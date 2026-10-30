@@ -18,8 +18,8 @@ The compatibility specification starts with public documentation. These are docu
 | --- | --- |
 | Open an existing vault in place | Implemented for visible UTF-8 Markdown files; hidden paths and symlinks excluded |
 | Preserve arbitrary frontmatter and `.obsidian` settings | Frontmatter preserved as source; `.obsidian` left untouched |
-| Source editor and reading view | Basic source editor and live CommonMark preview |
-| Obsidian-style live-preview editing | Planned |
+| Source editor and reading view | One formatted Markdown editor; syntax reveals on the active line |
+| Obsidian-style live-preview editing | Basic headings, emphasis, code, quotes, and link labels; advanced rendering planned |
 | Wikilinks and local Markdown links | Implemented subset, including display text and relative Markdown paths |
 | Heading and block links | Approximate navigation; exact anchor rules planned |
 | Backlinks and outgoing links | Implemented; backlinks index saved files |
@@ -28,8 +28,9 @@ The compatibility specification starts with public documentation. These are docu
 | Expandable file tree, create, rename, delete | Flat path list and create implemented; remaining operations planned |
 | Atomic writes, external-change handling, recovery history | Atomic replacement and revision checks implemented; stronger concurrency handling and history planned |
 | Properties, tags, aliases, unlinked mentions | Preservation only; structured behavior planned |
-| Callouts, tables, tasks, footnotes, math, diagrams | Full rendering and interactions planned |
-| Attachment display and note transclusion | Link labels only; rendering planned |
+| Bulleted, ordered, and task lists | Rendered with nesting and clickable task checkboxes; Markdown preserved |
+| Callouts, tables, footnotes, math, diagrams | Full rendering and interactions planned |
+| Attachment display and note transclusion | Images retain source syntax; note embeds show link labels; rendering planned |
 | Graph and local graph | Planned |
 | Canvas files | Planned using JSON Canvas |
 | Templates, daily notes, bookmarks, outline | Basic outline implemented; remaining workflows planned |

@@ -37,7 +37,13 @@ Use these keyboard shortcuts:
 
 ## Current behavior
 
-Notes remain ordinary `.md` files. The app supports source editing, a basic live side-by-side Markdown preview, tabs, plain-text search, an outline, wikilinks, local Markdown links, and backlinks.
+Notes remain ordinary `.md` files. The app has one live Markdown editor, tabs, plain-text search, an outline, wikilinks, local Markdown links, and backlinks.
+
+Headings, emphasis, code, quotes, and link labels format in the writing area as you type. The line containing the cursor reveals its Markdown syntax. Move to another line to hide those markers again. Frontmatter is concealed until the cursor or selection enters it; Ctrl+Home reveals it. Copy, cut, and save retain the original Markdown.
+
+Lists display bullets or numbers with nested indentation. Task lists display checkboxes; click one to toggle it, or focus it and press Space. Completed tasks appear crossed out. Toggling a checkbox updates the Markdown in the editor; use Ctrl+S to save. List markers stay rendered while typing. Select a marker's source range to reveal it for direct Markdown editing.
+
+Press Enter to continue a list with the same indentation and bullet style. Numbered lists advance to the next number; new tasks start unchecked. On an empty item, Enter exits the list and leaves a blank line for normal writing. Shift+Enter keeps the standard line break behavior.
 
 The app checks for external changes every three seconds. Clean tabs reload. Dirty tabs retain local edits, and conflicting saves stop. Closing a dirty tab or window offers Save, Discard, and Cancel.
 
@@ -49,11 +55,11 @@ Search matches all whitespace-separated words against saved note paths and saved
 
 Start with the example vault or a copy of a small vault. This prototype has no recovery history. Save checks reduce accidental overwrites but cannot lock out unrelated programs. A narrow race remains between the final comparison and atomic replacement. Hard links, extended attributes, file ownership, and arbitrary mixed line endings are not preserved as a compatibility contract.
 
-The preview handles basic CommonMark formatting. Images and note embeds appear as link labels. Links are followed from the sidebar, not by clicking preview text. Heading and block navigation uses a text match rather than Obsidian's full anchor rules. The file browser lists relative paths rather than expandable folders.
+Live formatting handles a subset of CommonMark. Images and advanced constructs retain their source syntax. Note embeds show their link labels. Links are followed from the sidebar. Heading and block navigation uses a text match rather than Obsidian's full anchor rules. The file browser lists note titles with their parent paths rather than expandable folders.
 
 Symbolic links, dotfiles, and hidden folders are excluded. Non-UTF-8 files remain unchanged and report an error when opened. Link resolution is case-sensitive and reports ambiguous basenames. Alias properties are preserved but are not interpreted as link targets.
 
-Graph, canvas, attachment rendering, property editing, live-preview editing, rename and delete operations, full search syntax, plugins, sync, mobile support, and distribution packaging remain unimplemented. The app rereads visible Markdown files on each refresh and has not been optimized for large vaults.
+Graph, canvas, attachment rendering, property editing, rename and delete operations, full search syntax, plugins, sync, mobile support, and distribution packaging remain unimplemented. The app rereads visible Markdown files on each refresh and has not been optimized for large vaults.
 
 See [the compatibility target](docs/compatibility.md) and [the architecture decisions](docs/architecture.md).
 

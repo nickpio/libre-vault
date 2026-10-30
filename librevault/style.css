@@ -1,0 +1,105 @@
+/* Default GTK 3 theme: a continuous black workspace with soft controls. */
+@define-color canvas #0c0c0c;
+@define-color panel #0c0c0c;
+@define-color hover #181818;
+@define-color selected #202020;
+@define-color ink #d5d5d5;
+@define-color muted #999999;
+@define-color edge #252525;
+@define-color accent #cccccc;
+
+window {
+    background: @canvas;
+    color: @ink;
+    font-family: "Inter", "Cantarell", sans-serif;
+    font-size: 10pt;
+}
+headerbar {
+    background: @canvas;
+    border: none;
+    box-shadow: none;
+    padding: 6px 12px;
+    min-height: 32px;
+}
+.brand { color: #eeeeee; font-size: 10pt; font-weight: bold; padding: 0 8px; }
+.breadcrumb { color: #aaaaaa; font-size: 9pt; }
+button {
+    background: #1a1a1a;
+    color: @ink;
+    border: 1px solid #333333;
+    border-radius: 8px;
+    padding: 5px 10px;
+    box-shadow: none;
+    text-shadow: none;
+    transition: background 120ms ease;
+}
+button:hover { background: #292929; border-color: #484848; }
+button:active { background: #333333; }
+button:disabled { color: #777777; background: #151515; }
+button:focus { outline-color: @accent; outline-offset: -2px; }
+button.icon-button, headerbar button.titlebutton {
+    background: transparent;
+    border-color: transparent;
+    color: #aaaaaa;
+    padding: 4px;
+    min-height: 22px;
+    min-width: 22px;
+}
+button.icon-button:hover, headerbar button.titlebutton:hover { background: #202020; color: #eeeeee; }
+button.icon-button:checked { background: #181818; color: #cccccc; }
+entry {
+    background: #161616;
+    color: @ink;
+    border: 1px solid transparent;
+    border-radius: 9px;
+    padding: 6px 9px;
+    min-height: 22px;
+    caret-color: @accent;
+    box-shadow: none;
+}
+entry:focus { border-color: #505050; }
+entry image { color: @muted; }
+.sidebar { background: @panel; }
+.vault-heading { padding: 0 0 6px; }
+.vault-title { color: #dddddd; font-size: 9pt; font-weight: bold; padding-left: 5px; }
+.caption { color: @muted; font-size: 9pt; font-weight: normal; padding: 20px 8px 8px; }
+list, list row { background: transparent; color: @ink; }
+.note-list row { border-radius: 8px; margin: 2px 0; padding: 9px 10px; }
+list row:hover { background: @hover; }
+list row:selected { background: @selected; color: #ffffff; }
+.note-folder { color: @muted; font-size: 8pt; }
+.muted { color: @muted; }
+.shortcuts { color: @muted; font-size: 8pt; padding: 12px 6px 4px; }
+scrolledwindow, viewport { border: none; box-shadow: none; background: transparent; }
+paned > separator { background: #191919; min-width: 1px; min-height: 1px; border: none; }
+.workspace-split > separator { background: transparent; min-width: 5px; }
+notebook { background: @canvas; border: none; }
+notebook > header { background: @canvas; border: none; padding: 4px 10px; box-shadow: none; }
+notebook > header tabs { border: none; }
+notebook > header tab {
+    background: transparent;
+    color: @muted;
+    border: none;
+    border-radius: 8px;
+    padding: 7px 16px;
+    margin: 2px 3px;
+    box-shadow: none;
+}
+notebook > header tab:hover { background: @hover; color: @ink; }
+notebook > header tab:checked { background: #1c1c1c; color: #dddddd; box-shadow: none; }
+textview, textview text { background: @canvas; color: @ink; caret-color: @accent; }
+textview.live-editor { font-size: 11pt; }
+.list-marker { color: #aaaaaa; font-size: 11pt; }
+checkbutton.task-checkbox { padding: 0; margin: 0; min-width: 18px; min-height: 18px; }
+checkbutton.task-checkbox check { min-width: 14px; min-height: 14px; border: 1px solid #707070; border-radius: 4px; background: #161616; box-shadow: none; color: #0c0c0c; }
+checkbutton.task-checkbox check:checked { background: #bdbdbd; border-color: #bdbdbd; }
+checkbutton.task-checkbox:hover check { border-color: #dddddd; }
+checkbutton.task-checkbox:focus { outline: 1px solid #aaaaaa; outline-offset: 2px; }
+textview text selection { background: #3a3a3a; color: #ffffff; }
+.context-link { background: transparent; border-color: transparent; padding: 8px; border-radius: 8px; font-size: 9pt; }
+.context-link:hover { background: @hover; border-color: transparent; }
+.statusbar { background: @canvas; border: none; }
+.status { padding: 5px 12px; color: @muted; font-size: 8pt; }
+scrollbar { background: transparent; border: none; }
+scrollbar slider { background: #363636; min-width: 5px; min-height: 5px; border: 2px solid transparent; border-radius: 8px; }
+scrollbar slider:hover { background: #555555; }
