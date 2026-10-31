@@ -99,6 +99,7 @@ class Vault:
         if not self.root.is_dir():
             raise VaultError('Choose a folder as your vault.')
         self.notes: dict[str, Note | None] = {}
+        self._link_cache: dict[str, tuple[str, list[Link]]] = {}
         self.refresh()
 
     def _path(self, relative: str) -> Path:
@@ -140,6 +141,10 @@ class Vault:
                     # Unreadable notes are still listed; opening one reports the error.
                     notes[relative] = None
         self.notes = dict(sorted(notes.items()))
+        self._link_cache = {
+            path: cached for path, cached in self._link_cache.items()
+            if (note := self.notes.get(path)) is not None and note.revision == cached[0]
+        }
 
     def save(self, note: Note, text: str) -> Note:
         path = self._path(note.path)
@@ -214,7 +219,16 @@ class Vault:
 
     def backlinks(self, relative: str) -> list[str]:
         return [path for path, note in self.notes.items() if note is not None and
-                any(self.resolve(path, link.target) == [relative] for link in links(note.text))]
+                any(self.resolve(path, link.target) == [relative] for link in self._saved_links(note))]
+
+    def _saved_links(self, note: Note) -> list[Link]:
+        # Cache syntax only: resolution must reflect newly created/deleted notes
+        # and basename ambiguity even when the linking note has not changed.
+        cached = self._link_cache.get(note.path)
+        if cached is None or cached[0] != note.revision:
+            cached = (note.revision, links(note.text))
+            self._link_cache[note.path] = cached
+        return cached[1]
 
     def search(self, query: str) -> list[str]:
         words = query.casefold().split()

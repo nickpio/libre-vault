@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import re
+from urllib.parse import unquote
 import gi
 
 gi.require_version('Gtk', '3.0')
@@ -41,6 +42,7 @@ class NotePane(Gtk.Box):
         self.formatted_text = None
         self.spans = []
         self.items = []
+        self.headings = []
         self.list_tags = {}
         self.list_widgets = []
         self.position_source = None
@@ -149,8 +151,9 @@ class NotePane(Gtk.Box):
 
     def format_pending(self):
         self.format_source = None
+        source_changed = self.text() != self.formatted_text
         self.render()
-        if self.window.current() is self:
+        if source_changed and self.window.current() is self:
             self.window.update_context()
         return False
 
@@ -166,7 +169,7 @@ class NotePane(Gtk.Box):
         text = self.text()
         if text != self.formatted_text:
             layout = markdown_layout(text)
-            self.spans, self.items = layout.spans, layout.items
+            self.spans, self.items, self.headings = layout.spans, layout.items, layout.headings
             self.formatted_text = text
             self.rebuild_list_widgets()
         start, end = self.buffer.get_bounds()
@@ -464,11 +467,13 @@ class Window(Gtk.ApplicationWindow):
         self.update_context()
 
     def populate_files(self):
-        for row in self.files.get_children():
-            self.files.remove(row)
-        if not self.vault:
+        paths = self.vault.search(self.search_entry.get_text()) if self.vault else []
+        rows = self.files.get_children()
+        if [row.path for row in rows] == paths:
             return
-        for path in self.vault.search(self.search_entry.get_text()):
+        for row in rows:
+            self.files.remove(row)
+        for path in paths:
             row = Gtk.ListBoxRow()
             row.path = path
             content = Gtk.Box(spacing=10)
@@ -571,7 +576,7 @@ class Window(Gtk.ApplicationWindow):
 
     def follow_link(self, source, target):
         candidates = self.vault.resolve(source, target)
-        fragment = target.partition('#')[2]
+        fragment = unquote(target.partition('#')[2])
         if len(candidates) == 1:
             self.open_note(candidates[0], fragment)
         elif candidates:
@@ -602,13 +607,15 @@ class Window(Gtk.ApplicationWindow):
                 self.files.select_row(row)
                 break
         self.section('Outline')
-        for match in re.finditer(r'(?m)^(#{1,6})\s+(.+?)\s*#*$', pane.text()):
-            offset = match.start()
+        if pane.text() != pane.formatted_text:
+            pane.render()
+        for heading in pane.headings:
+            offset = heading.start
             def jump(offset=offset):
                 position = pane.buffer.get_iter_at_offset(offset)
                 pane.buffer.place_cursor(position)
                 pane.editor.scroll_to_iter(position, 0.15, False, 0, 0)
-            self.context_button(match[2], jump)
+            self.context_button(heading.label, jump)
         self.section('Outgoing links')
         for link in links(pane.text()):
             self.context_button(('↳ ' if link.embedded else '') + link.label,

@@ -28,9 +28,17 @@ class ListItem:
 
 
 @dataclass(frozen=True)
+class Heading:
+    start: int
+    label: str
+    level: int
+
+
+@dataclass(frozen=True)
 class MarkdownLayout:
     spans: list[Span]
     items: list[ListItem]
+    headings: list[Heading]
 
 
 def positioned(rule, kind):
@@ -118,7 +126,7 @@ def markdown_layout(text):
     offsets = [0]
     for line in lines:
         offsets.append(offsets[-1] + len(line))
-    spans, skip, items, lists = [], set(), [], []
+    spans, skip, items, lists, headings = [], set(), [], [], []
     first = 0
     if lines and lines[0].strip() == '---':
         for index, line in enumerate(lines[1:], 1):
@@ -130,7 +138,7 @@ def markdown_layout(text):
                 break
     env = {}
     tokens = MARKDOWN.parse(''.join(lines[first:]), env)
-    for token in tokens:
+    for token_index, token in enumerate(tokens):
         if token.type in ('bullet_list_open', 'ordered_list_open'):
             lists.append(int(token.attrGet('start') or 1) if token.type == 'ordered_list_open' else None)
         elif token.type in ('bullet_list_close', 'ordered_list_close'):
@@ -163,6 +171,11 @@ def markdown_layout(text):
                 if end > start + 1 and re.match(r'^\s*' + re.escape(token.markup[0]) + '{' + str(len(token.markup)) + r',}\s*$', lines[end - 1]):
                     spans.append(Span(offsets[end - 1], offsets[end], 'syntax'))
         elif token.type == 'heading_open':
+            inline = tokens[token_index + 1]
+            label = ''.join('\n' if child.type in ('softbreak', 'hardbreak') else child.content
+                            for child in inline.children or []
+                            if child.type in ('text', 'code_inline', 'wikilink', 'image', 'softbreak', 'hardbreak'))
+            headings.append(Heading(offsets[start], label, int(token.tag[1:])))
             spans.append(Span(offsets[start], offsets[end], token.tag))
             prefix = re.match(r' {0,3}#{1,6}\s+', lines[start])
             if prefix:
@@ -186,4 +199,4 @@ def markdown_layout(text):
         prefix = re.match(r' {0,3}(?:>\s?)+', line)
         if prefix:
             spans.append(Span(offsets[index], offsets[index] + prefix.end(), 'syntax'))
-    return MarkdownLayout(spans, items)
+    return MarkdownLayout(spans, items, headings)
