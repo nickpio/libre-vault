@@ -33,7 +33,7 @@ The gear icon at the bottom-left opens **Settings**, with a category sidebar and
 
 Changes apply immediately to open notes and future tabs. **Restore defaults** resets all preferences. Settings are saved in `$XDG_CONFIG_HOME/libre-vault/settings.json`, or `~/.config/libre-vault/settings.json` when that variable is unset. Vault files and `.obsidian` settings are left untouched. The gear stays accessible when either sidebar is hidden.
 
-Both sidebars open and close with a short slide transition, preserving widths set with the splitters. GTK's system animation preference is respected.
+Both sidebars open and close with a short slide transition, preserving widths set with the splitters. Repeated toggles are ignored during a transition and its brief settling period. GTK's system animation preference is respected.
 
 Right-click the file explorer for **New note**, **New subfolder**, and **Open vault**. Right-clicking a folder creates inside it; right-clicking a note uses its parent folder. Right-click empty space to create at the vault root. Empty folders appear in the explorer immediately. The menu is also available with Shift+F10 or the Menu key when the explorer has focus.
 
@@ -58,6 +58,8 @@ The cheatsheet opens with search focused. Type a key combination, action, or sec
 ## Current behavior
 
 Notes remain ordinary `.md` files. The app has one live Markdown editor, tabs, plain-text search, an outline, wikilinks, local Markdown links, and backlinks.
+
+The outline indents nested headings, wraps long titles, and highlights the section containing the editor cursor. Click a heading to jump to it.
 
 Headings, emphasis, code, quotes, and link labels format in the writing area as you type. The line containing the cursor reveals its Markdown syntax. Move to another line to hide those markers again. Frontmatter is concealed until the cursor or selection enters it; Ctrl+Home reveals it. Copy, cut, and save retain the original Markdown.
 

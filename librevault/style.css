@@ -136,6 +136,18 @@ checkbutton.task-checkbox:focus { outline: 1px solid @soft; outline-offset: 2px;
 textview text selection { background: @selection_bg; color: @bright; }
 .context-link { background: transparent; border-color: transparent; padding: 8px; border-radius: 8px; font-size: 9pt; }
 .context-link:hover { background: @hover; border-color: transparent; }
+button.outline-heading {
+    color: @ink;
+    font-size: inherit;
+    font-weight: normal;
+    padding: 6px 8px;
+    border-width: 0 0 0 2px;
+    border-color: transparent;
+    border-radius: 4px;
+}
+button.outline-heading.outline-root { color: @bright; font-weight: bold; }
+button.outline-heading.current-heading { background: @selected; border-left-color: @accent; }
+.outline-empty { color: @muted; font-size: 9pt; padding: 6px 8px; }
 menu.explorer-menu {
     background: @raised;
     color: @ink;

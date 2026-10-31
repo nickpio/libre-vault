@@ -130,6 +130,40 @@ class WindowImprovementTests(unittest.TestCase):
         # Avoid a save prompt if a future test adds a vault switch.
         pane.dirty = False
 
+    def test_outline_hierarchy_wraps_long_titles_and_tracks_cursor_without_rebuild(self):
+        pane = self.window.current()
+        long_title = 'A detailed heading that should remain fully readable in a narrow outline'
+        text = ('Preface\n\n# Overview\n\nBody\n\n## First section\n\n### ' + long_title
+                + '\n\nDetails\n\n## Second section\n\nMore text\n\n#### Nested section\n')
+        pane.buffer.set_text(text)
+        self.drain_events()
+        rows = self.window.outline_rows
+        self.assertEqual([button.get_margin_start() for _, button in rows], [0, 12, 24, 12, 24])
+        long_button = rows[2][1]
+        self.assertEqual(long_button.get_label(), long_title)
+        self.assertTrue(long_button.get_child().get_line_wrap())
+        self.assertEqual(long_button.get_tooltip_text(), long_title)
+        self.assertTrue(rows[0][1].get_style_context().has_class('outline-root'))
+        with patch.object(self.window, 'update_context', wraps=self.window.update_context) as update:
+            pane.buffer.place_cursor(pane.buffer.get_iter_at_offset(text.index('More text')))
+            self.drain_events()
+            update.assert_not_called()
+        active = [button.get_label() for _, button in rows
+                  if button.get_style_context().has_class('current-heading')]
+        self.assertEqual(active, ['Second section'])
+        pane.buffer.place_cursor(pane.buffer.get_start_iter())
+        self.drain_events()
+        self.assertFalse(any(button.get_style_context().has_class('current-heading') for _, button in rows))
+
+    def test_outline_explains_when_note_has_no_headings(self):
+        pane = self.window.current()
+        pane.buffer.set_text('Just a paragraph.\n')
+        self.drain_events()
+        self.assertEqual(self.window.outline_rows, [])
+        labels = [child.get_text() for child in self.window.context.get_children()
+                  if isinstance(child, Gtk.Label)]
+        self.assertIn('No headings in this note.', labels)
+
 
 if __name__ == '__main__':
     unittest.main()

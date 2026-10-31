@@ -4,7 +4,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 try:
-    from librevault.app import GLib, Gtk, Window
+    from librevault.app import Gdk, GLib, Gtk, Window
     from gi.repository import Gio
     GTK_AVAILABLE = Gtk.init_check()[0]
 except (ImportError, ValueError):
@@ -73,12 +73,19 @@ class PanelTests(unittest.TestCase):
             self.assertAlmostEqual(width, initial, delta=2)
         self.assertFalse(self.window.current().dirty)
 
-    def test_quick_repeated_toggles_end_in_the_requested_state(self):
+    def test_repeated_toggles_wait_for_the_current_transition(self):
         original = self.widths()
         for opened in (False, True, False, True):
             self.toggle(opened)
             self.wait(30)
-        self.wait(220)
+        self.wait(260)
+        for panel, button in ((self.window.notes_panel, self.window.notes_toggle),
+                              (self.window.details_panel, self.window.details_toggle)):
+            self.assertFalse(panel.get_visible())
+            self.assertFalse(button.get_active())
+            self.assertIsNone(panel.tick)
+        self.toggle(True)
+        self.wait(300)
         for panel in (self.window.notes_panel, self.window.details_panel):
             self.assertTrue(panel.get_child_revealed())
             self.assertTrue(panel.get_visible())
@@ -94,7 +101,7 @@ class PanelTests(unittest.TestCase):
         self.wait(40)
         resized = self.widths()
         self.toggle(False)
-        self.wait(220)
+        self.wait(300)
         self.toggle(True)
         self.wait(220)
         for width, expected in zip(self.widths(), resized):
@@ -119,3 +126,43 @@ class PanelTests(unittest.TestCase):
         self.wait(30)
         self.window.destroy()
         self.assertTrue(all(panel.tick is None for panel in panels))
+
+    def test_shortcut_spam_keeps_buttons_and_widths_consistent(self):
+        original = self.widths()
+        event = Gdk.Event.new(Gdk.EventType.KEY_PRESS)
+        event.state = Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK
+        for opened in (False, True):
+            # Several presses before the next frame also cover the opening
+            # gap when the panel has not mapped and has no tick callback yet.
+            for _ in range(20):
+                for key in (Gdk.KEY_E, Gdk.KEY_D):
+                    event.keyval = key
+                    self.assertTrue(self.window.emit('key-press-event', event))
+            self.wait(300)
+            for panel, button in ((self.window.notes_panel, self.window.notes_toggle),
+                                  (self.window.details_panel, self.window.details_toggle)):
+                self.assertEqual(panel.get_child_revealed(), opened)
+                self.assertEqual(button.get_active(), opened)
+                self.assertIsNone(panel.tick)
+        for width, expected in zip(self.widths(), original):
+            self.assertAlmostEqual(width, expected, delta=2)
+        self.assertEqual(self.window.current().text(), '# Original\n')
+        self.assertFalse(self.window.current().dirty)
+
+    def test_short_settling_period_blocks_immediate_restart(self):
+        self.toggle(False)
+        # Inspect the actual end of the transition, before the next frame.
+        for _ in range(100):
+            if not (self.window.notes_panel.transitioning or self.window.details_panel.transitioning):
+                break
+            self.wait(5)
+        self.assertFalse(self.window.notes_panel.transitioning)
+        self.assertFalse(self.window.details_panel.transitioning)
+        self.toggle(True)
+        self.assertFalse(self.window.notes_toggle.get_active())
+        self.assertFalse(self.window.details_toggle.get_active())
+        self.wait(100)
+        self.toggle(True)
+        self.wait(300)
+        self.assertTrue(self.window.notes_panel.get_child_revealed())
+        self.assertTrue(self.window.details_panel.get_child_revealed())

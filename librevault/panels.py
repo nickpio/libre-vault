@@ -1,4 +1,6 @@
 """Short native GTK slide transitions that preserve resizable panel widths."""
+import time
+
 import gi
 
 gi.require_version('Gtk', '3.0')
@@ -12,6 +14,8 @@ class SlidingPanel(Gtk.Revealer):
         self.at_start = at_start
         self.tick = None
         self.opened = True
+        self.transitioning = False
+        self.accept_after = 0
         self.handle_width = paned.style_get_property('handle-size')
         self.original_request = child.get_size_request()
         self.set_transition_type(Gtk.RevealerTransitionType.SLIDE_RIGHT if at_start
@@ -24,7 +28,10 @@ class SlidingPanel(Gtk.Revealer):
 
     def set_open(self, opened):
         if opened == self.opened:
-            return
+            return self.opened
+        if self.transitioning or time.monotonic() < self.accept_after:
+            return self.opened
+        self.transitioning = True
         self.opened = opened
         self.show()
         if opened and not self.get_mapped():
@@ -32,8 +39,9 @@ class SlidingPanel(Gtk.Revealer):
             # so GTK can map it before starting the opening transition.
             self.set_size_request(1, -1)
             self.position_width(1)
-            return
+            return self.opened
         self.animate(opened)
+        return self.opened
 
     def mapped(self, *_):
         if self.opened and not self.get_reveal_child():
@@ -78,11 +86,12 @@ class SlidingPanel(Gtk.Revealer):
         if self.get_child_revealed() != self.get_reveal_child():
             return True
         self.tick = None
-        self.finish()
+        self.finish(animated=True)
         return False
 
-    def finish(self):
+    def finish(self, animated=False):
         if self.tick is not None:
+            animated = True
             self.remove_tick_callback(self.tick)
             self.tick = None
         self.sync_width()
@@ -92,8 +101,14 @@ class SlidingPanel(Gtk.Revealer):
         else:
             # Hiding the collapsed wrapper also removes the splitter handle.
             self.hide()
+        self.transitioning = False
+        if animated:
+            # Let the final allocation settle before capturing a width for
+            # another transition. Auto-repeat must not restart it mid-layout.
+            self.accept_after = time.monotonic() + 0.06
 
     def cleanup(self, *_):
         if self.tick is not None:
             self.remove_tick_callback(self.tick)
             self.tick = None
+        self.transitioning = False

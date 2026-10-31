@@ -185,6 +185,8 @@ class NotePane(Gtk.Box):
         self.render()
         if source_changed and self.window.current() is self:
             self.window.update_context()
+        elif self.window.current() is self:
+            self.window.update_outline_selection()
         return False
 
     def cleanup(self, *_):
@@ -327,6 +329,7 @@ class Window(Gtk.ApplicationWindow):
         self.set_default_size(1360, 850)
         self.vault = None
         self.panes = {}
+        self.outline_rows = []
         self.collapsed_folders = set()
         self.palette = None
         self.cheatsheet = None
@@ -405,7 +408,7 @@ class Window(Gtk.ApplicationWindow):
         sidebar.pack_start(hint, False, False, 0)
         self.notes_panel = SlidingPanel(sidebar, layout, at_start=True)
         layout.pack1(self.notes_panel, False, False)
-        self.notes_toggle.connect('toggled', lambda button: self.notes_panel.set_open(button.get_active()))
+        self.notes_toggle.connect('toggled', self.set_panel_open, self.notes_panel)
         center = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
         center.get_style_context().add_class('workspace-split')
         self.tabs = Gtk.Notebook(scrollable=True)
@@ -413,12 +416,14 @@ class Window(Gtk.ApplicationWindow):
         center.pack1(self.tabs, True, False)
         self.context = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
         self.context.set_border_width(12)
-        self.context.set_size_request(208, -1)
+        self.context.set_size_request(240, -1)
         self.context.get_style_context().add_class('sidebar')
         self.details_scroll = scrolled(self.context)
+        self.details_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.details_scroll.set_min_content_width(240)
         self.details_panel = SlidingPanel(self.details_scroll, center, at_start=False)
         center.pack2(self.details_panel, False, False)
-        self.details_toggle.connect('toggled', lambda button: self.details_panel.set_open(button.get_active()))
+        self.details_toggle.connect('toggled', self.set_panel_open, self.details_panel)
         layout.pack2(center, True, False)
         layout.set_position(232)
         center.set_position(900)
@@ -767,6 +772,23 @@ class Window(Gtk.ApplicationWindow):
         button.set_tooltip_text(label)
         button.connect('clicked', lambda *_: action())
         self.context.pack_start(button, False, False, 0)
+        return button
+
+    def update_outline_selection(self):
+        pane = self.current()
+        if not pane:
+            return
+        cursor = pane.buffer.get_iter_at_mark(pane.buffer.get_insert()).get_offset()
+        active = None
+        for offset, button in self.outline_rows:
+            if offset <= cursor:
+                active = button
+        for _, button in self.outline_rows:
+            style = button.get_style_context()
+            if button is active:
+                style.add_class('current-heading')
+            else:
+                style.remove_class('current-heading')
 
     def follow_link(self, source, target):
         candidates = self.vault.resolve(source, target)
@@ -786,6 +808,7 @@ class Window(Gtk.ApplicationWindow):
             self.status.set_text(f'Unresolved note or unsupported attachment: {target}')
 
     def update_context(self):
+        self.outline_rows = []
         for child in self.context.get_children():
             self.context.remove(child)
         pane = self.current()
@@ -803,13 +826,36 @@ class Window(Gtk.ApplicationWindow):
         self.section('Outline')
         if pane.text() != pane.formatted_text:
             pane.render()
+        ancestors = []
         for heading in pane.headings:
+            while ancestors and ancestors[-1] >= heading.level:
+                ancestors.pop()
+            depth = len(ancestors)
+            ancestors.append(heading.level)
             offset = heading.start
             def jump(offset=offset):
                 position = pane.buffer.get_iter_at_offset(offset)
                 pane.buffer.place_cursor(position)
                 pane.editor.scroll_to_iter(position, 0.15, False, 0, 0)
-            self.context_button(heading.label, jump)
+                self.update_outline_selection()
+            button = self.context_button(heading.label, jump)
+            button.set_margin_start(depth * 12)
+            button.get_style_context().add_class('outline-heading')
+            if depth == 0:
+                button.get_style_context().add_class('outline-root')
+                button.set_margin_top(4)
+            label = button.get_child()
+            label.set_ellipsize(Pango.EllipsizeMode.NONE)
+            label.set_line_wrap(True)
+            label.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            label.set_max_width_chars(24)
+            button.get_accessible().set_name(f'Heading {heading.level}: {heading.label}')
+            self.outline_rows.append((offset, button))
+        if not pane.headings:
+            empty = Gtk.Label(label='No headings in this note.', xalign=0)
+            empty.get_style_context().add_class('outline-empty')
+            self.context.pack_start(empty, False, False, 0)
+        self.update_outline_selection()
         self.section('Outgoing links')
         for link in links(pane.text()):
             self.context_button(('↳ ' if link.embedded else '') + link.label,
@@ -858,6 +904,11 @@ class Window(Gtk.ApplicationWindow):
 
     def toggle_details(self, *_):
         self.details_toggle.set_active(not self.details_toggle.get_active())
+
+    def set_panel_open(self, button, panel):
+        opened = panel.set_open(button.get_active())
+        if button.get_active() != opened:
+            button.set_active(opened)
 
     def toggle_file_tree(self, *_):
         self.notes_toggle.set_active(not self.notes_toggle.get_active())
