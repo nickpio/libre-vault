@@ -13,6 +13,13 @@ from gi.repository import Gtk, Gdk, GLib, Pango
 from .vault import Vault, VaultError, links
 from .formatting import markdown_layout
 from .editing import list_enter
+from .filetree import tree_paths
+from .commands import CommandPalette, KeybindCheatsheet
+from .shortcuts import APP_SHORTCUTS
+from .settings import SettingsDialog
+from .preferences import PreferencesStore
+from .appearance import PALETTES, stylesheet
+from .panels import SlidingPanel
 
 
 CSS = Path(__file__).with_name('style.css').read_bytes()
@@ -59,7 +66,7 @@ class NotePane(Gtk.Box):
         for level, size in enumerate([25, 21, 18, 16, 14, 12], 1):
             self.tags[f'h{level}'] = self.buffer.create_tag(
                 None, size_points=size, weight=Pango.Weight.BOLD,
-                foreground='#e4e4e4', pixels_above_lines=12, pixels_below_lines=8)
+                foreground='#e4e4e4', pixels_above_lines=20)
         # This tag has highest priority, including inside headings and code.
         self.hidden = self.buffer.create_tag(None, invisible=True)
         self.editor = Gtk.TextView(buffer=self.buffer)
@@ -68,7 +75,10 @@ class NotePane(Gtk.Box):
         self.editor.set_right_margin(40)
         self.editor.set_top_margin(30)
         self.editor.set_bottom_margin(80)
-        self.editor.set_pixels_below_lines(5)
+        # GTK 3's hit-testing converts a raw line byte count to a visible
+        # index in bottom padding, which aborts when syntax is invisible.
+        # Keep paragraph spacing above lines, where hit-testing starts at zero.
+        self.editor.set_pixels_above_lines(5)
         self.editor.get_style_context().add_class('live-editor')
         self.editor.connect('size-allocate', self.size_editor)
         self.editor.connect('copy-clipboard', self.copy_selection)
@@ -82,10 +92,28 @@ class NotePane(Gtk.Box):
         self.buffer.connect('changed', self.changed)
         self.buffer.connect('mark-set', self.cursor_moved)
         self.connect('destroy', self.cleanup)
+        self.apply_preferences()
         self.render()
 
+    def apply_preferences(self):
+        preferences = self.window.preferences
+        colors = PALETTES[preferences.theme]
+        self.tags['code'].set_property('background', colors['code_bg'])
+        self.tags['code'].set_property('size-points', max(8, preferences.editor_size - 1))
+        self.tags['metadata'].set_property('size-points', max(8, preferences.editor_size - 1))
+        for name in ('quote', 'completed', 'metadata'):
+            self.tags[name].set_property('foreground', colors['muted'])
+        self.tags['link'].set_property('foreground', colors['soft'])
+        for level, size in enumerate((25, 21, 18, 16, 14, 12), 1):
+            self.tags[f'h{level}'].set_property('size-points', size * preferences.editor_size / 11)
+            self.tags[f'h{level}'].set_property('foreground', colors['bright'])
+        self.editor.set_wrap_mode(Gtk.WrapMode.WORD_CHAR if preferences.wrap_lines else Gtk.WrapMode.NONE)
+        self.size_editor(self.editor, self.editor.get_allocation())
+        self.update_list_margins()
+
     def size_editor(self, _, allocation):
-        margin = max(32, (allocation.width - 780) // 2)
+        preferences = self.window.preferences
+        margin = max(32, (allocation.width - preferences.line_width) // 2) if preferences.readable_length else 32
         if self.editor.get_left_margin() != margin:
             self.editor.set_left_margin(margin)
             self.editor.set_right_margin(margin)
@@ -121,6 +149,8 @@ class NotePane(Gtk.Box):
         self.queue_format()
 
     def editor_key_press(self, _, event):
+        if not self.window.preferences.continue_lists:
+            return False
         if event.keyval not in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
             return False
         # Modified Enter and selected text keep GTK's normal editing behavior.
@@ -292,18 +322,23 @@ class NotePane(Gtk.Box):
 
 
 class Window(Gtk.ApplicationWindow):
-    def __init__(self, app, folder=None):
+    def __init__(self, app, folder=None, preferences_path=None):
         super().__init__(application=app, title='Libre Vault')
         self.set_default_size(1360, 850)
         self.vault = None
         self.panes = {}
+        self.collapsed_folders = set()
+        self.palette = None
+        self.cheatsheet = None
+        self.settings_dialog = None
+        self.preferences_store = PreferencesStore(preferences_path)
+        self.preferences = self.preferences_store.load()
         self.refresh_source = None
         self.connect('delete-event', self.on_delete)
         self.connect('key-press-event', self.key_press)
-        Gtk.Settings.get_default().set_property('gtk-application-prefer-dark-theme', True)
-        provider = Gtk.CssProvider()
-        provider.load_from_data(CSS)
-        Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        self.css_provider = Gtk.CssProvider()
+        self.apply_preferences()
+        Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), self.css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         header = Gtk.HeaderBar()
         header.set_show_close_button(True)
         self.set_titlebar(header)
@@ -316,22 +351,23 @@ class Window(Gtk.ApplicationWindow):
         header.set_custom_title(self.location_label)
         self.notes_toggle = Gtk.ToggleButton()
         self.notes_toggle.set_image(Gtk.Image.new_from_icon_name('view-list-symbolic', Gtk.IconSize.MENU))
-        self.notes_toggle.set_tooltip_text('Show notes sidebar')
-        self.notes_toggle.get_accessible().set_name('Show notes sidebar')
+        self.notes_toggle.set_tooltip_text('Toggle file tree · Ctrl+Shift+E')
+        self.notes_toggle.get_accessible().set_name('Toggle file tree')
         self.notes_toggle.set_active(True)
         self.notes_toggle.get_style_context().add_class('icon-button')
         header.pack_start(self.notes_toggle)
         self.details_toggle = Gtk.ToggleButton()
         self.details_toggle.set_image(Gtk.Image.new_from_icon_name('sidebar-show-right-symbolic', Gtk.IconSize.MENU))
-        self.details_toggle.set_tooltip_text('Show note details')
-        self.details_toggle.get_accessible().set_name('Show note details')
+        self.details_toggle.set_tooltip_text('Toggle note details · Ctrl+Shift+D')
+        self.details_toggle.get_accessible().set_name('Toggle note details')
         self.details_toggle.set_active(True)
         self.details_toggle.get_style_context().add_class('icon-button')
         header.pack_end(self.details_toggle)
-        header.pack_end(self.icon_button('window-close-symbolic', 'Close tab · Ctrl+W', self.close_tab))
         header.pack_end(self.icon_button('document-save-symbolic', 'Save note · Ctrl+S', self.save_current))
+        self.overlay = Gtk.Overlay()
+        self.add(self.overlay)
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        self.add(root)
+        self.overlay.add(root)
         layout = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
         layout.get_style_context().add_class('workspace-split')
         root.pack_start(layout, True, True, 0)
@@ -350,20 +386,26 @@ class Window(Gtk.ApplicationWindow):
         self.search_entry = Gtk.SearchEntry(placeholder_text='Search notes…')
         self.search_entry.connect('search-changed', lambda *_: self.populate_files())
         sidebar.pack_start(self.search_entry, False, False, 0)
-        files_heading = Gtk.Label(label='Notes', xalign=0)
+        files_heading = Gtk.Label(label='Files', xalign=0)
         files_heading.get_style_context().add_class('caption')
         sidebar.pack_start(files_heading, False, False, 0)
         self.files = Gtk.ListBox()
         self.files.get_style_context().add_class('note-list')
         self.files.set_activate_on_single_click(True)
-        self.files.connect('row-activated', lambda _, row: self.open_note(row.path))
-        sidebar.pack_start(scrolled(self.files, 212), True, True, 0)
-        hint = Gtk.Label(label='Ctrl+O  Open vault\nCtrl+N  New note\nCtrl+S  Save\nCtrl+W  Close tab', xalign=0)
+        self.files.connect('row-activated', self.activate_file)
+        self.files.connect('key-press-event', self.files_key_press)
+        self.files.connect('button-press-event', self.explorer_button_press)
+        self.files.connect('popup-menu', self.explorer_popup_menu)
+        files_scroll = scrolled(self.files, 212)
+        files_scroll.connect('button-press-event', self.explorer_button_press)
+        sidebar.pack_start(files_scroll, True, True, 0)
+        hint = Gtk.Label(label='Alt+P  Commands\nCtrl+O  Open vault\nCtrl+N  New note\nCtrl+S  Save\nCtrl+W  Close tab', xalign=0)
         hint.get_style_context().add_class('shortcuts')
         hint.set_margin_top(12)
         sidebar.pack_start(hint, False, False, 0)
-        layout.pack1(sidebar, False, False)
-        self.notes_toggle.connect('toggled', lambda button: sidebar.set_visible(button.get_active()))
+        self.notes_panel = SlidingPanel(sidebar, layout, at_start=True)
+        layout.pack1(self.notes_panel, False, False)
+        self.notes_toggle.connect('toggled', lambda button: self.notes_panel.set_open(button.get_active()))
         center = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
         center.get_style_context().add_class('workspace-split')
         self.tabs = Gtk.Notebook(scrollable=True)
@@ -374,8 +416,9 @@ class Window(Gtk.ApplicationWindow):
         self.context.set_size_request(208, -1)
         self.context.get_style_context().add_class('sidebar')
         self.details_scroll = scrolled(self.context)
-        center.pack2(self.details_scroll, False, False)
-        self.details_toggle.connect('toggled', lambda button: self.details_scroll.set_visible(button.get_active()))
+        self.details_panel = SlidingPanel(self.details_scroll, center, at_start=False)
+        center.pack2(self.details_panel, False, False)
+        self.details_toggle.connect('toggled', lambda button: self.details_panel.set_open(button.get_active()))
         layout.pack2(center, True, False)
         layout.set_position(232)
         center.set_position(900)
@@ -383,6 +426,9 @@ class Window(Gtk.ApplicationWindow):
         self.status.get_style_context().add_class('status')
         statusbar = Gtk.Box()
         statusbar.get_style_context().add_class('statusbar')
+        self.settings_button = self.icon_button('emblem-system-symbolic', 'Settings', self.show_settings)
+        self.settings_button.get_style_context().add_class('settings-button')
+        statusbar.pack_start(self.settings_button, False, False, 0)
         self.status.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
         statusbar.pack_start(self.status, True, True, 0)
         format_label = Gtk.Label(label='Markdown   ·   UTF-8')
@@ -404,6 +450,7 @@ class Window(Gtk.ApplicationWindow):
         return button
 
     def cleanup(self, *_):
+        Gtk.StyleContext.remove_provider_for_screen(Gdk.Screen.get_default(), self.css_provider)
         if self.refresh_source:
             GLib.source_remove(self.refresh_source)
             self.refresh_source = None
@@ -456,6 +503,7 @@ class Window(Gtk.ApplicationWindow):
             self.tabs.remove_page(0)
         self.panes.clear()
         self.vault = vault
+        self.collapsed_folders.clear()
         self.vault_label.set_text(vault.root.name)
         self.set_title(f'{vault.root.name} · Libre Vault')
         self.search_entry.set_text('')
@@ -467,30 +515,55 @@ class Window(Gtk.ApplicationWindow):
         self.update_context()
 
     def populate_files(self):
+        searching = bool(self.search_entry.get_text().strip())
         paths = self.vault.search(self.search_entry.get_text()) if self.vault else []
+        if self.vault and not searching:
+            paths = tree_paths(paths, self.vault.folders, self.collapsed_folders)
         rows = self.files.get_children()
-        if [row.path for row in rows] == paths:
+        if [row.path for row in rows] == paths and all(
+                row.search_result == searching and
+                (not row.path.endswith('/') or row.expanded == (row.path[:-1] not in self.collapsed_folders))
+                for row in rows):
             return
         for row in rows:
             self.files.remove(row)
         for path in paths:
             row = Gtk.ListBoxRow()
             row.path = path
-            content = Gtk.Box(spacing=10)
-            icon = Gtk.Image.new_from_icon_name('text-x-generic-symbolic', Gtk.IconSize.MENU)
+            row.search_result = searching
+            content = Gtk.Box(spacing=6)
+            is_folder = path.endswith('/')
+            if not searching:
+                content.set_margin_start(path.rstrip('/').count('/') * 18)
+                row.get_style_context().add_class('tree-row')
+                if is_folder:
+                    row.expanded = path[:-1] not in self.collapsed_folders
+                    indicator = Gtk.Image.new_from_icon_name(
+                        'pan-down-symbolic' if row.expanded else 'pan-end-symbolic', Gtk.IconSize.MENU)
+                    row.get_accessible().set_name(
+                        f"{Path(path).name}, folder, {'expanded' if row.expanded else 'collapsed'}")
+                else:
+                    indicator = Gtk.Box()
+                indicator.set_size_request(16, -1)
+                content.pack_start(indicator, False, False, 0)
+            icon = Gtk.Image.new_from_icon_name(
+                'folder-symbolic' if is_folder else 'text-x-generic-symbolic', Gtk.IconSize.MENU)
             icon.get_style_context().add_class('muted')
             content.pack_start(icon, False, False, 0)
             names = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
-            label = Gtk.Label(label=Path(path).stem, xalign=0)
+            label = Gtk.Label(label=Path(path).name if is_folder else Path(path).stem, xalign=0)
             label.set_ellipsize(Pango.EllipsizeMode.END)
+            if is_folder:
+                label.get_style_context().add_class('tree-folder')
             names.pack_start(label, False, False, 0)
-            if Path(path).parent != Path('.'):
+            if searching and Path(path).parent != Path('.'):
                 folder = Gtk.Label(label=str(Path(path).parent), xalign=0)
                 folder.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
                 folder.get_style_context().add_class('note-folder')
                 names.pack_start(folder, False, False, 0)
             content.pack_start(names, True, True, 0)
             row.add(content)
+            row.set_tooltip_text(path)
             self.files.add(row)
         pane = self.current()
         if pane:
@@ -500,17 +573,114 @@ class Window(Gtk.ApplicationWindow):
                     break
         self.files.show_all()
 
+    def activate_file(self, _, row):
+        if row.path.endswith('/'):
+            self.toggle_folder(row.path)
+        else:
+            self.open_note(row.path)
+
+    def toggle_folder(self, path):
+        folder = path.rstrip('/')
+        if folder in self.collapsed_folders:
+            self.collapsed_folders.remove(folder)
+        else:
+            self.collapsed_folders.add(folder)
+        self.populate_files()
+        for row in self.files.get_children():
+            if row.path == path:
+                self.files.select_row(row)
+                row.grab_focus()
+                break
+
+    def files_key_press(self, _, event):
+        if self.search_entry.get_text().strip() or event.state & Gtk.accelerator_get_default_mod_mask():
+            return False
+        row = self.files.get_selected_row()
+        if not row or event.keyval not in (Gdk.KEY_Left, Gdk.KEY_Right):
+            return False
+        if row.path.endswith('/'):
+            if (event.keyval == Gdk.KEY_Right) != row.expanded:
+                self.toggle_folder(row.path)
+                return True
+            if event.keyval == Gdk.KEY_Right:
+                child = self.files.get_row_at_index(row.get_index() + 1)
+                if child and child.path.startswith(row.path):
+                    self.files.select_row(child)
+                    child.grab_focus()
+                return True
+        parent = str(Path(row.path).parent) + '/'
+        if event.keyval == Gdk.KEY_Left:
+            for candidate in self.files.get_children():
+                if candidate.path == parent:
+                    self.files.select_row(candidate)
+                    candidate.grab_focus()
+                    return True
+        return False
+
+    def explorer_menu(self, row=None):
+        parent = ''
+        if row:
+            parent = row.path.rstrip('/') if row.path.endswith('/') else str(Path(row.path).parent)
+            if parent == '.':
+                parent = ''
+        menu = Gtk.Menu()
+        menu.set_reserve_toggle_size(False)
+        menu.get_style_context().add_class('explorer-menu')
+        menu.attach_to_widget(self.files, None)
+        for label, action in (
+                ('New note…', lambda: self.new_note(parent=parent)),
+                ('New subfolder…', lambda: self.new_folder(parent=parent))):
+            item = Gtk.MenuItem(label=label)
+            item.set_sensitive(self.vault is not None)
+            item.connect('activate', lambda _, action=action: action())
+            menu.append(item)
+        menu.append(Gtk.SeparatorMenuItem())
+        item = Gtk.MenuItem(label='Open vault…')
+        item.connect('activate', self.choose_vault)
+        menu.append(item)
+        menu.connect('selection-done', lambda menu: menu.destroy())
+        menu.show_all()
+        return menu
+
+    def explorer_button_press(self, _, event):
+        if event.button != 3 or event.type != Gdk.EventType.BUTTON_PRESS:
+            return False
+        source = Gtk.get_event_widget(event)
+        position = source.translate_coordinates(self.files, int(event.x), int(event.y))
+        row = self.files.get_row_at_y(position[1]) if position else None
+        if row:
+            self.files.select_row(row)
+        self.explorer_menu(row).popup_at_pointer(event)
+        return True
+
+    def explorer_popup_menu(self, *_):
+        self.explorer_menu(self.files.get_selected_row()).popup_at_widget(
+            self.files, Gdk.Gravity.NORTH_WEST, Gdk.Gravity.NORTH_WEST, None)
+        return True
+
     def open_note(self, relative, fragment=''):
         if relative not in self.panes:
             def action():
                 pane = NotePane(self, self.vault.read(relative))
                 self.panes[relative] = pane
-                self.tabs.append_page(pane, pane.tab_label)
+                tab = Gtk.Box(spacing=6)
+                tab.set_tooltip_text(relative)
+                tab.pack_start(pane.tab_label, True, True, 0)
+                close = self.icon_button('window-close-symbolic', 'Close note · Ctrl+W',
+                                         lambda *_: self.close_note(pane))
+                close.set_focus_on_click(False)
+                tab.pack_end(close, False, False, 0)
+                tab.show_all()
+                self.tabs.append_page(pane, tab)
                 pane.show_all()
             self.try_action(action)
         if relative not in self.panes:
             return
         pane = self.panes[relative]
+        ancestors = {str(parent) for parent in Path(relative).parents}
+        if self.collapsed_folders & ancestors:
+            self.collapsed_folders.difference_update(ancestors)
+            self.populate_files()
         self.tabs.set_current_page(self.tabs.page_num(pane))
         pane.editor.grab_focus()
         if fragment:
@@ -533,29 +703,53 @@ class Window(Gtk.ApplicationWindow):
             self.try_action(pane.save)
 
     def close_tab(self, *_):
-        pane = self.current()
+        self.close_note(self.current())
+
+    def close_note(self, pane):
         if pane and self.confirm_panes([pane]):
             self.tabs.remove_page(self.tabs.page_num(pane))
             self.panes.pop(pane.note.path, None)
             self.update_context()
 
-    def new_note(self, *_):
+    def new_note(self, *_, parent=''):
+        self.new_item('note', parent)
+
+    def new_folder(self, *_, parent=''):
+        self.new_item('folder', parent)
+
+    def new_item(self, kind, parent):
         if not self.vault:
             self.choose_vault()
             return
-        dialog = Gtk.Dialog(title='New note', transient_for=self, modal=True)
+        dialog = Gtk.Dialog(title=f'New {kind}', transient_for=self, modal=True)
         dialog.add_buttons('Cancel', Gtk.ResponseType.CANCEL, 'Create', Gtk.ResponseType.OK)
-        entry = Gtk.Entry(placeholder_text='Note name or existing-folder/Note name')
+        entry = Gtk.Entry(placeholder_text=f'{kind.capitalize()} name or existing-folder/{kind.capitalize()} name')
+        entry.set_text(parent + '/' if parent else '')
+        entry.set_position(-1)
+        entry.set_activates_default(True)
+        dialog.set_default_response(Gtk.ResponseType.OK)
         entry.set_size_request(430, -1)
         entry.set_margin_top(16)
         entry.set_margin_bottom(16)
         dialog.get_content_area().add(entry)
         dialog.show_all()
         if dialog.run() == Gtk.ResponseType.OK:
-            note = self.try_action(lambda: self.vault.create(entry.get_text()))
-            if note:
+            create = self.vault.create if kind == 'note' else self.vault.create_folder
+            created = self.try_action(lambda: create(entry.get_text()))
+            if created is not None:
+                path = created.path if kind == 'note' else created
+                self.collapsed_folders.difference_update(str(parent) for parent in Path(path).parents)
+                self.collapsed_folders.discard(path)
+                self.search_entry.set_text('')
                 self.populate_files()
-                self.open_note(note.path)
+                if kind == 'note':
+                    self.open_note(created.path)
+                else:
+                    for row in self.files.get_children():
+                        if row.path == created + '/':
+                            self.files.select_row(row)
+                            break
+                    self.status.set_text(f'Created folder · {created}')
         dialog.destroy()
 
     def section(self, title):
@@ -631,6 +825,7 @@ class Window(Gtk.ApplicationWindow):
             return True
         try:
             self.vault.refresh()
+            self.collapsed_folders.intersection_update(self.vault.folders)
             self.populate_files()
             for path, pane in self.panes.items():
                 disk_note = self.vault.notes.get(path)
@@ -651,12 +846,63 @@ class Window(Gtk.ApplicationWindow):
         return True
 
     def key_press(self, _, event):
-        if event.state & Gdk.ModifierType.CONTROL_MASK:
-            action = {'s': self.save_current, 'o': self.choose_vault, 'n': self.new_note, 'w': self.close_tab}.get(Gdk.keyval_name(event.keyval).lower())
-            if action:
-                action()
+        if self.palette is not None:
+            return self.palette.key_press(self.palette, event)
+        modifiers = event.state & Gtk.accelerator_get_default_mod_mask()
+        for shortcut in APP_SHORTCUTS:
+            key, mask = Gtk.accelerator_parse(shortcut.accelerator)
+            if Gdk.keyval_to_lower(event.keyval) == key and modifiers == mask:
+                getattr(self, shortcut.handler)()
                 return True
         return False
+
+    def toggle_details(self, *_):
+        self.details_toggle.set_active(not self.details_toggle.get_active())
+
+    def toggle_file_tree(self, *_):
+        self.notes_toggle.set_active(not self.notes_toggle.get_active())
+
+    def apply_preferences(self):
+        Gtk.Settings.get_default().set_property('gtk-application-prefer-dark-theme', self.preferences.theme == 'dark')
+        self.css_provider.load_from_data(stylesheet(CSS.decode('utf-8'), self.preferences).encode('utf-8'))
+        for pane in self.panes.values():
+            pane.apply_preferences()
+
+    def set_preferences(self, preferences):
+        self.preferences_store.save(preferences)
+        for window in self.get_application().get_windows():
+            if isinstance(window, Window):
+                window.preferences = preferences
+                window.apply_preferences()
+                if window.settings_dialog is not None:
+                    window.settings_dialog.sync_controls()
+
+    def show_settings(self, *_):
+        if self.settings_dialog is None:
+            self.settings_dialog = SettingsDialog(self)
+            self.settings_dialog.set_destroy_with_parent(True)
+            self.settings_dialog.connect('destroy', lambda *_: setattr(self, 'settings_dialog', None))
+        else:
+            self.settings_dialog.present()
+
+    def show_command_palette(self):
+        if self.palette is None:
+            self.palette = CommandPalette(self)
+            self.palette.connect('destroy', lambda *_: setattr(self, 'palette', None))
+            self.overlay.add_overlay(self.palette)
+            self.palette.show_all()
+            self.palette.filter_commands()
+            self.palette.search.grab_focus()
+        else:
+            self.palette.search.grab_focus()
+
+    def show_keybinds(self):
+        if self.cheatsheet is None:
+            self.cheatsheet = KeybindCheatsheet(self)
+            self.cheatsheet.set_destroy_with_parent(True)
+            self.cheatsheet.connect('destroy', lambda *_: setattr(self, 'cheatsheet', None))
+        else:
+            self.cheatsheet.present()
 
     def on_delete(self, *_):
         return not self.confirm_panes(list(self.panes.values()))

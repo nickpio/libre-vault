@@ -24,12 +24,21 @@ saved = vault.save(note, '# Revised plan\n')
 | `librevault/app.py` | GTK windows, open tabs, dirty buffers, live text styles, user choices, and periodic refresh |
 | `librevault/formatting.py` | Pure source-offset formatting spans, syntax ranges, and list/task structure derived from Markdown tokens |
 | `librevault/editing.py` | Pure source edits for Enter continuation and exiting empty list items |
+| `librevault/filetree.py` | Pure folder-first traversal of visible note paths and folders, respecting collapsed folders |
+| `librevault/commands.py` | Searchable command palette overlay and grouped keybind cheatsheet dialog |
+| `librevault/settings.py` | Category-based appearance/editor settings dialog, live controls, and save-error feedback |
+| `librevault/preferences.py` | Preference defaults, configuration validation, and atomic storage outside the vault |
+| `librevault/appearance.py` | Shared dark/light theme colors and generated typography styles |
+| `librevault/panels.py` | Native sidebar reveal transitions synchronized with splitters and saved panel widths |
+| `librevault/shortcuts.py` | Application shortcut registry shared by key handling and the cheatsheet, plus contextual GTK bindings |
 | `tests/test_editing.py` | Exact Markdown and cursor positions for list/task keyboard actions |
 | `tests/test_formatting.py` | Source offsets, nesting, escapes, literal code, and incomplete Markdown |
 | `tests/test_vault.py` | Repeatable filesystem and parsing regression cases |
 | `tests/smoke_gui.py` | The real GTK edit-to-save path and external-change behavior |
 
 Disk files are authoritative. The index is disposable and rebuilt from files. Each open tab owns its unsaved editor buffer and the revision it opened. The engine has no GTK dependency. The UI uses the same parser as the index.
+
+Application preferences live in the user's XDG configuration directory, independently of vaults. Loading missing or malformed preferences uses defaults without writing files. Changes save through atomic replacement before applying to all open windows. CSS and Markdown text tags share the same theme colors. Appearance updates change widget styles and layout without rewriting note buffers or changing dirty state. A failed settings save retains the previous preferences and reports the error in the settings dialog.
 
 A save writes a temporary file in the note's directory, flushes it, checks the source revision again, and atomically replaces the note. The temporary file is removed after a failure. This is optimistic conflict detection, not a filesystem transaction with other editors. Directory fsync, recovery versions, and a stronger concurrent-writer design remain release prerequisites.
 

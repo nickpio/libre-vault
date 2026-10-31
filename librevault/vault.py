@@ -102,7 +102,7 @@ class Vault:
         self._link_cache: dict[str, tuple[str, list[Link]]] = {}
         self.refresh()
 
-    def _path(self, relative: str) -> Path:
+    def _visible_path(self, relative: str) -> Path:
         # No symlink traversal. A vault never grants access outside its root.
         path = PurePosixPath(relative)
         if path.is_absolute() or not path.parts or any(p in ('.', '..') or p.startswith('.') for p in path.parts):
@@ -112,6 +112,10 @@ class Vault:
             current = current / part
             if current.is_symlink():
                 raise VaultError('Symbolic links are excluded from this prototype.')
+        return current
+
+    def _path(self, relative: str) -> Path:
+        current = self._visible_path(relative)
         if current.suffix.lower() != '.md':
             raise VaultError('This editor opens Markdown (.md) notes.')
         return current
@@ -126,8 +130,10 @@ class Vault:
 
     def refresh(self):
         notes = {}
+        visible_folders = []
         for directory, folders, files in os.walk(self.root, followlinks=False):
             folders[:] = sorted(f for f in folders if not f.startswith('.') and not (Path(directory) / f).is_symlink())
+            visible_folders.extend((Path(directory) / name).relative_to(self.root).as_posix() for name in folders)
             for name in sorted(files):
                 if name.startswith('.') or not name.lower().endswith('.md'):
                     continue
@@ -141,6 +147,7 @@ class Vault:
                     # Unreadable notes are still listed; opening one reports the error.
                     notes[relative] = None
         self.notes = dict(sorted(notes.items()))
+        self.folders = sorted(visible_folders)
         self._link_cache = {
             path: cached for path, cached in self._link_cache.items()
             if (note := self.notes.get(path)) is not None and note.revision == cached[0]
@@ -194,6 +201,18 @@ class Vault:
         note = self.read(relative)
         self.notes[relative] = note
         return note
+
+    def create_folder(self, relative: str) -> str:
+        path = self._visible_path(relative.strip())
+        if not path.parent.is_dir():
+            raise VaultError('Choose an existing parent folder for the new folder.')
+        try:
+            path.mkdir()
+        except FileExistsError as error:
+            raise VaultError('A file or folder already exists at that path.') from error
+        relative = path.relative_to(self.root).as_posix()
+        self.folders = sorted({*self.folders, relative})
+        return relative
 
     def resolve(self, source: str, target: str) -> list[str]:
         """Return candidates. Never silently choose between ambiguous basenames."""

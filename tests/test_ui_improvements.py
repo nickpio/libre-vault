@@ -8,6 +8,7 @@ from librevault.formatting import markdown_layout
 
 try:
     from librevault.app import GLib, Gtk, Window
+    from gi.repository import Gio
     GTK_AVAILABLE = Gtk.init_check()[0]
 except (ImportError, ValueError):
     GTK_AVAILABLE = False
@@ -29,8 +30,11 @@ class OutlineTests(unittest.TestCase):
 class WindowImprovementTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = Gtk.Application(application_id='org.librevault.UiRegressionTests')
-        cls.app.register(None)
+        cls.app = Gtk.Application.get_default()
+        if cls.app is None:
+            cls.app = Gtk.Application(application_id='org.librevault.UiRegressionTests',
+                                      flags=Gio.ApplicationFlags.NON_UNIQUE)
+            cls.app.register(None)
 
     def setUp(self):
         self.directory = TemporaryDirectory()

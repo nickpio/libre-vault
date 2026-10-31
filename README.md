@@ -26,14 +26,34 @@ Pass an existing vault folder to open it directly:
 
 Use **Open vault** to select another folder. Use **New note** to create a note in an existing folder. Click a note to open a tab. Follow internal links from **Outgoing links** and **Backlinks**.
 
+The gear icon at the bottom-left opens **Settings**, with a category sidebar and live preferences:
+
+- **Appearance:** dark or light theme, interface font size, text font family, and text size.
+- **Editor:** readable line length, writing column width, line wrapping, and list continuation on Enter.
+
+Changes apply immediately to open notes and future tabs. **Restore defaults** resets all preferences. Settings are saved in `$XDG_CONFIG_HOME/libre-vault/settings.json`, or `~/.config/libre-vault/settings.json` when that variable is unset. Vault files and `.obsidian` settings are left untouched. The gear stays accessible when either sidebar is hidden.
+
+Both sidebars open and close with a short slide transition, preserving widths set with the splitters. GTK's system animation preference is respected.
+
+Right-click the file explorer for **New note**, **New subfolder**, and **Open vault**. Right-clicking a folder creates inside it; right-clicking a note uses its parent folder. Right-click empty space to create at the vault root. Empty folders appear in the explorer immediately. The menu is also available with Shift+F10 or the Menu key when the explorer has focus.
+
+Notes are grouped beneath their folders with indentation for each level. Click a folder to expand or collapse it. With the explorer focused, Right expands a folder or enters it; Left collapses it or selects its parent. Opening a note reveals any collapsed parent folders.
+
 Use these keyboard shortcuts:
 
 | Shortcut | Action |
 | --- | --- |
+| Alt+P | Open the command palette |
 | Ctrl+O | Open a vault |
 | Ctrl+N | Create a note |
 | Ctrl+S | Save the active note |
 | Ctrl+W | Close the active tab |
+| Ctrl+Shift+D | Show or hide the note details panel |
+| Ctrl+Shift+E | Show or hide the file tree |
+
+Press **Alt+P** to open the compact command palette near the top of the workspace. Run **Open keybind cheatsheet** to see the full keyboard reference, grouped by application, editor, file explorer, tabs, and dialogs. Type to filter commands, press Enter to run the selected command, or press Escape or click outside to dismiss the palette and return to your previous control.
+
+The cheatsheet opens with search focused. Type a key combination, action, or section name to filter shortcuts. Use Up/Down to browse matching results while continuing to type. Press Enter to focus the list, where Left/Right jumps between matching sections and Home/End reaches the first or last result. Ctrl+F returns to search. The selected row stays in view as you navigate. Press Escape to close.
 
 ## Current behavior
 
@@ -55,7 +75,7 @@ Search matches all whitespace-separated words against saved note paths and saved
 
 Start with the example vault or a copy of a small vault. This prototype has no recovery history. Save checks reduce accidental overwrites but cannot lock out unrelated programs. A narrow race remains between the final comparison and atomic replacement. Hard links, extended attributes, file ownership, and arbitrary mixed line endings are not preserved as a compatibility contract.
 
-Live formatting handles a subset of CommonMark. Images and advanced constructs retain their source syntax. Note embeds show their link labels. Links are followed from the sidebar. Heading and block navigation uses a text match rather than Obsidian's full anchor rules. The file browser lists note titles with their parent paths rather than expandable folders.
+Live formatting handles a subset of CommonMark. Images and advanced constructs retain their source syntax. Note embeds show their link labels. Links are followed from the sidebar. Heading and block navigation uses a text match rather than Obsidian's full anchor rules. Search filters saved notes, hides folder entries, and displays parent paths beside results. Folder expansion lasts until another vault is opened or the app closes.
 
 Symbolic links, dotfiles, and hidden folders are excluded. Non-UTF-8 files remain unchanged and report an error when opened. Link resolution is case-sensitive and reports ambiguous basenames. Alias properties are preserved but are not interpreted as link targets.
 

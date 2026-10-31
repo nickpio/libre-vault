@@ -7,8 +7,16 @@
 @define-color muted #999999;
 @define-color edge #252525;
 @define-color accent #cccccc;
+@define-color raised #161616;
+@define-color button_bg #1a1a1a;
+@define-color border #333333;
+@define-color focus_edge #505050;
+@define-color bright #eeeeee;
+@define-color soft #aaaaaa;
+@define-color code_bg #1b1b1b;
+@define-color selection_bg #3a3a3a;
 
-window {
+window, dialog {
     background: @canvas;
     color: @ink;
     font-family: "Inter", "Cantarell", sans-serif;
@@ -21,34 +29,37 @@ headerbar {
     padding: 6px 12px;
     min-height: 32px;
 }
-.brand { color: #eeeeee; font-size: 10pt; font-weight: bold; padding: 0 8px; }
-.breadcrumb { color: #aaaaaa; font-size: 9pt; }
+headerbar .title { color: @bright; }
+spinbutton { color: @ink; background: @raised; border: 1px solid @edge; border-radius: 8px; }
+spinbutton entry { color: @ink; background: transparent; }
+.brand { color: @bright; font-size: 10pt; font-weight: bold; padding: 0 8px; }
+.breadcrumb { color: @soft; font-size: 9pt; }
 button {
-    background: #1a1a1a;
+    background: @button_bg;
     color: @ink;
-    border: 1px solid #333333;
+    border: 1px solid @border;
     border-radius: 8px;
     padding: 5px 10px;
     box-shadow: none;
     text-shadow: none;
     transition: background 120ms ease;
 }
-button:hover { background: #292929; border-color: #484848; }
-button:active { background: #333333; }
-button:disabled { color: #777777; background: #151515; }
+button:hover { background: @hover; border-color: @focus_edge; }
+button:active { background: @border; }
+button:disabled { color: @muted; background: @raised; }
 button:focus { outline-color: @accent; outline-offset: -2px; }
 button.icon-button, headerbar button.titlebutton {
     background: transparent;
     border-color: transparent;
-    color: #aaaaaa;
+    color: @soft;
     padding: 4px;
     min-height: 22px;
     min-width: 22px;
 }
-button.icon-button:hover, headerbar button.titlebutton:hover { background: #202020; color: #eeeeee; }
-button.icon-button:checked { background: #181818; color: #cccccc; }
+button.icon-button:hover, headerbar button.titlebutton:hover { background: @selected; color: @bright; }
+button.icon-button:checked { background: @hover; color: @accent; }
 entry {
-    background: #161616;
+    background: @raised;
     color: @ink;
     border: 1px solid transparent;
     border-radius: 9px;
@@ -57,21 +68,48 @@ entry {
     caret-color: @accent;
     box-shadow: none;
 }
-entry:focus { border-color: #505050; }
+entry:focus { border-color: @focus_edge; }
 entry image { color: @muted; }
 .sidebar { background: @panel; }
 .vault-heading { padding: 0 0 6px; }
-.vault-title { color: #dddddd; font-size: 9pt; font-weight: bold; padding-left: 5px; }
+.vault-title { color: @bright; font-size: 9pt; font-weight: bold; padding-left: 5px; }
 .caption { color: @muted; font-size: 9pt; font-weight: normal; padding: 20px 8px 8px; }
 list, list row { background: transparent; color: @ink; }
 .note-list row { border-radius: 8px; margin: 2px 0; padding: 9px 10px; }
+.note-list row.tree-row { margin: 0; padding: 5px 6px; border-radius: 5px; }
+.tree-folder { font-weight: bold; color: @bright; }
 list row:hover { background: @hover; }
-list row:selected { background: @selected; color: #ffffff; }
+list row:selected { background: @selected; color: @bright; }
 .note-folder { color: @muted; font-size: 8pt; }
 .muted { color: @muted; }
 .shortcuts { color: @muted; font-size: 8pt; padding: 12px 6px 4px; }
+frame.command-palette {
+    background: @canvas;
+    border: 1px solid @edge;
+    border-radius: 8px;
+    box-shadow: 0 6px 20px alpha(#000000, 0.35);
+}
+frame.command-palette > border { border: none; }
+.palette-label { color: @muted; font-size: 9pt; margin: 2px 4px 4px; }
+.command-results row { border-radius: 6px; padding: 8px 10px; }
+.command-results row:selected { background: @selected; }
+.palette-hint { color: @muted; font-size: 8pt; margin: 6px 4px 2px; }
+.keybind-heading { color: @muted; font-size: 9pt; padding: 16px 10px 8px; }
+.keybind-cheatsheet, .keybind-content { background: @canvas; color: @ink; }
+.keybind-keys {
+    color: @soft;
+    font-family: monospace;
+    font-size: 9pt;
+    background: @hover;
+    border: 1px solid @edge;
+    border-radius: 4px;
+    padding: 3px 6px;
+}
+.keybind-list row { border-radius: 6px; margin: 1px 0; padding: 8px 10px; border: 1px solid transparent; }
+.keybind-list row:selected { background: @selected; border-color: @border; }
+.keybind-list row:focus { outline: none; }
 scrolledwindow, viewport { border: none; box-shadow: none; background: transparent; }
-paned > separator { background: #191919; min-width: 1px; min-height: 1px; border: none; }
+paned > separator { background: @edge; min-width: 1px; min-height: 1px; border: none; }
 .workspace-split > separator { background: transparent; min-width: 5px; }
 notebook { background: @canvas; border: none; }
 notebook > header { background: @canvas; border: none; padding: 4px 10px; box-shadow: none; }
@@ -86,20 +124,58 @@ notebook > header tab {
     box-shadow: none;
 }
 notebook > header tab:hover { background: @hover; color: @ink; }
-notebook > header tab:checked { background: #1c1c1c; color: #dddddd; box-shadow: none; }
+notebook > header tab:checked { background: @selected; color: @bright; box-shadow: none; }
 textview, textview text { background: @canvas; color: @ink; caret-color: @accent; }
 textview.live-editor { font-size: 11pt; }
-.list-marker { color: #aaaaaa; font-size: 11pt; }
+.list-marker { color: @soft; font-size: 11pt; }
 checkbutton.task-checkbox { padding: 0; margin: 0; min-width: 18px; min-height: 18px; }
-checkbutton.task-checkbox check { min-width: 14px; min-height: 14px; border: 1px solid #707070; border-radius: 4px; background: #161616; box-shadow: none; color: #0c0c0c; }
-checkbutton.task-checkbox check:checked { background: #bdbdbd; border-color: #bdbdbd; }
-checkbutton.task-checkbox:hover check { border-color: #dddddd; }
-checkbutton.task-checkbox:focus { outline: 1px solid #aaaaaa; outline-offset: 2px; }
-textview text selection { background: #3a3a3a; color: #ffffff; }
+checkbutton.task-checkbox check { min-width: 14px; min-height: 14px; border: 1px solid @muted; border-radius: 4px; background: @raised; box-shadow: none; color: @canvas; }
+checkbutton.task-checkbox check:checked { background: @accent; border-color: @accent; }
+checkbutton.task-checkbox:hover check { border-color: @bright; }
+checkbutton.task-checkbox:focus { outline: 1px solid @soft; outline-offset: 2px; }
+textview text selection { background: @selection_bg; color: @bright; }
 .context-link { background: transparent; border-color: transparent; padding: 8px; border-radius: 8px; font-size: 9pt; }
 .context-link:hover { background: @hover; border-color: transparent; }
+menu.explorer-menu {
+    background: @raised;
+    color: @ink;
+    border: 1px solid @border;
+    border-radius: 8px;
+    padding: 5px;
+    font-size: 10pt;
+}
+menu.explorer-menu > menuitem {
+    min-width: 150px;
+    min-height: 18px;
+    margin: 0;
+    padding: 5px 10px;
+    border: none;
+    border-radius: 4px;
+}
+menu.explorer-menu > menuitem:hover { background: @hover; }
+menu.explorer-menu > separator {
+    min-height: 1px;
+    margin: 5px 4px;
+    padding: 0;
+    border: none;
+    background: @border;
+}
 .statusbar { background: @canvas; border: none; }
+.settings-button { margin: 3px 4px 3px 8px; }
+.settings-heading { color: @muted; font-size: 9pt; margin: 0 12px 8px; }
+.settings-dialog { background: @canvas; color: @ink; }
+.settings-navigation { background: @panel; border-right: 1px solid @edge; }
+.settings-categories row { padding: 9px 12px; margin: 2px 0; border-radius: 6px; }
+.settings-reset { margin-top: 20px; padding: 8px 10px; }
+.settings-page-title { font-size: 18pt; font-weight: bold; color: @bright; }
+.settings-subtitle, .settings-description { color: @muted; font-size: 9pt; }
+.setting-row { padding: 15px 0; border-bottom: 1px solid @edge; }
+.settings-preview { background: @raised; border: 1px solid @edge; border-radius: 8px; padding: 20px; }
+.settings-error { color: @ink; padding: 8px 16px; }
+.settings-dialog switch { background: @selected; border: 1px solid @border; border-radius: 14px; }
+.settings-dialog switch:checked { background: @accent; }
+.settings-dialog switch slider { background: @raised; border: 1px solid @border; border-radius: 14px; min-width: 22px; min-height: 22px; }
 .status { padding: 5px 12px; color: @muted; font-size: 8pt; }
 scrollbar { background: transparent; border: none; }
-scrollbar slider { background: #363636; min-width: 5px; min-height: 5px; border: 2px solid transparent; border-radius: 8px; }
-scrollbar slider:hover { background: #555555; }
+scrollbar slider { background: @border; min-width: 5px; min-height: 5px; border: 2px solid transparent; border-radius: 8px; }
+scrollbar slider:hover { background: @focus_edge; }
