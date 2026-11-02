@@ -136,8 +136,9 @@ class CommandTests(unittest.TestCase):
         self.assertIs(palette.get_toplevel(), self.window)
         card = palette.card.get_allocation()
         self.assertLess(card.y, 80)
-        self.assertLess(card.height, 220)
-        self.assertLessEqual(card.width, 560)
+        self.assertLess(card.height, 320)
+        self.assertGreater(card.height, 220)
+        self.assertAlmostEqual(card.width, min(760, palette.get_allocated_width() - 32), delta=2)
         self.assertAlmostEqual(card.x + card.width / 2,
                                palette.get_allocated_width() / 2, delta=2)
         self.assertTrue(self.window.key_press(self.window, self.event(Gdk.KEY_Tab)))

@@ -40,7 +40,7 @@ Use **Open vault** to select another folder. Use **New note** to create a note i
 
 The gear icon at the bottom-left opens **Settings**, with a category sidebar and live preferences:
 
-- **Appearance:** dark or light theme, interface font size, text font family, and text size.
+- **Appearance:** Dark, Light, or Lights Out theme, interface font size, text font family, and text size. Lights Out uses pure-black surfaces with white text and brighter controls for OLED displays.
 - **Editor:** readable line length, writing column width, line wrapping, and list continuation on Enter.
 
 Changes apply immediately to open notes and future tabs. **Restore defaults** resets all preferences. Settings are saved in `$XDG_CONFIG_HOME/libre-vault/settings.json`, or `~/.config/libre-vault/settings.json` when that variable is unset. Vault files and `.obsidian` settings are left untouched. The gear stays accessible when either sidebar is hidden.
@@ -92,7 +92,7 @@ These shortcuts apply when the note editor has focus:
 
 Right-click the editor for the same editing commands. Find searches the complete Markdown source, including concealed syntax and frontmatter. Searches are literal and case-insensitive by default; use **Aa** to match case. Enter in the find field advances to the next match, Shift+Enter goes back, and Escape closes the bar. Replace All applies to the active note and undoes as one action.
 
-Each tab keeps up to 500 undo actions in memory. Adjacent typing and deletion are grouped; task toggles, list continuation, formatting, and replacements form individual actions. Undo restores the cursor and selection. Saving preserves the history, and returning to the saved text clears the unsaved indicator. Reloading a clean note after an external change clears that tab's history.
+Each tab keeps up to 500 undo actions within an estimated 8 MiB memory budget. Oldest actions are discarded as needed; an edit larger than the budget clears undo history and cannot itself be undone. Adjacent typing and deletion are grouped; task toggles, list continuation, formatting, and replacements form individual actions. Undo restores the cursor and selection. Saving preserves the history, and returning to the saved text clears the unsaved indicator. Reloading a clean note after an external change clears that tab's history.
 
 ## Current behavior
 
@@ -113,6 +113,10 @@ Edits autosave after two seconds of inactivity. Ctrl+S saves immediately. While 
 The app checks for external changes every three seconds. Clean tabs reload. Dirty tabs retain local edits, and conflicting saves stop. Closing a dirty tab or window offers Save, Discard, and Cancel.
 
 Saves preserve a UTF-8 byte-order mark, uniform CRLF line endings, and Unix permission bits. Frontmatter stays in the source. The app leaves `.obsidian` settings untouched. Opening a vault does not create configuration files.
+
+A rebuildable SQLite cache stores note content, metadata and links under `$XDG_CACHE_HOME/libre-vault` or `~/.cache/libre-vault`, outside the vault. Unopened notes do not retain their full text in memory; loaded saved-note text uses a 4 MiB cache. Delete the cache with the app closed to rebuild it on the next launch.
+
+Reading mode limits each render to 32 embedded files and 4 MiB of embedded note source. Open files separately when a preview reaches the limit.
 
 Search shows saved-note snippets with highlighted matches. Plain words match paths and contents without case sensitivity. Quoted phrases, `path:`, `file:`, `content:`, `tag:`, `alias:`, and `property:` filters narrow results. Prefix a term with `-` to exclude it. For example, `tag:work property:status=done -path:Archive` finds completed work outside Archive. `[status]` matches notes with that property. Unsaved edits are not included in search or backlink indexing. Outgoing links use the active editor contents.
 

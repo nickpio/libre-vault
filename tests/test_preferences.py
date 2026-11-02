@@ -54,7 +54,7 @@ class PreferenceTests(unittest.TestCase):
         with TemporaryDirectory() as directory, patch.dict(os.environ, {'XDG_CONFIG_HOME': directory}):
             self.assertEqual(PreferencesStore().path, Path(directory) / 'libre-vault' / 'settings.json')
 
-    def test_both_themes_define_all_stylesheet_colors(self):
+    def test_all_themes_define_all_stylesheet_colors(self):
         source = (Path(__file__).resolve().parents[1] / 'librevault' / 'style.css').read_text()
         for theme in PALETTES:
             rendered = stylesheet(source, replace(Preferences(), theme=theme, editor_font='serif', editor_size=16))

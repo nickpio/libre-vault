@@ -212,7 +212,6 @@ def move(vault, relative, destination):
                 mapping[path] = new + path[len(old):]
     future = copy.copy(vault)
     future.notes = {mapping.get(path, path): note for path, note in vault.notes.items()}
-    future._metadata_cache = {}
     future_files = {mapping.get(path, path) for path in files}
     updates, originals = [], {}
     for path, note in vault.notes.items():
@@ -221,6 +220,7 @@ def move(vault, relative, destination):
         raw = vault._path(path).read_bytes()
         if fingerprint(raw) != note.revision:
             raise Conflict(f'{path} changed outside the app. Refresh before moving notes.')
+        note = vault.indexed_note(path)
         text = rewrite_links(vault, note, mapping, future, future_files)
         if text != note.text:
             originals[path] = raw

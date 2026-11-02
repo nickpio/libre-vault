@@ -45,7 +45,7 @@ class SettingsDialog(Gtk.Dialog):
         self.stack = Gtk.Stack()
         layout.pack_start(self.stack, True, True, 0)
         appearance = self.page('Appearance', 'Make Libre Vault feel like your workspace.')
-        self.combo(appearance, 'theme', 'Base theme', 'Choose a dark or light workspace.')
+        self.combo(appearance, 'theme', 'Base theme', 'Choose Dark, Light, or Lights Out with pure-black backgrounds and high-contrast text.')
         self.spin(appearance, 'interface_size', 'Interface font size', 'Size of text in menus and controls.', 'pt')
         self.combo(appearance, 'editor_font', 'Text font', 'Font family used when writing and reading notes.')
         self.spin(appearance, 'editor_size', 'Text font size', 'Size of your note text. Headings scale with it.', 'pt')

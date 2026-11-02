@@ -25,7 +25,7 @@ class LinkCacheTests(unittest.TestCase):
         with patch.object(engine, 'parse', wraps=engine.parse) as parse:
             self.assertEqual(self.vault.backlinks('Target.md'), ['Source.md'])
             initial_count = parse.call_count
-            self.assertEqual(initial_count, 2)
+            self.assertEqual(initial_count, 0)
             self.vault.refresh()
             self.assertEqual(self.vault.backlinks('Target.md'), ['Source.md'])
             self.assertEqual(self.vault.backlinks('Source.md'), [])
@@ -40,12 +40,12 @@ class LinkCacheTests(unittest.TestCase):
         self.vault.refresh()
         self.assertIs(self.vault.notes['Target.md'], previous['Target.md'])
         self.assertIsNot(self.vault.notes['Source.md'], previous['Source.md'])
-        self.assertEqual(self.vault.notes['Source.md'].text, 'Changed text')
+        self.assertEqual(self.vault.indexed_note('Source.md').text, 'Changed text')
 
     def test_save_reparses_only_changed_note(self):
         self.vault.backlinks('Target.md')
         with patch.object(engine, 'parse', wraps=engine.parse) as parse:
-            self.vault.save(self.vault.notes['Source.md'], 'No links\n')
+            self.vault.save(self.vault.read('Source.md'), 'No links\n')
             self.assertEqual(self.vault.backlinks('Target.md'), [])
             self.assertEqual(parse.call_count, 1)
             self.vault.backlinks('Target.md')
@@ -64,7 +64,7 @@ class LinkCacheTests(unittest.TestCase):
         (self.root / 'Source.md').write_bytes(b'\xff')
         self.vault.refresh()
         self.assertEqual(self.vault.backlinks('Target.md'), [])
-        self.assertNotIn('Source.md', self.vault._link_cache)
+        self.assertEqual(self.vault.index.links('Source.md'), [])
         self.write('Source.md', '[[Target]]\n')
         self.vault.refresh()
         self.assertEqual(self.vault.backlinks('Target.md'), ['Source.md'])
@@ -74,16 +74,16 @@ class LinkCacheTests(unittest.TestCase):
         (self.root / 'Source.md').unlink()
         self.vault.refresh()
         self.assertEqual(self.vault.backlinks('Target.md'), [])
-        self.assertNotIn('Source.md', self.vault._link_cache)
+        self.assertEqual(self.vault.index.links('Source.md'), [])
 
     def test_create_resolves_previously_missing_target_without_reparse(self):
-        self.vault.save(self.vault.notes['Source.md'], '[[New]]\n')
+        self.vault.save(self.vault.read('Source.md'), '[[New]]\n')
         self.assertEqual(self.vault.backlinks('New.md'), [])
         self.vault.create('New.md')
         with patch.object(engine, 'parse', wraps=engine.parse) as parse:
             self.assertEqual(self.vault.backlinks('New.md'), ['Source.md'])
-            # Only the new empty note needs a parse.
-            self.assertEqual(parse.call_count, 1)
+            # New notes are parsed when indexed, not during backlink queries.
+            self.assertEqual(parse.call_count, 0)
 
     def test_path_changes_update_ambiguity_without_reparsing_source(self):
         (self.root / 'Target.md').unlink()

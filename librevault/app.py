@@ -840,6 +840,8 @@ class Window(Gtk.ApplicationWindow):
         if self.vault_monitor:
             self.vault_monitor.close()
             self.vault_monitor = None
+        if self.vault:
+            self.vault.close()
 
     def error(self, error):
         self.status.set_text(str(error))
@@ -900,6 +902,7 @@ class Window(Gtk.ApplicationWindow):
     def load_vault(self, folder):
         vault = Vault(folder)
         if not self.confirm_panes(list(self.panes.values())):
+            vault.close()
             return
         self.persist_workspace()
         self.release_vault()
@@ -947,6 +950,8 @@ class Window(Gtk.ApplicationWindow):
         if self.recovery:
             self.recovery.close()
             self.recovery = None
+        if self.vault:
+            self.vault.close()
 
     def close_vault(self, *_):
         if self.vault is None:
@@ -1620,7 +1625,7 @@ class Window(Gtk.ApplicationWindow):
                     if pane.dirty:
                         self.status.set_text(f'External change to {path}. Your unsaved edits are retained; saving will stop on conflict.')
                     else:
-                        pane.load_external(disk_note)
+                        pane.load_external(self.vault.indexed_note(path))
                 if pane.mode == 'reading':
                     pane.reading.refresh()
             self.update_context()
@@ -1659,7 +1664,7 @@ class Window(Gtk.ApplicationWindow):
             self.notes_toggle.set_active(not self.notes_toggle.get_active())
 
     def apply_preferences(self):
-        Gtk.Settings.get_default().set_property('gtk-application-prefer-dark-theme', self.preferences.theme == 'dark')
+        Gtk.Settings.get_default().set_property('gtk-application-prefer-dark-theme', self.preferences.theme != 'light')
         self.css_provider.load_from_data(stylesheet(CSS.decode('utf-8'), self.preferences).encode('utf-8'))
         for pane in self.panes.values():
             pane.apply_preferences()

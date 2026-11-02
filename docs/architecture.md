@@ -28,6 +28,7 @@ saved = vault.save(note, '# Revised plan\n')
 | --- | --- |
 | `librevault/vault.py` | Path validation, UTF-8 reads, revision checks, atomic replacement, link parsing, resolution, search, and backlinks |
 | `librevault/monitor.py` | Recursive Gio directory watches, coalesced filesystem events, and watch cleanup |
+| `librevault/index.py` | Disposable SQLite content, metadata, link and substring indexes, plus a byte-bounded text cache |
 | `librevault/app.py` | GTK windows, open tabs, dirty buffers, live text styles, user choices, and event-driven refresh |
 | `librevault/formatting.py` | Pure source-offset formatting spans, syntax ranges, and list/task structure derived from Markdown tokens |
 | `librevault/editing.py` | Pure source edits for list continuation, emphasis toggles, link construction, and literal match offsets |
@@ -69,7 +70,7 @@ Edits and cursor movement schedule one idle formatting pass. Source spans are ca
 
 The editor handles unmodified Enter with `list_enter(text, cursor)`. This pure function parses the current source and returns one replacement range, or no edit when GTK should handle the key normally. Bullets preserve their style and indentation, ordered lists advance their displayed number, and new task markers are unchecked. Empty items exit with a blank separator to prevent subsequent prose from becoming a lazy list continuation. The adapter applies the edit as one user action and places the caret after the replacement. It does not use cached widget positions, so consecutive Enter presses work before formatting runs.
 
-Each `NotePane` owns a `BufferHistory`. Insert/delete signals record character-offset source deltas and before/after selections. GTK user-action boundaries make compound edits atomic for undo; adjacent typing and deletion coalesce for up to one second, ending at whitespace boundaries or cursor movement. History holds at most 500 actions and excludes text tags. Replay uses buffer edits without recording itself. Dirty state compares the current source with the saved note, so undo/redo can cross a save checkpoint without changing its disk revision. External reload suspends recording and clears history before adopting the new source.
+Each `NotePane` owns a `BufferHistory`. Insert/delete signals record character-offset source deltas and before/after selections. GTK user-action boundaries make compound edits atomic for undo; adjacent typing and deletion coalesce for up to one second, ending at whitespace boundaries or cursor movement. History holds at most 500 actions and an estimated 8 MiB of retained action data per buffer, and excludes text tags. Oldest actions are evicted first. A single compound edit that exceeds the budget establishes a new undo checkpoint, clearing prior history rather than retaining a partial action. Replay uses buffer edits without recording itself. Dirty state compares the current source with the saved note, so undo/redo can cross a save checkpoint without changing its disk revision. External reload suspends recording and clears history before adopting the new source.
 
 The in-note find bar searches original source, including invisible characters. Literal matches use source offsets rather than offsets in rendered text. Replacements modify those ranges; Replace All walks matches backwards inside one user action. Search highlights use a separate text tag and never enter edit history. Editor shortcuts are scoped to the editor; find-field keyboard controls are routed before GTK entry defaults so Escape closes the bar and text-entry editing cannot format the note.
 
@@ -85,7 +86,7 @@ A browser application with a local HTTP server would make HTML previews easier b
 
 An Electron editor with CodeMirror is another candidate for the final editing experience. It offers a stronger foundation for Obsidian-like live preview, at the cost of a browser runtime and additional JavaScript dependencies. GTK was selected for the runnable Linux prototype; that choice remains provisional until a live-preview editing spike establishes whether it can meet the required experience. The independently tested vault behavior should remain the reference if the shell changes.
 
-A database as the authoritative note store would require import and export behavior and risk diverging from ordinary vault files. Only derived indexes may use a database in later versions.
+A database as the authoritative note store would require import and export behavior and risk diverging from ordinary vault files. SQLite stores only derived indexes; deleting the cache never deletes Markdown files.
 
 ## Risks that need evidence
 
@@ -100,3 +101,16 @@ A database as the authoritative note store would require import and export behav
 Each open vault owns Gio directory monitors for its visible, non-symlink directories and a parent watch for root replacement. Notifications are coalesced for 100 ms, then reconciled against current disk state. File changes read only the affected Markdown notes; directory changes scan that subtree and reinstall its watches. Both sides of moves are reconciled. Non-Markdown events also refresh reading dependencies, including attachments. Buffer changes independently queue an idle reading refresh so unsaved transclusions remain current.
 
 An initial reconciliation after watch installation closes the scan/watch startup gap. Explicit `Window.refresh()` and `Vault.refresh()` remain full rescans for callers that need them, including organization operations. Switching vaults or destroying the window disconnects and cancels watches and pending callbacks. Watch-installation failures appear in the status bar; reopening the vault retries them. There is no periodic polling fallback. Gio backend support and OS watch limits therefore constrain live monitoring; unsupported filesystems or dropped notifications may require an explicit rescan or reopening the vault.
+
+
+## Large-vault memory
+
+`Vault.notes` holds `NoteRecord` values with paths, revisions and BOM flags; unreadable notes remain `None`. Full `Note` snapshots belong to open editors or temporary operations. `read()` reads the authoritative file; `indexed_note()` loads a consistent saved snapshot from SQLite with a 4 MiB LRU text-cache budget. Oversized notes bypass that cache. Search streams one candidate document at a time and does not populate the text cache.
+
+The private per-vault SQLite database lives under `$XDG_CACHE_HOME/libre-vault`, or `~/.cache/libre-vault`. It contains note text, YAML properties, tags, aliases, and parsed links. Files are created with mode 0600. The cache can be deleted while the app is closed and rebuilt from the Markdown vault. Startup reconciles files against stored revisions; unchanged notes reuse parsed data. Invalid database contents are rebuilt on reopen. Locked or unavailable databases report an error rather than being discarded. Vault closure releases the connection and cached text.
+
+SQLite uses a 2 MiB page-cache target with memory mapping disabled. FTS5 trigrams narrow positive substring searches of at least three characters, followed by the existing exact query matcher and snippet generation. Short strings, negative-only queries and metadata-only filters stream through the disk index. Builds without the trigram tokenizer use that streaming path for all queries. This preserves literal substrings, aliases, Unicode case folding, filters and unreadable-path search behavior.
+
+Reading views allow at most 32 embedded files and 4 MiB of embedded note source per render. Oversized previews display a message to open the file separately. Embedded images are scaled to 680 by 520 pixels and PDF pages to at most 680 by 900 pixels. Dependency snapshots retain hashes of open-note text rather than extra full-text copies. These limits do not cap the open document itself or all renderer allocations.
+
+Path records, visible explorer rows, and search results still grow with note count. Open buffers and their per-buffer undo budgets grow with the number of open tabs. Parsing and index updates still run on the GTK thread; large individual documents and multi-file organization operations can use additional temporary memory. `tests/test_disk_index.py` checks retained Python allocations as well as cache bounds and search behavior; it is not a bound on native-library RSS.

@@ -35,8 +35,8 @@ class IncrementalIndexTests(unittest.TestCase):
             self.vault.update_paths(['B.md', 'B.md'])
             self.assertEqual([call.args[0] for call in read.call_args_list], ['B.md'])
         self.assertIs(self.vault.notes['A.md'], original)
-        self.assertNotIn('B.md', self.vault._metadata_cache)
-        self.assertNotIn('B.md', self.vault._link_cache)
+        self.assertEqual(self.vault.metadata('B.md').tags, ())
+        self.assertEqual(self.vault.index.links('B.md'), [])
         self.assertEqual(self.vault.backlinks('B.md'), ['A.md'])
 
     def test_directory_move_delete_and_exclusions(self):
@@ -64,10 +64,10 @@ class IncrementalIndexTests(unittest.TestCase):
         (self.root / 'B.md').write_bytes(b'\xff')
         self.vault.update_paths(['B.md'])
         self.assertIsNone(self.vault.notes['B.md'])
-        self.assertNotIn('B.md', self.vault._metadata_cache)
+        self.assertEqual(self.vault.metadata('B.md').tags, ())
         (self.root / 'B.md').write_text('Recovered')
         self.vault.update_paths(['B.md'])
-        self.assertEqual(self.vault.notes['B.md'].text, 'Recovered')
+        self.assertEqual(self.vault.indexed_note('B.md').text, 'Recovered')
         (self.root / 'B.md').unlink()
         (self.root / 'B.md').symlink_to(self.root / 'A.md')
         self.vault.update_paths(['B.md'])
@@ -119,7 +119,7 @@ class MonitorTests(unittest.TestCase):
                 self.assertEqual({call.args[0] for call in read.call_args_list}, {'A.md'})
             pane.buffer.insert_at_cursor(' draft')
             (self.root / 'A.md').write_text('Competing')
-            self.wait_for(lambda: self.window.vault.notes['A.md'].text == 'Competing')
+            self.wait_for(lambda: self.window.vault.indexed_note('A.md').text == 'Competing')
             self.assertIn('draft', pane.text())
             with self.assertRaises(Conflict):
                 pane.save()
@@ -133,7 +133,7 @@ class MonitorTests(unittest.TestCase):
         self.wait_for(lambda: 'Moved/Nested/C.md' in self.window.vault.notes
                       and 'Folder/Nested/C.md' not in self.window.vault.notes)
         (self.root / 'Moved' / 'Nested' / 'C.md').write_text('Updated')
-        self.wait_for(lambda: self.window.vault.notes['Moved/Nested/C.md'].text == 'Updated')
+        self.wait_for(lambda: self.window.vault.indexed_note('Moved/Nested/C.md').text == 'Updated')
         (self.root / 'Moved' / 'Nested' / 'C.md').unlink()
         (self.root / 'Moved' / 'Nested').rmdir()
         self.wait_for(lambda: 'Moved/Nested' not in self.window.vault.folders)
@@ -195,7 +195,7 @@ class MonitorTests(unittest.TestCase):
         (self.root / 'Fresh.md').write_text('Fresh')
         self.wait_for(lambda: 'Fresh.md' in self.window.vault.notes)
         (self.root / 'Fresh.md').write_text('Changed')
-        self.wait_for(lambda: self.window.vault.notes['Fresh.md'].text == 'Changed')
+        self.wait_for(lambda: self.window.vault.indexed_note('Fresh.md').text == 'Changed')
 
     def test_idle_does_not_read_notes_or_rebuild_ui(self):
         deadline = time.monotonic() + 4.2

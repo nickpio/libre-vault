@@ -16,6 +16,14 @@ PALETTES['light'] = {
     name: f'#{0xFFFFFF - int(color[1:], 16):06x}'
     for name, color in PALETTES['dark'].items()
 }
+PALETTES['lights_out'] = {
+    'canvas': '#000000', 'panel': '#000000', 'raised': '#000000',
+    'button_bg': '#000000', 'code_bg': '#000000',
+    'hover': '#111111', 'selected': '#1a1a1a', 'selection_bg': '#333333',
+    'ink': '#ffffff', 'bright': '#ffffff', 'accent': '#ffffff',
+    'soft': '#dedede', 'muted': '#bdbdbd', 'edge': '#303030',
+    'border': '#555555', 'focus_edge': '#aaaaaa', 'panel_border': '#ffffff',
+}
 FONTS = {'sans': '"Inter", "Cantarell", sans-serif', 'serif': 'serif', 'monospace': 'monospace'}
 
 

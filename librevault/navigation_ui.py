@@ -12,6 +12,8 @@ from .navigation import matching_notes
 
 
 class QuickSwitcher(CommandPalette):
+    max_width = 560
+
     def __init__(self, owner):
         super().__init__(owner)
         self.search.set_placeholder_text('Find a note…')

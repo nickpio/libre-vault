@@ -2,6 +2,7 @@
 from io import BytesIO
 from pathlib import Path
 import re
+import sys
 from urllib.parse import quote
 
 import gi
@@ -11,7 +12,7 @@ from markdown_it import MarkdownIt
 
 from .attachments import local_path
 from .appearance import PALETTES
-from .vault import VaultError, wiki_rule
+from .vault import VaultError, fingerprint, wiki_rule
 
 
 MARKDOWN = MarkdownIt('commonmark', {'html': False}).enable('table').enable('strikethrough')
@@ -105,7 +106,7 @@ class PdfView(Gtk.Box):
         self.page = max(0, min(count - 1, self.page + delta))
         page = self.document.get_page(self.page)
         width, height = page.get_size()
-        scale = min(1.5, 680 / max(width, 1))
+        scale = min(1.5, 680 / max(width, 1), 900 / max(height, 1))
         surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, max(1, int(width * scale)), max(1, int(height * scale)))
         context = cairo.Context(surface)
         context.set_source_rgb(1, 1, 1)
@@ -119,6 +120,9 @@ class PdfView(Gtk.Box):
 
 
 class ReadingView(Gtk.ScrolledWindow):
+    MAX_EMBEDS = 32
+    MAX_EMBED_BYTES = 4 * 1024 * 1024
+
     def __init__(self, pane):
         super().__init__()
         self.pane = pane
@@ -149,7 +153,7 @@ class ReadingView(Gtk.ScrolledWindow):
                 opened = self.pane.window.panes.get(relative)
                 state.append((source, target, 'note', candidates, disk,
                               saved.revision if saved is not None else None,
-                              opened.text() if opened is not None else None))
+                              fingerprint(opened.text().encode('utf-8')) if opened is not None else None))
             else:
                 try:
                     path = local_path(vault, source, target)
@@ -175,6 +179,9 @@ class ReadingView(Gtk.ScrolledWindow):
         self.references.clear()
         for child in self.body.get_children():
             child.destroy()
+        self.embed_count = 0
+        self.embed_bytes = 0
+        self.embed_limit_shown = False
         self.blocks(self.body, source, self.pane.note.path, {self.pane.note.path})
         self.body.show_all()
         self.dependency_state = self.dependencies()
@@ -295,6 +302,12 @@ class ReadingView(Gtk.ScrolledWindow):
             self.label(parent, f'Math: {expression}\nCould not render this expression: {error}')
 
     def embed(self, parent, target, source, visited):
+        if self.embed_count >= self.MAX_EMBEDS:
+            if not self.embed_limit_shown:
+                self.label(parent, 'Preview limit reached. Open embedded files separately to view more.')
+                self.embed_limit_shown = True
+            return
+        self.embed_count += 1
         vault = self.pane.window.vault
         self.references.add((source, target))
         candidates = vault.resolve(source, target)
@@ -309,8 +322,17 @@ class ReadingView(Gtk.ScrolledWindow):
             frame.add(content)
             parent.pack_start(frame, False, False, 0)
             try:
-                note = vault.read(relative)
-                text = self.pane.window.panes[relative].text() if relative in self.pane.window.panes else note.text
+                opened = self.pane.window.panes.get(relative)
+                remaining = self.MAX_EMBED_BYTES - self.embed_bytes
+                if opened is None and vault._path(relative).stat().st_size > remaining:
+                    self.label(content, 'Note exceeds the preview budget. Open it separately to read it.')
+                    return
+                text = opened.text() if opened is not None else vault.read(relative).text
+                size = sys.getsizeof(text)
+                if size > remaining:
+                    self.label(content, 'Note exceeds the preview budget. Open it separately to read it.')
+                    return
+                self.embed_bytes += size
                 self.blocks(content, text, relative, visited | {relative})
             except (OSError, VaultError) as error:
                 self.label(content, str(error))

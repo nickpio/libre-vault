@@ -2,6 +2,8 @@
 from contextlib import contextmanager
 from dataclasses import dataclass
 import time
+import sys
+from functools import cached_property
 
 
 @dataclass(frozen=True)
@@ -22,6 +24,16 @@ class Action:
     changes: tuple[Change, ...]
     before: Selection
     after: Selection
+
+
+    @cached_property
+    def size(self):
+        return (sys.getsizeof(self) + sys.getsizeof(self.changes) + 256
+                + sum(change_size(change) for change in self.changes))
+
+
+def change_size(change):
+    return sys.getsizeof(change) + sys.getsizeof(change.removed) + sys.getsizeof(change.inserted) + 128
 
 
 def action_kind(action):
@@ -59,10 +71,14 @@ class BufferHistory:
     GTK user-action boundaries group list continuation, task toggles, paste,
     formatting, and replacements. Adjacent typing/deletion is coalesced for
     up to one second. Store deltas, bounded to 500 actions, rather than copies
-    of the entire document for every keystroke.
+    of the entire document for every keystroke. An 8 MiB budget bounds retained
+    actions too; edits larger than that establish a new undo checkpoint.
     """
-    def __init__(self, buffer):
+    def __init__(self, buffer, max_bytes=8 * 1024 * 1024):
         self.buffer = buffer
+        self.max_bytes = max_bytes
+        self.pending_bytes = 0
+        self.overflow = False
         self.undo_stack = []
         self.redo_stack = []
         self.depth = 0
@@ -110,7 +126,13 @@ class BufferHistory:
         if not self.suppressed:
             if self.before is None:
                 self.before = self.selection()
-            self.pending.append(change)
+            if not self.overflow:
+                self.pending_bytes += change_size(change)
+                if self.pending_bytes > self.max_bytes:
+                    self.pending.clear()
+                    self.overflow = True
+                else:
+                    self.pending.append(change)
             self.editing += 1
 
     def insert(self, _, position, text, length):
@@ -125,7 +147,17 @@ class BufferHistory:
             if self.depth == 0:
                 self.commit()
 
+    @property
+    def retained_bytes(self):
+        return sum(action.size for action in self.undo_stack + self.redo_stack)
+
     def commit(self):
+        if self.overflow:
+            # A partial compound action cannot be undone safely. An oversized
+            # edit establishes a new checkpoint rather than breaking offsets.
+            self.reset()
+            return
+        self.pending_bytes = 0
         if not self.pending:
             self.before = None
             return
@@ -142,6 +174,9 @@ class BufferHistory:
             self.undo_stack.append(action)
             del self.undo_stack[:-500]
         self.redo_stack.clear()
+        retained = self.retained_bytes
+        while self.undo_stack and retained > self.max_bytes:
+            retained -= self.undo_stack.pop(0).size
         self.last_time, self.last_kind = now, kind
 
     def mark_set(self, _, position, mark):
@@ -200,6 +235,8 @@ class BufferHistory:
         self.undo_stack.clear()
         self.redo_stack.clear()
         self.pending.clear()
+        self.pending_bytes = 0
+        self.overflow = False
         self.before = None
         self.break_group()
 
@@ -207,3 +244,4 @@ class BufferHistory:
         for signal in self.signals:
             self.buffer.disconnect(signal)
         self.signals.clear()
+        self.reset()

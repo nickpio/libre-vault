@@ -8,6 +8,8 @@ from .shortcuts import APP_SHORTCUTS, EDITOR_SHORTCUTS, KEYBIND_GROUPS
 
 
 class CommandPalette(Gtk.EventBox):
+    max_width = 760
+
     def __init__(self, owner):
         super().__init__()
         self.owner = owner
@@ -37,7 +39,7 @@ class CommandPalette(Gtk.EventBox):
         self.results.get_style_context().add_class('command-results')
         self.results_scroll = Gtk.ScrolledWindow()
         self.results_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        self.results_scroll.set_max_content_height(88)
+        self.results_scroll.set_max_content_height(176)
         self.results_scroll.set_propagate_natural_height(True)
         self.results_scroll.add(self.results)
         content.pack_start(self.results_scroll, False, False, 0)
@@ -77,9 +79,10 @@ class CommandPalette(Gtk.EventBox):
         self.connect('button-press-event', self.outside_click)
         self.connect('size-allocate', self.resize_card)
         self.connect('destroy', self.restore_focus)
+        self.resize_card(self, owner.overlay.get_allocation())
 
     def resize_card(self, _, allocation):
-        width = max(1, min(560, allocation.width - 32))
+        width = max(1, min(self.max_width, allocation.width - 32))
         if self.card.get_size_request().width != width:
             self.card.set_size_request(width, -1)
 

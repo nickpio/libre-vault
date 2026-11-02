@@ -108,3 +108,40 @@ class MemoryTests(unittest.TestCase):
         self.window.update_context()
         self.drain()
         self.assertTrue(all(reference() is None for reference in references))
+
+    def test_undo_budget_preserves_valid_history_and_bounds_compound_edits(self):
+        from librevault.history import BufferHistory
+        buffer = Gtk.TextBuffer()
+        history = BufferHistory(buffer, max_bytes=1800)
+        self.addCleanup(history.close)
+        for value in ('a' * 500, 'b' * 500, 'c' * 500):
+            buffer.begin_user_action()
+            buffer.insert_at_cursor(value)
+            buffer.end_user_action()
+            self.assertLessEqual(history.retained_bytes, history.max_bytes)
+        self.assertTrue(history.undo())
+        self.assertEqual(buffer.get_text(*buffer.get_bounds(), True), 'a' * 500 + 'b' * 500)
+        self.assertTrue(history.redo())
+        self.assertLessEqual(history.retained_bytes, history.max_bytes)
+        buffer.begin_user_action()
+        for _ in range(8):
+            buffer.insert_at_cursor('x' * 500)
+            self.assertLessEqual(sum(len(c.inserted) for c in history.pending), history.max_bytes)
+        buffer.end_user_action()
+        self.assertFalse(history.can_undo)
+        self.assertFalse(history.can_redo)
+        buffer.insert_at_cursor('end')
+        self.assertTrue(history.undo())
+        self.assertTrue(buffer.get_text(*buffer.get_bounds(), True).endswith('x' * 500))
+
+    def test_reading_limits_repeated_embeds_and_large_note_previews(self):
+        pane = self.window.current()
+        (self.root / 'Embedded.md').write_text('small embedded content')
+        self.window.vault.update_paths(['Embedded.md'])
+        pane.buffer.set_text('![[Embedded]]\n' * 100)
+        pane.set_mode('reading')
+        self.assertEqual(pane.reading.embed_count, pane.reading.MAX_EMBEDS)
+        self.assertLessEqual(pane.reading.embed_bytes, pane.reading.MAX_EMBED_BYTES)
+        pane.reading.MAX_EMBED_BYTES = 8
+        pane.reading.refresh(force=True)
+        self.assertEqual(pane.reading.embed_bytes, 0)

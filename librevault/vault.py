@@ -10,11 +10,13 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import stat
+import sqlite3
 import tempfile
 from urllib.parse import unquote, urlsplit
 
 from markdown_it import MarkdownIt
 
+from .index import NoteIndex, TextCache
 from .metadata import matches_query, note_metadata, query_terms, search_result
 
 
@@ -30,6 +32,13 @@ class Conflict(VaultError):
 class Note:
     path: str
     text: str
+    revision: str
+    bom: bool
+
+
+@dataclass(frozen=True, slots=True)
+class NoteRecord:
+    path: str
     revision: str
     bom: bool
 
@@ -96,14 +105,21 @@ def fingerprint(raw: bytes) -> str:
 
 
 class Vault:
-    def __init__(self, root: str | Path):
+    def __init__(self, root: str | Path, *, cache_dir=None, text_cache_bytes=4 * 1024 * 1024):
         self.root = Path(root).expanduser().resolve(strict=True)
         if not self.root.is_dir():
             raise VaultError('Choose a folder as your vault.')
-        self.notes: dict[str, Note | None] = {}
-        self._link_cache: dict[str, tuple[str, list[Link]]] = {}
-        self._metadata_cache = {}
-        self.refresh()
+        self.notes: dict[str, NoteRecord | None] = {}
+        try:
+            self.index = NoteIndex(self.root, cache_dir)
+        except (OSError, sqlite3.Error) as error:
+            raise VaultError(f'Could not open the note index: {error}') from error
+        self.text_cache = TextCache(text_cache_bytes)
+        try:
+            self.refresh()
+        except Exception:
+            self.close()
+            raise
 
     def _visible_path(self, relative: str) -> Path:
         # No symlink traversal. A vault never grants access outside its root.
@@ -137,8 +153,9 @@ class Vault:
         if self.root.is_symlink():
             self.notes.clear()
             self.folders = []
-            self._link_cache.clear()
-            self._metadata_cache.clear()
+            self.index.prune({})
+            self.index.connection.commit()
+            self.text_cache.clear()
             return
         notes = {}
         visible_folders = []
@@ -153,22 +170,46 @@ class Vault:
                     continue
                 relative = path.relative_to(self.root).as_posix()
                 try:
-                    note = self.read(relative)
-                    previous = self.notes.get(relative)
-                    # Polling must not keep a second full copy of an unchanged
-                    # vault while building the replacement index.
-                    notes[relative] = previous if previous == note else note
+                    notes[relative] = self._index_note(self.read(relative))
                 except (VaultError, OSError):
                     # Unreadable notes are still listed; opening one reports the error.
                     notes[relative] = None
         self.notes = dict(sorted(notes.items()))
         self.folders = sorted(visible_folders)
-        self._link_cache = {
-            path: cached for path, cached in self._link_cache.items()
-            if (note := self.notes.get(path)) is not None and note.revision == cached[0]
-        }
-        self._metadata_cache = {path: cached for path, cached in self._metadata_cache.items()
-                                if (note := self.notes.get(path)) is not None and note.revision == cached[0]}
+        self.index.prune({path for path, note in self.notes.items() if note is not None})
+        self.index.connection.commit()
+        for path in list(self.text_cache.entries):
+            record = self.notes.get(path)
+            if record is None or record.revision != self.text_cache.get(path).revision:
+                self.text_cache.remove(path)
+
+    def _index_note(self, note):
+        if self.index.revision(note.path) != note.revision:
+            self.index.store(note, note_metadata(note.text), links(note.text))
+            self.text_cache.remove(note.path)
+        record = NoteRecord(note.path, note.revision, note.bom)
+        previous = self.notes.get(note.path)
+        return previous if previous == record else record
+
+    def indexed_note(self, relative):
+        """Load a saved snapshot on demand; read() always checks the live file."""
+        record = self.notes.get(relative)
+        if record is None:
+            raise VaultError(f'{relative} is not readable in the saved index.')
+        cached = self.text_cache.get(relative)
+        if cached is not None and cached.revision == record.revision:
+            return cached
+        snapshot = self.index.snapshot(relative)
+        if snapshot is None:
+            raise VaultError('The note index is unavailable. Reopen the vault to rebuild it.')
+        text, revision, bom = snapshot
+        note = Note(relative, text, revision, bool(bom))
+        self.text_cache.put(relative, note)
+        return note
+
+    def close(self):
+        self.text_cache.clear()
+        self.index.close()
 
     def update_paths(self, paths):
         """Reconcile reported files/subtrees against disk without reading other notes.
@@ -209,9 +250,7 @@ class Vault:
                 pass
             for name in found:
                 try:
-                    note = self.read(name)
-                    previous = self.notes.get(name)
-                    found[name] = previous if previous == note else note
+                    found[name] = self._index_note(self.read(name))
                 except (VaultError, OSError):
                     # Keep unreadable Markdown listed, as in a full scan.
                     pass
@@ -220,12 +259,12 @@ class Vault:
             self.notes.update(found)
             for name in old_paths | found.keys():
                 note = self.notes.get(name)
-                for cache in (self._link_cache, self._metadata_cache):
-                    cached = cache.get(name)
-                    if cached is not None and (note is None or note.revision != cached[0]):
-                        cache.pop(name)
+                if note is None:
+                    self.index.remove(name)
+                    self.text_cache.remove(name)
             self.folders = sorted(folders)
         self.notes = dict(sorted(self.notes.items()))
+        self.index.connection.commit()
 
     def save(self, note: Note, text: str) -> Note:
         path = self._path(note.path)
@@ -257,7 +296,8 @@ class Vault:
             if os.path.exists(temporary):
                 os.unlink(temporary)
         saved = self.read(note.path)
-        self.notes[note.path] = saved
+        self.notes[note.path] = self._index_note(saved)
+        self.index.connection.commit()
         return saved
 
     def create(self, relative: str) -> Note:
@@ -273,7 +313,8 @@ class Vault:
         except FileExistsError as error:
             raise VaultError('A note already exists at that path.') from error
         note = self.read(relative)
-        self.notes[relative] = note
+        self.notes[relative] = self._index_note(note)
+        self.index.connection.commit()
         return note
 
     def create_folder(self, relative: str) -> str:
@@ -319,14 +360,9 @@ class Vault:
         return [path for path, note in self.notes.items() if note is not None and
                 any(self.resolve(path, link.target) == [relative] for link in self._saved_links(note))]
 
-    def _saved_links(self, note: Note) -> list[Link]:
-        # Cache syntax only: resolution must reflect newly created/deleted notes
-        # and basename ambiguity even when the linking note has not changed.
-        cached = self._link_cache.get(note.path)
-        if cached is None or cached[0] != note.revision:
-            cached = (note.revision, links(note.text))
-            self._link_cache[note.path] = cached
-        return cached[1]
+    def _saved_links(self, note: NoteRecord) -> list[Link]:
+        # Resolve against current paths, while syntax lives in the disk index.
+        return [Link(**value) for value in self.index.links(note.path)]
 
     def search(self, query: str) -> list[str]:
         return [result.path for result in self.search_results(query)]
@@ -336,20 +372,20 @@ class Vault:
         if not terms:
             from .metadata import SearchResult
             return [SearchResult(path, '', ()) for path in self.notes]
-        return [search_result(path, note.text if note else '', terms)
-                for path, note in self.notes.items()
-                if matches_query(path, note.text if note else '', terms,
-                                 self.metadata(path))]
+        candidates = set(self.index.candidates(terms))
+        results = []
+        for path, record in self.notes.items():
+            if record is not None and path not in candidates:
+                continue
+            # Stream one document at a time; searching never fills the text cache.
+            text = self.index.text(path) if record else ''
+            if matches_query(path, text, terms, self.metadata(path)):
+                results.append(search_result(path, text, terms))
+        return results
 
     def metadata(self, relative: str):
-        note = self.notes.get(relative)
-        if note is None:
-            return note_metadata('')
-        cached = self._metadata_cache.get(relative)
-        if cached is None or cached[0] != note.revision:
-            cached = (note.revision, note_metadata(note.text))
-            self._metadata_cache[relative] = cached
-        return cached[1]
+        record = self.notes.get(relative)
+        return self.index.metadata(record.path) if record is not None else note_metadata('')
 
     def move(self, relative: str, destination: str) -> dict[str, str]:
         """Rename or move a note/folder, updating unambiguous Markdown links."""

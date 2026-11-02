@@ -59,7 +59,7 @@ class VaultTests(unittest.TestCase):
         self.assertEqual(path.read_bytes(), b'\xef\xbb\xbf---\r\ntitle: Example\r\n---\r\nNew\r\n')
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o640)
         self.assertNotEqual(saved.revision, note.revision)
-        self.assertEqual(vault.notes['Note.md'], saved)
+        self.assertEqual(vault.indexed_note('Note.md'), saved)
 
     def test_external_edits_and_deletions_stop_saves(self):
         path = self.write('Note.md', 'original')

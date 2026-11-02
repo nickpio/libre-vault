@@ -7,7 +7,7 @@ import tempfile
 
 
 OPTIONS = {
-    'theme': (('dark', 'Dark'), ('light', 'Light')),
+    'theme': (('dark', 'Dark'), ('light', 'Light'), ('lights_out', 'Lights Out')),
     'editor_font': (('sans', 'Sans serif'), ('serif', 'Serif'), ('monospace', 'Monospace')),
 }
 BOUNDS = {'interface_size': (8, 18), 'editor_size': (8, 32), 'line_width': (480, 1200)}

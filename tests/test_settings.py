@@ -79,6 +79,21 @@ class SettingsTests(unittest.TestCase):
         self.assertFalse((self.root / '.obsidian').exists())
         self.assertFalse((self.root / 'settings.json').exists())
 
+    def test_lights_out_uses_black_surfaces_and_persists_from_theme_control(self):
+        pane = self.window.current()
+        before = pane.text()
+        self.dialog.controls['theme'].set_active_id('lights_out')
+        self.assertEqual(PreferencesStore(self.preferences_path).load().theme, 'lights_out')
+        self.assertTrue(Gtk.Settings.get_default().get_property('gtk-application-prefer-dark-theme'))
+        for name in ('canvas', 'panel', 'raised', 'button_bg', 'code_bg'):
+            found, color = self.window.get_style_context().lookup_color(name)
+            self.assertTrue(found)
+            self.assertEqual((color.red, color.green, color.blue), (0, 0, 0))
+        text = pane.tags['h1'].get_property('foreground-rgba')
+        self.assertEqual((text.red, text.green, text.blue), (1, 1, 1))
+        self.assertEqual(pane.text(), before)
+        self.assertFalse(pane.dirty)
+
     def test_editor_controls_change_layout_and_list_continuation(self):
         pane = self.window.current()
         allocation = Gdk.Rectangle()
