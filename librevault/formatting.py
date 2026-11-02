@@ -39,6 +39,7 @@ class MarkdownLayout:
     spans: list[Span]
     items: list[ListItem]
     headings: list[Heading]
+    images: list[tuple[int, int, str]]
 
 
 def positioned(rule, kind):
@@ -126,7 +127,7 @@ def markdown_layout(text):
     offsets = [0]
     for line in lines:
         offsets.append(offsets[-1] + len(line))
-    spans, skip, items, lists, headings = [], set(), [], [], []
+    spans, skip, items, lists, headings, images = [], set(), [], [], [], []
     first = 0
     if lines and lines[0].strip() == '---':
         for index, line in enumerate(lines[1:], 1):
@@ -188,6 +189,16 @@ def markdown_layout(text):
         elif token.type == 'blockquote_open':
             spans.append(Span(offsets[start], offsets[end], 'quote'))
         elif token.type == 'inline':
+            # Recognize standalone image lines, including lines adjacent to text
+            # in the same paragraph. Block tokens exclude fenced/code content.
+            for line_number in range(start, end):
+                raw = lines[line_number].rstrip('\r\n')
+                if not raw.lstrip().startswith('!['):
+                    continue
+                children = MARKDOWN.parseInline(raw, env)[0].children or []
+                if len(children) == 1 and children[0].type == 'image':
+                    images.append((offsets[line_number], offsets[line_number] + len(raw),
+                                   children[0].attrGet('src')))
             # Parse the source block rather than token.content, which has already
             # lost quote/list prefixes and would shift the original offsets.
             source = ''.join(lines[start:end]).rstrip('\n')
@@ -199,4 +210,4 @@ def markdown_layout(text):
         prefix = re.match(r' {0,3}(?:>\s?)+', line)
         if prefix:
             spans.append(Span(offsets[index], offsets[index] + prefix.end(), 'syntax'))
-    return MarkdownLayout(spans, items, headings)
+    return MarkdownLayout(spans, items, headings, images)

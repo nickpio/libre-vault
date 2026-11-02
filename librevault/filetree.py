@@ -13,6 +13,8 @@ def tree_paths(notes, folders, collapsed):
     def visit(parent):
         for path in sorted(children[parent], key=lambda path: (
                 not path.endswith('/'), PurePosixPath(path).name.casefold(), path)):
+            if not parent and path == 'attachments/':
+                continue
             yield path
             if path.endswith('/') and path[:-1] not in collapsed:
                 yield from visit(path[:-1])
