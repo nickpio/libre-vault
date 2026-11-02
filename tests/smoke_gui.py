@@ -35,7 +35,7 @@ def main():
         root = Path(folder) / 'vault'
         example = Path(__file__).resolve().parents[1] / 'example-vault'
         shutil.copytree(example, root)
-        window = Window(app)
+        window = Window(app, preferences_path=Path(folder) / 'settings.json')
         try:
             assert window.vault is None
             assert window.workspace_stack.get_visible_child_name() == 'welcome'

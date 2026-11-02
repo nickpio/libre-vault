@@ -31,7 +31,7 @@ from .attachments import attachment_markdown, store_attachment
 from .reading import ReadingView
 from .navigation_ui import EditorNavigation
 from .navigation import Location, NavigationHistory
-from .workspace import WorkspaceStore
+from .workspace import LastVaultStore, WorkspaceStore
 
 
 CSS = Path(__file__).with_name('style.css').read_bytes()
@@ -638,6 +638,7 @@ class Window(Gtk.ApplicationWindow):
         self.preferences_store = PreferencesStore(preferences_path)
         self.preferences = self.preferences_store.load()
         self.workspace_store = WorkspaceStore(self.preferences_store.path)
+        self.last_vault_store = LastVaultStore(self.preferences_store.path)
         self.navigation_history = NavigationHistory()
         self.restoring_workspace = False
         self.split_pane = None
@@ -801,7 +802,14 @@ class Window(Gtk.ApplicationWindow):
         if folder:
             self.try_action(lambda: self.load_vault(folder))
         else:
-            self.open_vault_button.grab_focus()
+            last_vault = self.last_vault_store.load()
+            if last_vault:
+                try:
+                    self.load_vault(last_vault)
+                except (VaultError, OSError) as error:
+                    self.status.set_text(f'Last vault unavailable · {error}')
+            if self.vault is None:
+                self.open_vault_button.grab_focus()
 
     def icon_button(self, icon, tooltip, action):
         button = Gtk.Button.new_from_icon_name(icon, Gtk.IconSize.MENU)
@@ -894,14 +902,7 @@ class Window(Gtk.ApplicationWindow):
         if not self.confirm_panes(list(self.panes.values())):
             return
         self.persist_workspace()
-        if self.vault_monitor:
-            self.vault_monitor.close()
-        self.close_split()
-        while self.tabs.get_n_pages():
-            self.tabs.remove_page(0)
-        self.panes.clear()
-        if self.recovery:
-            self.recovery.close()
+        self.release_vault()
         self.vault = vault
         self.navigation_history = NavigationHistory()
         self.recovery = RecoveryStore(vault.root)
@@ -919,6 +920,58 @@ class Window(Gtk.ApplicationWindow):
             self.open_note(first)
         self.update_context()
         self.vault_monitor = VaultMonitor(vault, self.refresh, self.status.set_text)
+        try:
+            self.last_vault_store.save(vault.root)
+        except OSError as error:
+            self.status.set_text(f'Could not remember the opened vault: {error}')
+
+    def release_vault(self):
+        if self.vault_monitor:
+            self.vault_monitor.close()
+            self.vault_monitor = None
+        if self.reading_source is not None:
+            GLib.source_remove(self.reading_source)
+            self.reading_source = None
+        for source in self.scroll_restore_sources.values():
+            GLib.source_remove(source)
+        self.scroll_restore_sources.clear()
+        for overlay in (self.palette, self.quick_switcher):
+            if overlay is not None:
+                overlay.destroy()
+        self.close_split()
+        while self.tabs.get_n_pages():
+            pane = self.tabs.get_nth_page(0)
+            self.tabs.remove_page(0)
+            pane.destroy()
+        self.panes.clear()
+        if self.recovery:
+            self.recovery.close()
+            self.recovery = None
+
+    def close_vault(self, *_):
+        if self.vault is None:
+            return True
+        if not self.confirm_panes(list(self.panes.values())):
+            return False
+        try:
+            self.last_vault_store.save(None)
+        except OSError as error:
+            self.error(error)
+            return False
+        self.persist_workspace()
+        self.release_vault()
+        self.vault = None
+        self.navigation_history = NavigationHistory()
+        self.collapsed_folders.clear()
+        self.vault_label.set_text('No vault open')
+        self.set_title('Libre Vault')
+        self.search_entry.set_text('')
+        self.populate_files()
+        self.update_workspace_state()
+        self.update_context()
+        self.status.set_text('Open a vault folder to begin.')
+        self.open_vault_button.grab_focus()
+        return True
 
     def initialize_panel_widths(self, center, allocation):
         # The workspace can start hidden behind the welcome screen. Wait for
@@ -1088,6 +1141,10 @@ class Window(Gtk.ApplicationWindow):
         menu.append(Gtk.SeparatorMenuItem())
         item = Gtk.MenuItem(label='Open vault…')
         item.connect('activate', self.choose_vault)
+        menu.append(item)
+        item = Gtk.MenuItem(label='Close vault')
+        item.set_sensitive(self.vault is not None)
+        item.connect('activate', self.close_vault)
         menu.append(item)
         menu.connect('selection-done', lambda menu: menu.destroy())
         menu.show_all()

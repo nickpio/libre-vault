@@ -184,3 +184,91 @@ class WelcomeTests(unittest.TestCase):
         error.assert_called_once()
         self.assertIsNone(window.vault)
         self.assertEqual(window.workspace_stack.get_visible_child_name(), 'welcome')
+
+    def test_launch_reopens_last_vault_and_explicit_path_takes_precedence(self):
+        (self.root / 'Note.md').write_text('# Note\n')
+        self.window.load_vault(self.root)
+        self.window.destroy()
+        reopened = application.Window(self.app, preferences_path=self.preferences)
+        self.addCleanup(reopened.destroy)
+        self.assertEqual(reopened.vault.root, self.root)
+        self.assertEqual(reopened.current().note.path, 'Note.md')
+        other = Path(self.directory.name) / 'other'
+        other.mkdir()
+        explicit = application.Window(self.app, other, preferences_path=self.preferences)
+        self.addCleanup(explicit.destroy)
+        self.assertEqual(explicit.vault.root, other)
+        self.assertEqual(explicit.last_vault_store.load(), str(other))
+
+    def test_unavailable_last_vault_leaves_welcome_without_a_modal_error(self):
+        missing = self.root / 'missing'
+        self.window.last_vault_store.save(missing)
+        with patch.object(application.Window, 'error') as error:
+            window = application.Window(self.app, preferences_path=self.preferences)
+            self.addCleanup(window.destroy)
+        error.assert_not_called()
+        self.assertIsNone(window.vault)
+        self.assertEqual(window.workspace_stack.get_visible_child_name(), 'welcome')
+        self.assertIn('Last vault unavailable', window.status.get_text())
+        self.assertFalse(missing.exists())
+
+    def test_malformed_last_vault_is_ignored(self):
+        path = self.window.last_vault_store.path
+        path.parent.mkdir(parents=True)
+        for contents in ('broken json', '[]', '{"last_vault": []}', '{"last_vault": "relative"}'):
+            with self.subTest(contents=contents):
+                path.write_text(contents)
+                window = application.Window(self.app, preferences_path=self.preferences)
+                self.assertIsNone(window.vault)
+                window.destroy()
+
+    def test_close_vault_from_palette_returns_to_welcome_and_forgets_startup(self):
+        (self.root / 'Note.md').write_text('# Note\n')
+        self.window.load_vault(self.root)
+        pane = self.window.current()
+        monitor = self.window.vault_monitor
+        self.window.open_split(pane)
+        self.window.show_command_palette()
+        self.window.palette.search.set_text('close vault')
+        self.window.palette.run_selected()
+        self.assertIsNone(self.window.vault)
+        self.assertTrue(monitor.closed)
+        self.assertIsNone(self.window.recovery)
+        self.assertIsNone(self.window.split_view)
+        self.assertFalse(self.window.panes)
+        self.assertEqual(self.window.tabs.get_n_pages(), 0)
+        self.assertEqual(self.window.workspace_stack.get_visible_child_name(), 'welcome')
+        self.assertIsNone(self.window.last_vault_store.load())
+        self.assertEqual(self.window.workspace_store.load(self.root)['tabs'][0]['path'], 'Note.md')
+        reopened = application.Window(self.app, preferences_path=self.preferences)
+        self.addCleanup(reopened.destroy)
+        self.assertIsNone(reopened.vault)
+
+    def test_cancel_close_retains_dirty_note_and_last_vault(self):
+        (self.root / 'Note.md').write_text('# Note\n')
+        self.window.load_vault(self.root)
+        pane = self.window.current()
+        pane.buffer.insert_at_cursor('local change')
+        with patch.object(application.Gtk, 'MessageDialog') as dialog:
+            dialog.return_value.run.return_value = Gtk.ResponseType.CANCEL
+            self.assertFalse(self.window.close_vault())
+        self.assertIs(self.window.current(), pane)
+        self.assertTrue(pane.dirty)
+        self.assertEqual(self.window.last_vault_store.load(), str(self.root))
+
+    def test_discard_close_cancels_autosave_and_save_close_preserves_edits(self):
+        (self.root / 'Note.md').write_text('# Note\n')
+        self.window.load_vault(self.root)
+        pane = self.window.current()
+        pane.buffer.insert_at_cursor('discard this')
+        with patch.object(application.Gtk, 'MessageDialog') as dialog:
+            dialog.return_value.run.return_value = Gtk.ResponseType.NO
+            self.assertTrue(self.window.close_vault())
+        self.assertIsNone(pane.autosave_source)
+        self.assertEqual((self.root / 'Note.md').read_text(), '# Note\n')
+        self.window.load_vault(self.root)
+        self.window.current().buffer.insert_at_cursor('save this')
+        with patch.object(application.Gtk, 'MessageDialog') as dialog:
+            dialog.return_value.run.return_value = Gtk.ResponseType.YES
+            self.assertTrue(self.window.close_vault())
+        self.assertIn('save this', (self.root / 'Note.md').read_text())

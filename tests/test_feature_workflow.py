@@ -105,8 +105,7 @@ class FeatureWorkflowTests(unittest.TestCase):
 
             restored = Window(self.app, preferences_path=preferences)
             self.addCleanup(restored.destroy)
-            self.assertIsNone(restored.vault)
-            restored.load_vault(root)
+            self.assertEqual(restored.vault.root, root)
             self.settle()
             self.assertEqual([restored.tabs.get_nth_page(i).note.path for i in range(restored.tabs.get_n_pages())], expected_tabs)
             self.assertEqual(restored.current().note.path, destination)

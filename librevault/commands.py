@@ -49,6 +49,7 @@ class CommandPalette(Gtk.EventBox):
             actions.extend([('Quick switcher', owner.show_quick_switcher),
                             ('New note', owner.new_note), ('New folder', owner.new_folder),
                             ('Save note', owner.save_current), ('Close note', owner.close_tab),
+                            ('Close vault', owner.close_vault),
                             ('Navigate back', owner.navigate_back), ('Navigate forward', owner.navigate_forward),
                             ('Toggle split editor', owner.toggle_split),
                             ('Toggle file tree', owner.toggle_file_tree),

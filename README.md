@@ -18,7 +18,9 @@ Launch the app without opening a vault:
 ./run.sh
 ```
 
-The welcome screen offers **Open vault**. Press Ctrl+O or choose that button to select a vault or an empty folder. Settings and the command palette are available before a vault is opened. No folder is opened or created automatically.
+First launch shows the welcome screen with **Open vault**. Press Ctrl+O or choose that button to select a vault or an empty folder. Later launches reopen the last opened vault. If its folder is unavailable, the welcome screen remains available. Settings and the command palette also work before a vault is opened.
+
+Use **Close vault** in the explorer's right-click menu or the command palette to return to welcome. Unsaved notes offer Save, Discard, and Cancel. Closing a vault clears the startup choice, so the next launch stays on welcome until another vault is opened.
 
 To open the example vault directly:
 
@@ -72,7 +74,7 @@ The cheatsheet opens with search focused. Type a key combination, action, or sec
 
 The quick switcher matches note paths and frontmatter aliases. Type `[[` in an editor for note suggestions, then use Up/Down and Enter or Tab to complete the link. Ctrl-click an editor link to follow it. Following an unresolved note link offers to create the note. The command palette also exposes navigation, note creation, saving, settings, and panel controls.
 
-Opening a vault restores its tabs, cursor and scroll positions, collapsed folders, and split editor. A split shares the original note's source buffer and undo history. Keep one note in the split while selecting another tab to compare them. Workspace state is saved beside application settings in `workspaces.json`. Starting without a vault still opens the welcome screen.
+Opening a vault restores its tabs, cursor and scroll positions, collapsed folders, and split editor. A split shares the original note's source buffer and undo history. Keep one note in the split while selecting another tab to compare them. Workspace state is saved beside application settings in `workspaces.json`; `session.json` remembers which vault to reopen. An explicit vault argument takes precedence over the remembered vault.
 
 These shortcuts apply when the note editor has focus:
 
