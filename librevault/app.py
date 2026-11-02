@@ -19,6 +19,7 @@ from .formatting import markdown_layout
 from .editing import TextEdit, format_inline, list_enter, markdown_link
 from .history import BufferHistory
 from .findbar import FindBar
+from .graph_ui import GraphView
 from .filetree import tree_paths
 from .metadata import note_metadata, property_text, with_properties
 from .commands import CommandPalette, KeybindCheatsheet
@@ -691,6 +692,8 @@ class Window(Gtk.ApplicationWindow):
         self.palette = None
         self.cheatsheet = None
         self.settings_dialog = None
+        self.graph_window = None
+        self.graph_views = set()
         self.preferences_store = PreferencesStore(preferences_path)
         self.preferences = self.preferences_store.load()
         self.workspace_store = WorkspaceStore(self.preferences_store.path)
@@ -736,6 +739,7 @@ class Window(Gtk.ApplicationWindow):
         header.pack_end(self.details_toggle)
         self.save_button = self.icon_button('document-save-symbolic', 'Save note · Ctrl+S', self.save_current)
         header.pack_end(self.save_button)
+        header.pack_start(self.icon_button('view-grid-symbolic', 'Graph view · Ctrl+Alt+G', self.show_graph))
         header.pack_start(self.icon_button('go-previous-symbolic', 'Navigate back · Alt+Left', self.navigate_back))
         header.pack_start(self.icon_button('go-next-symbolic', 'Navigate forward · Alt+Right', self.navigate_forward))
         header.pack_end(self.icon_button('view-dual-symbolic', 'Toggle split editor · Ctrl+Shift+S', self.toggle_split))
@@ -802,9 +806,23 @@ class Window(Gtk.ApplicationWindow):
         files_scroll = scrolled(self.files, 212)
         files_scroll.connect('button-press-event', self.explorer_button_press)
         sidebar.pack_start(files_scroll, True, True, 0)
-        hint = Gtk.Label(label='Alt+P  Commands\nCtrl+O  Open vault\nCtrl+N  New note\nCtrl+S  Save\nCtrl+W  Close tab', xalign=0)
-        hint.get_style_context().add_class('shortcuts')
+        hint = Gtk.Button()
+        hint.get_style_context().add_class('sidebar-command')
         hint.set_margin_top(12)
+        hint.set_tooltip_text('Open command palette · Alt+P')
+        hint.get_accessible().set_name('Open command palette')
+        hint.connect('clicked', lambda *_: self.show_command_palette())
+        hint_content = Gtk.Box(spacing=8)
+        icon = Gtk.Image.new_from_icon_name('input-keyboard-symbolic', Gtk.IconSize.MENU)
+        icon.get_style_context().add_class('muted')
+        hint_content.pack_start(icon, False, False, 0)
+        label = Gtk.Label(label='Commands', xalign=0)
+        label.get_style_context().add_class('sidebar-command-label')
+        hint_content.pack_start(label, True, True, 0)
+        keys = Gtk.Label(label='Alt+P')
+        keys.get_style_context().add_class('keybind-keys')
+        hint_content.pack_end(keys, False, False, 0)
+        hint.add(hint_content)
         sidebar.pack_start(hint, False, False, 0)
         self.notes_panel = SlidingPanel(sidebar, layout, at_start=True)
         layout.pack1(self.notes_panel, False, False)
@@ -876,6 +894,8 @@ class Window(Gtk.ApplicationWindow):
         return button
 
     def cleanup(self, *_):
+        if self.graph_window:
+            self.graph_window.destroy()
         self.persist_workspace()
         if self.reading_source is not None:
             GLib.source_remove(self.reading_source)
@@ -985,6 +1005,8 @@ class Window(Gtk.ApplicationWindow):
             self.status.set_text(f'Could not remember the opened vault: {error}')
 
     def release_vault(self):
+        if self.graph_window:
+            self.graph_window.destroy()
         if self.vault_monitor:
             self.vault_monitor.close()
             self.vault_monitor = None
@@ -1438,11 +1460,16 @@ class Window(Gtk.ApplicationWindow):
             self.navigation_history.visit(Location(relative, cursor))
         return pane
 
-    def current(self):
-        if self.split_view is not None and self.get_focus() is self.split_view:
+    def active_page(self):
+        focus = self.get_focus()
+        if self.split_view is not None and focus and (focus is self.split_view or focus.is_ancestor(self.split_box)):
             return self.split_pane
-        index = self.tabs.get_current_page()
-        return self.tabs.get_nth_page(index) if index >= 0 else None
+        return self.tabs.get_nth_page(self.tabs.get_current_page()) if self.tabs.get_n_pages() else None
+
+    def current(self):
+        """The active note, if the focused workspace pane is a note editor."""
+        page = self.active_page()
+        return page if isinstance(page, NotePane) else None
 
     def save_current(self, *_):
         pane = self.current()
@@ -1450,9 +1477,13 @@ class Window(Gtk.ApplicationWindow):
             self.try_action(pane.save)
 
     def close_tab(self, *_):
-        self.close_note(self.current())
+        self.close_note(self.active_page())
 
     def close_note(self, pane):
+        if isinstance(pane, GraphView):
+            self.tabs.remove_page(self.tabs.page_num(pane))
+            self.update_context()
+            return
         if pane and self.confirm_panes([pane]):
             if pane is self.split_pane:
                 self.close_split()
@@ -1573,6 +1604,9 @@ class Window(Gtk.ApplicationWindow):
                 self.try_action(create)
 
     def update_context(self):
+        if self.vault:
+            for graph in tuple(self.graph_views):
+                graph.refresh_if_changed()
         self.outline_rows = []
         for child in self.context.get_children():
             child.destroy()
@@ -1734,6 +1768,48 @@ class Window(Gtk.ApplicationWindow):
                 if window.settings_dialog is not None:
                     window.settings_dialog.sync_controls()
 
+    def show_graph(self, *_, local=False):
+        if not self.vault:
+            return
+        if self.graph_window:
+            self.graph_window.destroy()
+        from .graph_ui import GraphWindow
+        self.graph_window = GraphWindow(self, local=local)
+
+    def show_graph_tab(self, *_, local=False, state=None):
+        if not self.vault:
+            return
+        self.remember_location()
+        graph = GraphView(self, local=local, state=state)
+        tab = Gtk.Box(spacing=6)
+        tab.pack_start(Gtk.Label(label='Local graph' if graph.local.get_active() else 'Graph'), True, True, 0)
+        close = self.icon_button('window-close-symbolic', 'Close graph tab · Ctrl+W',
+                                 lambda *_: self.close_note(graph))
+        close.set_focus_on_click(False)
+        tab.pack_end(close, False, False, 0)
+        tab.show_all()
+        self.tabs.append_page(graph, tab)
+        self.tabs.set_current_page(self.tabs.page_num(graph))
+        graph.canvas.grab_focus()
+        self.update_context()
+        return graph
+
+    def show_local_graph_tab(self, *_):
+        return self.show_graph_tab(local=True)
+
+    def open_graph_note(self, graph, path):
+        # Keep a graph in the main tab visible when its companion is a note.
+        beside_graph = self.tabs.page_num(graph) >= 0 and isinstance(self.split_pane, NotePane)
+        pane = self.open_note(path)
+        if pane and beside_graph:
+            self.open_split(pane)
+            self.tabs.set_current_page(self.tabs.page_num(graph))
+            self.split_view.grab_focus()
+            self.update_context()
+
+    def show_local_graph(self, *_):
+        self.show_graph(local=True)
+
     def show_settings(self, *_):
         if self.settings_dialog is None:
             self.settings_dialog = SettingsDialog(self)
@@ -1772,6 +1848,10 @@ class Window(Gtk.ApplicationWindow):
             self.navigation_history.update(Location(pane.note.path, cursor))
 
     def tab_switched(self, _, pane, index):
+        if isinstance(pane, GraphView):
+            self.note_toolbars.hide()
+            GLib.idle_add(self.update_context)
+            return
         self.note_toolbars.set_visible_child(pane.toolbar)
         self.note_toolbars.show()
         self.remember_location()
@@ -1781,9 +1861,9 @@ class Window(Gtk.ApplicationWindow):
         GLib.idle_add(self.update_context)
 
     def tab_removed(self, notebook, pane, index):
-        if pane.toolbar.get_parent() is self.note_toolbars:
+        if isinstance(pane, NotePane) and pane.toolbar.get_parent() is self.note_toolbars:
             self.note_toolbars.remove(pane.toolbar)
-        self.note_toolbars.set_visible(notebook.get_n_pages() > 0)
+        self.note_toolbars.set_visible(isinstance(notebook.get_nth_page(notebook.get_current_page()), NotePane))
         if pane is self.split_pane:
             self.close_split()
         source = self.scroll_restore_sources.pop(pane, None)
@@ -1822,7 +1902,7 @@ class Window(Gtk.ApplicationWindow):
         if self.split_view is not None:
             self.close_split()
             return
-        pane = self.current()
+        pane = self.active_page()
         if pane:
             self.open_split(pane)
 
@@ -1831,11 +1911,16 @@ class Window(Gtk.ApplicationWindow):
         self.close_split()
         self.split_pane = pane
         bar = Gtk.Box(spacing=6)
-        title = Gtk.Label(label=pane.note.path, xalign=0)
+        title = Gtk.Label(label='Graph' if isinstance(pane, GraphView) else pane.note.path, xalign=0)
         title.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
         bar.pack_start(title, True, True, 8)
         bar.pack_end(self.icon_button('window-close-symbolic', 'Close split editor', self.close_split), False, False, 0)
         self.split_box.pack_start(bar, False, False, 0)
+        if isinstance(pane, GraphView):
+            self.split_view = GraphView(self, state=pane.snapshot())
+            self.split_box.pack_start(self.split_view, True, True, 0)
+            self.show_split()
+            return
         self.split_view = SplitTextView(pane)
         self.split_view.connect('key-press-event', self.split_key_press)
         self.split_view.connect('copy-clipboard', pane.copy_selection)
@@ -1850,6 +1935,9 @@ class Window(Gtk.ApplicationWindow):
         split_scroll.get_vadjustment().connect('value-changed', self.split_view.queue_sync)
         split_scroll.get_hadjustment().connect('value-changed', self.split_view.queue_sync)
         self.split_box.pack_start(split_scroll, True, True, 0)
+        self.show_split()
+
+    def show_split(self):
         self.split_box.set_no_show_all(False)
         self.split_box.show_all()
         self.split_box.set_no_show_all(True)
@@ -1866,9 +1954,9 @@ class Window(Gtk.ApplicationWindow):
 
     def remap_navigation(self, mapping, deleted=()):
         self.navigation_history.remap(mapping, deleted)
-        if self.split_pane and self.split_pane.note.path in deleted:
+        if isinstance(self.split_pane, NotePane) and self.split_pane.note.path in deleted:
             self.close_split()
-        elif self.split_pane:
+        elif isinstance(self.split_pane, NotePane):
             self.open_split(self.split_pane)
         self.persist_workspace()
 
@@ -1878,14 +1966,20 @@ class Window(Gtk.ApplicationWindow):
         pages = []
         for index in range(self.tabs.get_n_pages()):
             pane = self.tabs.get_nth_page(index)
+            if isinstance(pane, GraphView):
+                pages.append(pane.snapshot())
+                continue
             pages.append({'path': pane.note.path,
                           'cursor': pane.buffer.get_iter_at_mark(pane.buffer.get_insert()).get_offset(),
                           'scroll': pane.scroll.get_vadjustment().get_value()})
         index = self.tabs.get_current_page()
         active = self.tabs.get_nth_page(index) if index >= 0 else None
-        state = {'tabs': pages, 'active': active.note.path if active else None,
+        active_key = {'graph': active.workspace_id} if isinstance(active, GraphView) else active.note.path if active else None
+        split_key = ({'graph': self.split_pane.workspace_id, 'state': self.split_view.snapshot()}
+                     if isinstance(self.split_pane, GraphView) else self.split_pane.note.path if self.split_pane else None)
+        state = {'tabs': pages, 'active': active_key,
                  'collapsed_folders': sorted(self.collapsed_folders),
-                 'split': self.split_pane.note.path if self.split_pane else None}
+                 'split': split_key}
         try:
             self.workspace_store.save(self.vault.root, state)
         except OSError as error:
@@ -1899,7 +1993,12 @@ class Window(Gtk.ApplicationWindow):
             return False
         self.restoring_workspace = True
         try:
+            graphs = {}
             for saved in pages:
+                if isinstance(saved, dict) and saved.get('kind') == 'graph':
+                    graph = self.show_graph_tab(state=saved)
+                    graphs[graph.workspace_id] = graph
+                    continue
                 if (not isinstance(saved, dict) or not isinstance(saved.get('path'), str)
                         or saved['path'] not in self.vault.notes):
                     continue
@@ -1918,12 +2017,18 @@ class Window(Gtk.ApplicationWindow):
             active = state.get('active')
             if isinstance(active, str) and active in self.panes:
                 self.open_note(active)
+            if isinstance(active, dict) and isinstance(active.get('graph'), str) and active['graph'] in graphs:
+                self.tabs.set_current_page(self.tabs.page_num(graphs[active['graph']]))
             folders = state.get('collapsed_folders', [])
             if isinstance(folders, list):
                 self.collapsed_folders = {path for path in folders if isinstance(path, str) and path in self.vault.folders}
             split = state.get('split')
             if isinstance(split, str) and split in self.panes:
                 self.open_split(self.panes[split])
+            elif isinstance(split, dict) and isinstance(split.get('graph'), str) and split['graph'] in graphs:
+                self.open_split(graphs[split['graph']])
+                if isinstance(split.get('state'), dict):
+                    self.split_view.restore_state(split['state'])
         finally:
             self.restoring_workspace = False
         self.populate_files()

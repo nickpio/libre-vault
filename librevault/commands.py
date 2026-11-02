@@ -48,7 +48,11 @@ class CommandPalette(Gtk.EventBox):
         actions = [('Open keybind cheatsheet', owner.show_keybinds),
                    ('Open vault', owner.choose_vault), ('Open settings', owner.show_settings)]
         if owner.vault:
-            actions.extend([('Quick switcher', owner.show_quick_switcher),
+            actions.extend([('Open graph in tab', owner.show_graph_tab),
+                            ('Open local graph in tab', owner.show_local_graph_tab),
+                            ('Graph view', owner.show_graph),
+                            ('Local graph', owner.show_local_graph),
+                            ('Quick switcher', owner.show_quick_switcher),
                             ('New note', owner.new_note), ('New folder', owner.new_folder),
                             ('Save note', owner.save_current), ('Close note', owner.close_tab),
                             ('Close vault', owner.close_vault),

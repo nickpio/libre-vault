@@ -122,6 +122,18 @@ Search shows saved-note snippets with highlighted matches. Plain words match pat
 
 The details panel displays tags, aliases, and properties. **Edit properties** edits YAML frontmatter as one undoable action. Tags come from frontmatter lists or inline `#tags`, including nested tags. Aliases participate in link resolution and the quick switcher; ambiguous names still require a choice.
 
+## Graph view
+
+Open **Graph view** from the header, command palette, or Ctrl+Alt+G. Notes appear as nodes sized by their number of connections. Hover to highlight neighbors and see the full path; click to open a note. Drag the background to pan, drag a node to place it, scroll to zoom around the pointer, and use **Fit** to frame the graph.
+
+**Open graph in tab** in the command palette opens a workspace tab. You can also choose **Open as tab** in a floating graph window. With the graph tab selected, press Ctrl+Shift+S or use the split-view button, then select a note in the main tabs. The graph stays in the split while you work. Clicking a node opens its note beside the graph. You can also split a note first and keep the graph in the main tab. Graph tabs, filters, local depth, and split placement are restored when the vault reopens. Hidden graph tabs stop their layout workers and defer updates until visible. Close a graph tab with its close button or Ctrl+W.
+
+**Open local graph in tab** and **Local graph** in the command palette show the active note's neighborhood. Set depth from one to five links. The graph's local root stays fixed to the note active when the window opened. Search filters paths and aliases by words; turn off **Orphans** to hide notes without connections. Arrow keys select notes, Enter opens the selected note, plus/minus zoom, F fits, and Escape closes a floating graph window.
+
+The graph uses saved, unambiguous note links, including note embeds. Duplicate links are merged; self-links, unresolved targets, attachments, and external URLs are omitted. Saving or refreshing the vault updates an open graph. **Refresh** rebuilds and rearranges it manually. Tag nodes, custom color groups, and Obsidian's full graph filter syntax are not implemented.
+
+A separate process reads only indexed paths, aliases, and links and computes the layout. Crowded spatial cells use aggregate repulsion, avoiding all-pairs calculations. Layout has an eight-second work window and a 160-step limit, then releases the worker. Dragging freezes the layout. The canvas limits labels to 150 plus the focused note, skips offscreen drawing, and redraws only for layout or interaction changes. Large graphs may need zooming or local filtering to inspect comfortably.
+
 ## Prototype limits
 
 Start with the example vault or a copy of a small vault. Recovery keeps the latest unsaved draft, not a history of saved versions. Save checks reduce accidental overwrites but cannot lock out unrelated programs. A narrow race remains between the final comparison and atomic replacement. Hard links, extended attributes, file ownership, and arbitrary mixed line endings are not preserved as a compatibility contract.
@@ -130,7 +142,7 @@ Live formatting handles a subset of CommonMark; richer media and block rendering
 
 Symbolic links, dotfiles, and hidden folders are excluded from browsing. Non-UTF-8 files remain unchanged and report an error when opened. Link resolution is case-sensitive and reports ambiguous basenames and aliases.
 
-Graph, canvas, unlinked mentions, saved-version history, full search syntax, plugins, sync, mobile support, and distribution packaging remain unimplemented. Filesystem notifications update changed notes and directory subtrees without periodic full-vault reads. Initial indexing, explicit rescans, and multi-file organization operations still scan the vault; large-vault latency has not been optimized. Multi-file moves use revision checks and rollback after ordinary failures; they are not a crash-atomic filesystem transaction. Interrupted moves retain original rewritten-note bytes and a manifest under `.trash/.librevault-moves` for manual recovery.
+Canvas, unlinked mentions, saved-version history, full search syntax, plugins, sync, mobile support, and distribution packaging remain unimplemented. Filesystem notifications update changed notes and directory subtrees without periodic full-vault reads. Initial indexing, explicit rescans, and multi-file organization operations still scan the vault; large-vault latency has not been optimized. Multi-file moves use revision checks and rollback after ordinary failures; they are not a crash-atomic filesystem transaction. Interrupted moves retain original rewritten-note bytes and a manifest under `.trash/.librevault-moves` for manual recovery.
 
 See [the compatibility target](docs/compatibility.md) and [the architecture decisions](docs/architecture.md).
 

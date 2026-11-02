@@ -90,7 +90,14 @@ list row:selected { background: @selected; color: @bright; }
 .welcome-title { color: @bright; font-size: 22pt; font-weight: bold; }
 .welcome-open { padding: 10px 24px; }
 .welcome-hint { color: @muted; font-size: 9pt; }
-.shortcuts { color: @muted; font-size: 8pt; padding: 12px 6px 4px; }
+button.sidebar-command {
+    background: transparent;
+    border: 1px solid @edge;
+    border-radius: 8px;
+    padding: 8px;
+}
+button.sidebar-command:hover { background: @hover; border-color: @border; }
+.sidebar-command-label { color: @muted; font-size: 9pt; }
 frame.command-palette {
     background: @canvas;
     border: 1px solid @edge;
