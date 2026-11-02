@@ -10,7 +10,7 @@ from urllib.parse import unquote
 import gi
 
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, Gdk, Gio, GLib, Pango
+from gi.repository import Gtk, Gdk, GdkPixbuf, Gio, GLib, Pango
 
 from .vault import Vault, VaultError, links
 from .monitor import VaultMonitor
@@ -27,7 +27,7 @@ from .settings import SettingsDialog
 from .preferences import PreferencesStore
 from .appearance import PALETTES, stylesheet
 from .panels import SlidingPanel
-from .attachments import attachment_markdown, store_attachment
+from .attachments import attachment_markdown, local_path, store_attachment
 from .reading import ReadingView
 from .navigation_ui import EditorNavigation
 from .navigation import Location, NavigationHistory
@@ -65,6 +65,7 @@ class NotePane(Gtk.Box):
         self.headings = []
         self.list_tags = {}
         self.list_widgets = []
+        self.image_widgets = []
         self.position_source = None
         self.mode = 'live'
         self.buffer = text_buffer(note.text.replace('\r\n', '\n'))
@@ -160,7 +161,18 @@ class NotePane(Gtk.Box):
             start, end = (it.get_offset() for it in selection)
         else:
             start = end = self.buffer.get_iter_at_mark(self.buffer.get_insert()).get_offset()
-        self.apply_edit(TextEdit(start, end, attachment_markdown(target)))
+        markup = attachment_markdown(target)
+        if markup.startswith('!'):
+            text = self.text()
+            line_start = text.rfind('\n', 0, start) + 1
+            line_end = text.find('\n', end)
+            if line_end < 0:
+                line_end = len(text)
+            if text[line_start:start].strip():
+                markup = '\n' + markup
+            if text[end:line_end].strip():
+                markup += '\n'
+        self.apply_edit(TextEdit(start, end, markup))
         return relative
 
     def choose_attachment(self):
@@ -357,11 +369,15 @@ class NotePane(Gtk.Box):
             self.spans, self.items, self.headings = layout.spans, layout.items, layout.headings
             self.formatted_text = text
             self.rebuild_list_widgets()
+            self.rebuild_image_widgets(layout.images)
         start, end = self.buffer.get_bounds()
-        for tag in [*self.tags.values(), *self.list_tags.values(), self.hidden]:
+        for tag in [*self.tags.values(), *self.list_tags.values(), self.hidden,
+                    *(entry[3] for entry in self.image_widgets)]:
             self.buffer.remove_tag(tag, start, end)
         if self.mode == 'source':
             for _, widget in self.list_widgets:
+                widget.hide()
+            for _, _, widget, tag in self.image_widgets:
                 widget.hide()
             return
         if self.mode == 'reading':
@@ -399,7 +415,39 @@ class NotePane(Gtk.Box):
                 line_end = text.find('\n', item.content_start)
                 stop = len(text) if line_end < 0 else line_end
                 self.buffer.apply_tag(self.tags['completed'], content, self.buffer.get_iter_at_offset(stop))
+        for image_start, image_end, widget, tag in self.image_widgets:
+            editing_image = image_start <= cursor < image_end
+            in_selection = selected and image_start < selected[1] and image_end > selected[0]
+            visible = self.mode == 'live' and not editing_image and not in_selection
+            widget.set_visible(bool(visible))
+            if visible:
+                left = self.buffer.get_iter_at_offset(image_start)
+                right = self.buffer.get_iter_at_offset(image_end)
+                self.buffer.apply_tag(self.hidden, left, right)
+                self.buffer.apply_tag(tag, left, right)
         self.queue_positions()
+
+    def rebuild_image_widgets(self, images):
+        for _, _, widget, tag in self.image_widgets:
+            widget.destroy()
+            self.buffer.get_tag_table().remove(tag)
+        self.image_widgets.clear()
+        for start, end, target in images:
+            try:
+                path = local_path(self.window.vault, self.note.path, target)
+                info = GdkPixbuf.Pixbuf.get_file_info(str(path))
+                if not info or not info[1] or not info[2]:
+                    continue
+                scale = min(1, 600 / info[1], 360 / info[2])
+                pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(
+                    str(path), max(1, int(info[1] * scale)), max(1, int(info[2] * scale)), True)
+            except (OSError, GLib.Error, VaultError):
+                continue
+            widget = Gtk.Image.new_from_pixbuf(pixbuf)
+            widget.set_tooltip_text('Place the cursor inside the image Markdown to edit it')
+            self.editor.add_child_in_window(widget, Gtk.TextWindowType.WIDGET, 0, 0)
+            tag = self.buffer.create_tag(None, pixels_above_lines=pixbuf.get_height() + 8)
+            self.image_widgets.append((start, end, widget, tag))
 
     def rebuild_list_widgets(self):
         focused = next((item.task_offset for item, widget in self.list_widgets if widget.has_focus()), None)
@@ -471,6 +519,14 @@ class NotePane(Gtk.Box):
             y += (rect.height - height) // 2
             widget.set_child_visible(y >= 0 and y + height <= self.editor.get_allocated_height())
             self.editor.move_child(widget, x - width - 8, y)
+        for start, _, widget, _ in self.image_widgets:
+            if not widget.get_visible():
+                continue
+            position = self.buffer.get_iter_at_offset(start)
+            rect = self.editor.get_iter_location(position)
+            x, y = self.editor.buffer_to_window_coords(Gtk.TextWindowType.WIDGET, rect.x, rect.y)
+            height = widget.get_preferred_height().natural_height
+            self.editor.move_child(widget, x, y - height - 4)
         return False
 
     def save(self):

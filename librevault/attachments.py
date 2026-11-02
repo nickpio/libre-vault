@@ -29,7 +29,7 @@ def local_path(vault, source, target):
 
 
 def store_attachment(vault, name, data):
-    """Copy bytes into a visible attachments directory without overwriting."""
+    """Reuse matching attachment bytes or copy them without overwriting."""
     name = Path(name).name
     name = re.sub(r'[\x00-\x1f/\\]', '_', name).lstrip('.') or 'attachment'
     directory = vault._visible_path('attachments')
@@ -37,6 +37,26 @@ def store_attachment(vault, name, data):
     if not directory.is_dir():
         raise VaultError('The attachments path is not a folder.')
     original = Path(name)
+    # Compare only the same extension so the reused file keeps its display and
+    # open behavior. Skip symlinks and unreadable entries in the vault.
+    for candidate in sorted(directory.iterdir()):
+        if candidate.name.startswith('.') or candidate.suffix.lower() != original.suffix.lower():
+            continue
+        try:
+            path = vault._visible_path('attachments/' + candidate.name)
+            if not path.is_file() or path.stat().st_size != len(data):
+                continue
+            with path.open('rb') as handle:
+                offset = 0
+                while offset < len(data):
+                    chunk = handle.read(min(65536, len(data) - offset))
+                    if not chunk or chunk != data[offset:offset + len(chunk)]:
+                        break
+                    offset += len(chunk)
+                if offset == len(data) and not handle.read(1):
+                    return path.relative_to(vault.root).as_posix()
+        except (OSError, VaultError):
+            continue
     for number in range(10000):
         filename = name if number == 0 else f'{original.stem} {number}{original.suffix}'
         path = vault._visible_path('attachments/' + filename)
