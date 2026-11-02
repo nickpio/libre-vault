@@ -47,6 +47,7 @@ Your notes stay ordinary `.md` files in ordinary folders. No accounts, no lock-i
 [**Graph**](#graph-view) &nbsp;&middot;&nbsp;
 [**Architecture**](#architecture) &nbsp;&middot;&nbsp;
 [**Roadmap**](#roadmap) &nbsp;&middot;&nbsp;
+[**Development**](#development) &nbsp;&middot;&nbsp;
 [**Testing**](#testing) &nbsp;&middot;&nbsp;
 [**License**](#license)
 
@@ -175,11 +176,11 @@ Edit YAML frontmatter as a single undoable action. Tags from frontmatter or inli
 
 ## Installation
 
-Build a **standalone executable** or an **AppImage** from a git checkout, or run the Python source directly with `run.sh`. Prebuilt AppImage releases are not published yet.
+Build a **standalone executable** or an **AppImage** from a git checkout. Prebuilt AppImage releases are not published yet. To work on the application, see [Development](#development) for running directly from a checkout.
 
 <table>
 <tr>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 <h3>AppImage</h3>
 
@@ -188,22 +189,13 @@ Build a **standalone executable** or an **AppImage** from a git checkout, or run
 **Main distribution method.** One self-contained file with Python, GTK, and every dependency bundled. Download, mark it executable, and run it. No root access and no system packages.
 
 </td>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 <h3>Build from source</h3>
 
 ![](https://img.shields.io/badge/-available%20now-2ea44f?style=flat-square)
 
 **For packagers and contributors.** Build the same standalone executable, or the AppImage itself, from a git checkout using your own toolchain.
-
-</td>
-<td width="33%" valign="top">
-
-<h3>Run from source</h3>
-
-![](https://img.shields.io/badge/-available%20now-2ea44f?style=flat-square)
-
-Install the dependencies from your distribution and start the app with `./run.sh`. No build step.
 
 </td>
 </tr>
@@ -226,7 +218,7 @@ The AppImage will keep the same startup behavior and storage locations as runnin
 
 ### Build from source
 
-On Linux, install the [runtime dependencies](#2-install-dependencies), Python's `venv` and `pip` tools, and `binutils` from your distribution. Include the PyGObject Cairo bridge, provided by `python3-gi-cairo` on Debian/Ubuntu or `python-cairo` on Arch. Debian/Ubuntu also need `python3-venv` for the environment below.
+On Linux, install the [runtime dependencies](#install-dependencies), Python's `venv` and `pip` tools, and `binutils` from your distribution. Include the PyGObject Cairo bridge, provided by `python3-gi-cairo` on Debian/Ubuntu or `python-cairo` on Arch. Debian/Ubuntu also need `python3-venv` for the environment below.
 
 From the checkout root, create a build environment that can access your distribution's GTK bindings:
 
@@ -265,73 +257,6 @@ Verify the actual executable with an isolated GUI smoke test:
 ```
 
 This copies the artifact outside the checkout, clears `PYTHONPATH`, and checks GTK startup, editing and saving, YAML aliases, Cairo, math rendering, image loading, and a spawned graph worker. It follows the background-display rules in [Testing](#testing).
-
-### Run from source
-
-#### 1. Requirements
-
-| Dependency | Version | Purpose |
-| --- | --- | --- |
-| Python | 3.10+ | Runtime |
-| GTK 3 + PyGObject | PyGObject 3.42+ | Native user interface |
-| markdown-it-py | 3.x - 4.x | Markdown parsing |
-| PyYAML | 6.x | Frontmatter and properties |
-| Matplotlib | 3.6+ | Math rendering (mathtext) |
-| Poppler GLib | optional | Inline PDF page previews |
-
-#### 2. Install dependencies
-
-<details open>
-<summary><b>Debian / Ubuntu</b></summary>
-
-```sh
-sudo apt install python3-gi gir1.2-gtk-3.0 python3-markdown-it python3-yaml python3-matplotlib gir1.2-poppler-0.18
-```
-
-</details>
-
-<details>
-<summary><b>Arch Linux</b></summary>
-
-```sh
-sudo pacman -S python-gobject gtk3 python-markdown-it-py python-yaml python-matplotlib poppler-glib
-```
-
-</details>
-
-<details>
-<summary><b>Fedora</b></summary>
-
-```sh
-sudo dnf install python3-gobject gtk3 python3-markdown-it-py python3-pyyaml python3-matplotlib poppler-glib
-```
-
-</details>
-
-<details>
-<summary><b>pip (Python packages only)</b></summary>
-
-GTK 3 itself and its GObject introspection data must still come from your distribution.
-
-```sh
-python3 -m pip install -r requirements.txt
-```
-
-</details>
-
-#### 3. Clone and run
-
-```sh
-git clone https://github.com/nickpio/libre-vault.git
-cd libre-vault
-
-./run.sh                  # open the welcome screen (or the last vault)
-./run.sh example-vault    # open the bundled example vault
-./run.sh /path/to/vault   # open any existing vault folder
-```
-
-> [!TIP]
-> `run.sh` works from any directory and resolves relative vault paths from your current location. The equivalent Python entry point is `python3 -m librevault [vault]`.
 
 <p align="right"><a href="#top">back to top</a></p>
 
@@ -699,6 +624,77 @@ The full matrix and acceptance gates live in [**docs/compatibility.md**](docs/co
 - **Not yet built.** Canvas, unlinked mentions, saved-version history, full search syntax, plugins, sync, mobile support, and published AppImage releases.
 
 </details>
+
+<p align="right"><a href="#top">back to top</a></p>
+
+## Development
+
+Run directly from a checkout while developing Libre Vault. Restart after editing Python or CSS files to see your changes; no executable rebuild is needed.
+
+### Runtime requirements
+
+| Dependency | Version | Purpose |
+| --- | --- | --- |
+| Python | 3.10+ | Runtime |
+| GTK 3 + PyGObject | PyGObject 3.42+ | Native user interface |
+| markdown-it-py | 3.x - 4.x | Markdown parsing |
+| PyYAML | 6.x | Frontmatter and properties |
+| Matplotlib | 3.6+ | Math rendering (mathtext) |
+| Poppler GLib | optional | Inline PDF page previews |
+
+### Install dependencies
+
+<details open>
+<summary><b>Debian / Ubuntu</b></summary>
+
+```sh
+sudo apt install python3-gi gir1.2-gtk-3.0 python3-markdown-it python3-yaml python3-matplotlib gir1.2-poppler-0.18
+```
+
+</details>
+
+<details>
+<summary><b>Arch Linux</b></summary>
+
+```sh
+sudo pacman -S python-gobject gtk3 python-markdown-it-py python-yaml python-matplotlib poppler-glib
+```
+
+</details>
+
+<details>
+<summary><b>Fedora</b></summary>
+
+```sh
+sudo dnf install python3-gobject gtk3 python3-markdown-it-py python3-pyyaml python3-matplotlib poppler-glib
+```
+
+</details>
+
+<details>
+<summary><b>pip (Python packages only)</b></summary>
+
+GTK 3 itself and its GObject introspection data must still come from your distribution.
+
+```sh
+python3 -m pip install -r requirements.txt
+```
+
+</details>
+
+### Run from source
+
+```sh
+git clone https://github.com/nickpio/libre-vault.git
+cd libre-vault
+
+./run.sh                  # open the welcome screen (or the last vault)
+./run.sh example-vault    # open the bundled example vault
+./run.sh /path/to/vault   # open any existing vault folder
+```
+
+> [!TIP]
+> `run.sh` works from any directory and resolves relative vault paths from your current location. The equivalent Python entry point is `python3 -m librevault [vault]`.
 
 <p align="right"><a href="#top">back to top</a></p>
 
