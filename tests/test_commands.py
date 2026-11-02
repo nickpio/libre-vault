@@ -210,8 +210,10 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(len(sheet.visible_rows()), 1)
         self.assertIn('Ctrl+S', sheet.visible_rows()[0].get_accessible().get_name())
         sheet.search.set_text('Ctrl+O')
-        self.assertEqual(len(sheet.visible_rows()), 1)
-        self.assertIn('Open a vault', sheet.visible_rows()[0].get_accessible().get_name())
+        matches = [row.get_accessible().get_name() for row in sheet.visible_rows()]
+        self.assertEqual(len(matches), 2)
+        self.assertTrue(any('Open a vault' in name for name in matches))
+        self.assertTrue(any('Quick switcher' in name for name in matches))
         sheet.search.set_text('FILE explorer')
         self.assertGreater(len(sheet.visible_rows()), 1)
         self.assertEqual([row.get_header().get_text() for row in sheet.visible_rows() if row.get_header()],

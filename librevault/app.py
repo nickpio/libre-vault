@@ -2,24 +2,35 @@
 from __future__ import annotations
 
 import argparse
+import math
+import posixpath
 from pathlib import Path
 import re
 from urllib.parse import unquote
 import gi
 
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, Gdk, GLib, Pango
+from gi.repository import Gtk, Gdk, Gio, GLib, Pango
 
 from .vault import Vault, VaultError, links
+from .recovery import RecoveryStore
 from .formatting import markdown_layout
-from .editing import list_enter
+from .editing import TextEdit, format_inline, list_enter, markdown_link
+from .history import BufferHistory
+from .findbar import FindBar
 from .filetree import tree_paths
+from .metadata import note_metadata, property_text, with_properties
 from .commands import CommandPalette, KeybindCheatsheet
-from .shortcuts import APP_SHORTCUTS
+from .shortcuts import APP_SHORTCUTS, EDITOR_SHORTCUTS
 from .settings import SettingsDialog
 from .preferences import PreferencesStore
 from .appearance import PALETTES, stylesheet
 from .panels import SlidingPanel
+from .attachments import attachment_markdown, store_attachment
+from .reading import ReadingView
+from .navigation_ui import EditorNavigation
+from .navigation import Location, NavigationHistory
+from .workspace import WorkspaceStore
 
 
 CSS = Path(__file__).with_name('style.css').read_bytes()
@@ -45,6 +56,7 @@ class NotePane(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.window, self.note = window, note
         self.dirty = False
+        self.autosave_source = None
         self.format_source = None
         self.formatted_text = None
         self.spans = []
@@ -53,6 +65,7 @@ class NotePane(Gtk.Box):
         self.list_tags = {}
         self.list_widgets = []
         self.position_source = None
+        self.mode = 'live'
         self.buffer = text_buffer(note.text.replace('\r\n', '\n'))
         self.tags = {
             'strong': self.buffer.create_tag(None, weight=Pango.Weight.BOLD),
@@ -84,16 +97,106 @@ class NotePane(Gtk.Box):
         self.editor.connect('copy-clipboard', self.copy_selection)
         self.editor.connect('cut-clipboard', self.cut_selection)
         self.editor.connect('key-press-event', self.editor_key_press)
+        self.editor.connect('populate-popup', self.populate_edit_menu)
+        self.editor.connect('paste-clipboard', self.paste_attachment)
+        self.editor.drag_dest_set(Gtk.DestDefaults.ALL,
+                                  [Gtk.TargetEntry.new('text/uri-list', 0, 1)], Gdk.DragAction.COPY)
+        self.editor.connect('drag-data-received', self.drop_attachments)
         self.scroll = scrolled(self.editor)
         self.scroll.get_vadjustment().connect('value-changed', self.queue_positions)
         self.scroll.get_hadjustment().connect('value-changed', self.queue_positions)
-        self.pack_start(self.scroll, True, True, 0)
+        self.content_stack = Gtk.Stack()
+        self.content_stack.add_named(self.scroll, 'editor')
+        self.reading = ReadingView(self)
+        self.content_stack.add_named(self.reading, 'reading')
+        self.pack_start(self.content_stack, True, True, 0)
+        toolbar = self.toolbar = Gtk.Box(spacing=8)
+        toolbar.set_border_width(6)
+        mode = self.mode_selector = Gtk.ComboBoxText()
+        for value, title in [('live', 'Live preview'), ('source', 'Source'), ('reading', 'Reading')]:
+            mode.append(value, title)
+        mode.set_active_id('live')
+        mode.connect('changed', lambda field: self.set_mode(field.get_active_id()))
+        mode.get_accessible().set_name('Note view mode')
+        toolbar.pack_start(mode, False, False, 0)
+        attach = Gtk.Button.new_from_icon_name('mail-attachment-symbolic', Gtk.IconSize.BUTTON)
+        attach.set_tooltip_text('Insert attachment')
+        attach.connect('clicked', lambda *_: self.choose_attachment())
+        toolbar.pack_end(attach, False, False, 0)
         self.tab_label = Gtk.Label(label=Path(note.path).stem)
-        self.buffer.connect('changed', self.changed)
-        self.buffer.connect('mark-set', self.cursor_moved)
+        self.history = BufferHistory(self.buffer)
+        self.findbar = FindBar(self)
+        self.pack_start(self.findbar, False, False, 0)
+        self.reorder_child(self.findbar, 0)
+        self.buffer_handlers = [self.buffer.connect('changed', self.changed),
+                                self.buffer.connect('mark-set', self.cursor_moved)]
         self.connect('destroy', self.cleanup)
         self.apply_preferences()
         self.render()
+        self.navigation = EditorNavigation(self)
+
+    def set_mode(self, mode):
+        if mode not in ('live', 'source', 'reading'):
+            return
+        self.mode = mode
+        if self.mode_selector.get_active_id() != mode:
+            self.mode_selector.set_active_id(mode)
+        self.content_stack.set_visible_child_name('reading' if mode == 'reading' else 'editor')
+        self.render()
+        if mode == 'reading':
+            self.findbar.close()
+            self.reading.refresh(force=True)
+        else:
+            self.reading.clear()
+            self.editor.grab_focus()
+
+    def insert_attachment_bytes(self, name, data):
+        relative = store_attachment(self.window.vault, name, data)
+        import posixpath
+        target = posixpath.relpath(relative, str(Path(self.note.path).parent))
+        selection = self.buffer.get_selection_bounds()
+        if selection:
+            start, end = (it.get_offset() for it in selection)
+        else:
+            start = end = self.buffer.get_iter_at_mark(self.buffer.get_insert()).get_offset()
+        self.apply_edit(TextEdit(start, end, attachment_markdown(target)))
+        return relative
+
+    def choose_attachment(self):
+        dialog = Gtk.FileChooserDialog(title='Insert attachment', transient_for=self.window,
+                                       action=Gtk.FileChooserAction.OPEN)
+        dialog.add_buttons('Cancel', Gtk.ResponseType.CANCEL, 'Insert', Gtk.ResponseType.OK)
+        try:
+            if dialog.run() == Gtk.ResponseType.OK:
+                path = Path(dialog.get_filename())
+                self.window.try_action(lambda: self.insert_attachment_bytes(path.name, path.read_bytes()))
+        finally:
+            dialog.destroy()
+
+    def paste_attachment(self, view):
+        clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+        image = clipboard.wait_for_image()
+        if image is None:
+            return
+        view.stop_emission_by_name('paste-clipboard')
+        success, data = image.save_to_bufferv('png', [], [])
+        if success:
+            self.window.try_action(lambda: self.insert_attachment_bytes('Screenshot.png', data))
+
+    def drop_attachments(self, _, context, x, y, selection, info, time):
+        success = False
+        try:
+            for uri in selection.get_uris() or []:
+                file = Gio.File.new_for_uri(uri)
+                filename = file.get_path()
+                if filename is None:
+                    raise VaultError('Drop a local file to add an attachment.')
+                path = Path(filename)
+                self.insert_attachment_bytes(path.name, path.read_bytes())
+                success = True
+        except (OSError, VaultError) as error:
+            self.window.error(error)
+        Gtk.drag_finish(context, success, False, time)
 
     def apply_preferences(self):
         preferences = self.window.preferences
@@ -110,6 +213,10 @@ class NotePane(Gtk.Box):
         self.editor.set_wrap_mode(Gtk.WrapMode.WORD_CHAR if preferences.wrap_lines else Gtk.WrapMode.NONE)
         self.size_editor(self.editor, self.editor.get_allocation())
         self.update_list_margins()
+        self.findbar.cached = None
+        self.findbar.refresh()
+        if self.mode == 'reading':
+            self.reading.refresh()
 
     def size_editor(self, _, allocation):
         preferences = self.window.preferences
@@ -143,12 +250,47 @@ class NotePane(Gtk.Box):
             self.buffer.end_user_action()
 
     def changed(self, *_):
-        self.dirty = True
-        self.tab_label.set_text('• ' + Path(self.note.path).stem)
-        self.window.status.set_text('Unsaved changes · Ctrl+S to save')
+        self.dirty = self.text() != self.note.text.replace('\r\n', '\n')
+        self.tab_label.set_text(('• ' if self.dirty else '') + Path(self.note.path).stem)
+        self.window.status.set_text('Unsaved changes · Ctrl+S to save' if self.dirty
+                                    else f'No unsaved changes · {self.note.path}')
+        if self.autosave_source is not None:
+            GLib.source_remove(self.autosave_source)
+            self.autosave_source = None
+        try:
+            if self.dirty:
+                self.window.recovery.write(self.note, self.text())
+            else:
+                self.window.recovery.remove(self.note.path)
+        except OSError as error:
+            self.window.status.set_text(f'Could not write recovery draft: {error}')
+        if self.dirty:
+            self.autosave_source = GLib.timeout_add_seconds(2, self.autosave)
         self.queue_format()
 
+    def autosave(self):
+        self.autosave_source = None
+        if self.window.confirming_panes:
+            self.autosave_source = GLib.timeout_add_seconds(2, self.autosave)
+            return False
+        try:
+            self.save()
+        except (VaultError, OSError) as error:
+            self.window.status.set_text(f'Autosave failed: {error}')
+        return False
+
     def editor_key_press(self, _, event):
+        if hasattr(self, 'navigation') and self.navigation.key_press(event):
+            return True
+        modifiers = event.state & Gtk.accelerator_get_default_mod_mask()
+        for shortcut in EDITOR_SHORTCUTS:
+            key, mask = Gtk.accelerator_parse(shortcut.accelerator)
+            if Gdk.keyval_to_lower(event.keyval) == Gdk.keyval_to_lower(key) and modifiers == mask:
+                getattr(self, shortcut.handler)()
+                return True
+        if event.keyval == Gdk.KEY_Escape and self.findbar.get_visible():
+            self.findbar.close()
+            return True
         if not self.window.preferences.continue_lists:
             return False
         if event.keyval not in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
@@ -183,6 +325,7 @@ class NotePane(Gtk.Box):
         self.format_source = None
         source_changed = self.text() != self.formatted_text
         self.render()
+        self.findbar.refresh()
         if source_changed and self.window.current() is self:
             self.window.update_context()
         elif self.window.current() is self:
@@ -190,6 +333,14 @@ class NotePane(Gtk.Box):
         return False
 
     def cleanup(self, *_):
+        self.history.close()
+        for handler in self.buffer_handlers:
+            self.buffer.disconnect(handler)
+        self.buffer_handlers.clear()
+        self.toolbar.destroy()
+        if self.autosave_source is not None:
+            GLib.source_remove(self.autosave_source)
+            self.autosave_source = None
         if self.position_source is not None:
             GLib.source_remove(self.position_source)
             self.position_source = None
@@ -207,6 +358,12 @@ class NotePane(Gtk.Box):
         start, end = self.buffer.get_bounds()
         for tag in [*self.tags.values(), *self.list_tags.values(), self.hidden]:
             self.buffer.remove_tag(tag, start, end)
+        if self.mode == 'source':
+            for _, widget in self.list_widgets:
+                widget.hide()
+            return
+        if self.mode == 'reading':
+            self.reading.refresh()
         cursor = self.buffer.get_iter_at_mark(self.buffer.get_insert()).get_offset()
         line_start = text.rfind('\n', 0, cursor) + 1
         line_end = text.find('\n', cursor)
@@ -319,8 +476,148 @@ class NotePane(Gtk.Box):
             self.note = self.window.vault.save(self.note, self.text())
             self.dirty = False
             self.tab_label.set_text(Path(self.note.path).stem)
+            try:
+                self.window.recovery.remove(self.note.path)
+            except OSError as error:
+                self.window.status.set_text(f'Saved, but could not remove recovery draft: {error}')
+                return
+        self.history.break_group()
         self.window.status.set_text(f'Saved · {self.note.path}')
         self.window.update_context()
+
+    def undo(self):
+        if self.history.undo():
+            self.editor.grab_focus()
+            self.editor.scroll_mark_onscreen(self.buffer.get_insert())
+
+    def redo(self):
+        if self.history.redo():
+            self.editor.grab_focus()
+            self.editor.scroll_mark_onscreen(self.buffer.get_insert())
+
+    def apply_edit(self, edit, selection=None, user_action=True):
+        self.history.break_group()
+        if user_action:
+            self.buffer.begin_user_action()
+        try:
+            if self.text()[edit.start:edit.end] != edit.replacement:
+                start = self.buffer.get_iter_at_offset(edit.start)
+                self.buffer.delete(start, self.buffer.get_iter_at_offset(edit.end))
+                self.buffer.insert(start, edit.replacement)
+            if selection is None:
+                end = edit.start + len(edit.replacement)
+                selection = (end, end)
+            self.buffer.select_range(self.buffer.get_iter_at_offset(selection[1]),
+                                     self.buffer.get_iter_at_offset(selection[0]))
+        finally:
+            if user_action:
+                self.buffer.end_user_action()
+
+    def emphasize(self, marker):
+        selection = self.buffer.get_selection_bounds()
+        if selection:
+            start, end = (it.get_offset() for it in selection)
+        else:
+            start = end = self.buffer.get_iter_at_mark(self.buffer.get_insert()).get_offset()
+        edit, selected = format_inline(self.text(), start, end, marker)
+        self.apply_edit(edit, selected)
+        self.editor.grab_focus()
+
+    def bold(self):
+        self.emphasize('**')
+
+    def italic(self):
+        self.emphasize('*')
+
+    def insert_link(self):
+        original = self.text()
+        selection = self.buffer.get_selection_bounds()
+        if selection:
+            start, end = (it.get_offset() for it in selection)
+        else:
+            start = end = self.buffer.get_iter_at_mark(self.buffer.get_insert()).get_offset()
+        dialog = Gtk.Dialog(title='Insert link', transient_for=self.window, modal=True)
+        dialog.add_buttons('Cancel', Gtk.ResponseType.CANCEL, 'Insert', Gtk.ResponseType.OK)
+        dialog.set_default_response(Gtk.ResponseType.OK)
+        content = dialog.get_content_area()
+        content.set_border_width(16)
+        content.set_spacing(8)
+        label = Gtk.Entry(placeholder_text='Link text')
+        label.set_text(original[start:end])
+        label.get_accessible().set_name('Link text')
+        target = Gtk.Entry(placeholder_text='URL or note path')
+        target.get_accessible().set_name('Link target')
+        target.set_size_request(400, -1)
+        for field in (label, target):
+            field.set_activates_default(True)
+            content.pack_start(field, False, False, 0)
+        target.connect('changed', lambda *_: dialog.set_response_sensitive(
+            Gtk.ResponseType.OK, bool(target.get_text().strip())))
+        dialog.set_response_sensitive(Gtk.ResponseType.OK, False)
+        dialog.show_all()
+        target.grab_focus()
+        try:
+            if dialog.run() == Gtk.ResponseType.OK and target.get_text().strip():
+                if self.text() != original:
+                    self.window.status.set_text('The note changed while the link dialog was open. Select text and try again.')
+                    return
+                source = markdown_link(label.get_text(), target.get_text().strip())
+                self.apply_edit(TextEdit(start, end, source))
+                self.editor.grab_focus()
+        finally:
+            dialog.destroy()
+
+    def show_find(self):
+        self.findbar.open()
+
+    def show_replace(self):
+        self.findbar.open(replace=True)
+
+    def find_next(self):
+        self.findbar.step(True)
+
+    def find_previous(self):
+        self.findbar.step(False)
+
+    def populate_edit_menu(self, _, menu):
+        menu.set_reserve_toggle_size(False)
+        menu.get_style_context().add_class('editor-menu')
+        items = []
+        for title, action, enabled in (
+                ('Undo', self.undo, self.history.can_undo), ('Redo', self.redo, self.history.can_redo),
+                ('Bold', self.bold, True), ('Italic', self.italic, True),
+                ('Insert link…', self.insert_link, True),
+                ('Insert attachment…', self.choose_attachment, True),
+                ('Live preview', lambda: self.set_mode('live'), True),
+                ('Source mode', lambda: self.set_mode('source'), True),
+                ('Reading mode', lambda: self.set_mode('reading'), True),
+                ('Find…', self.show_find, True), ('Replace…', self.show_replace, True)):
+            item = Gtk.MenuItem(label=title)
+            item.set_sensitive(enabled)
+            item.connect('activate', lambda _, action=action: action())
+            items.append(item)
+        items.append(Gtk.SeparatorMenuItem())
+        for item in reversed(items):
+            menu.prepend(item)
+            item.show()
+
+    def load_external(self, note):
+        cursor = self.history.selection()
+        self.note = note
+        text = note.text.replace('\r\n', '\n')
+        self.buffer.handler_block_by_func(self.changed)
+        try:
+            with self.history.suspended():
+                self.buffer.set_text(text)
+                self.buffer.select_range(self.buffer.get_iter_at_offset(min(cursor.cursor, len(text))),
+                                         self.buffer.get_iter_at_offset(min(cursor.anchor, len(text))))
+        finally:
+            self.buffer.handler_unblock_by_func(self.changed)
+        self.history.reset()
+        self.dirty = False
+        self.tab_label.set_text(Path(note.path).stem)
+        self.render()
+        self.findbar.refresh()
 
 
 class Window(Gtk.ApplicationWindow):
@@ -328,6 +625,8 @@ class Window(Gtk.ApplicationWindow):
         super().__init__(application=app, title='Libre Vault')
         self.set_default_size(1360, 850)
         self.vault = None
+        self.recovery = None
+        self.confirming_panes = False
         self.panes = {}
         self.outline_rows = []
         self.collapsed_folders = set()
@@ -336,7 +635,16 @@ class Window(Gtk.ApplicationWindow):
         self.settings_dialog = None
         self.preferences_store = PreferencesStore(preferences_path)
         self.preferences = self.preferences_store.load()
+        self.workspace_store = WorkspaceStore(self.preferences_store.path)
+        self.navigation_history = NavigationHistory()
+        self.restoring_workspace = False
+        self.split_pane = None
+        self.split_view = None
+        self.workspace_source = None
+        self.scroll_restore_sources = {}
+        self.quick_switcher = None
         self.refresh_source = None
+        self.panel_widths_initialized = False
         self.connect('delete-event', self.on_delete)
         self.connect('key-press-event', self.key_press)
         self.css_provider = Gtk.CssProvider()
@@ -366,14 +674,46 @@ class Window(Gtk.ApplicationWindow):
         self.details_toggle.set_active(True)
         self.details_toggle.get_style_context().add_class('icon-button')
         header.pack_end(self.details_toggle)
-        header.pack_end(self.icon_button('document-save-symbolic', 'Save note · Ctrl+S', self.save_current))
+        self.save_button = self.icon_button('document-save-symbolic', 'Save note · Ctrl+S', self.save_current)
+        header.pack_end(self.save_button)
+        header.pack_start(self.icon_button('go-previous-symbolic', 'Navigate back · Alt+Left', self.navigate_back))
+        header.pack_start(self.icon_button('go-next-symbolic', 'Navigate forward · Alt+Right', self.navigate_forward))
+        header.pack_end(self.icon_button('view-dual-symbolic', 'Toggle split editor · Ctrl+Shift+S', self.toggle_split))
         self.overlay = Gtk.Overlay()
         self.add(self.overlay)
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.overlay.add(root)
+        self.workspace_stack = Gtk.Stack()
+        self.workspace_stack.set_homogeneous(False)
+        root.pack_start(self.workspace_stack, True, True, 0)
+        welcome = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        welcome.set_halign(Gtk.Align.CENTER)
+        welcome.set_valign(Gtk.Align.CENTER)
+        welcome.set_border_width(32)
+        icon = Gtk.Image.new_from_icon_name('folder-documents-symbolic', Gtk.IconSize.DIALOG)
+        icon.get_style_context().add_class('muted')
+        welcome.pack_start(icon, False, False, 0)
+        title = Gtk.Label(label='Welcome to Libre Vault')
+        title.get_style_context().add_class('welcome-title')
+        welcome.pack_start(title, False, False, 0)
+        description = Gtk.Label(label='Your notes stay in ordinary Markdown files.\nOpen a vault or an empty folder to begin.')
+        description.set_justify(Gtk.Justification.CENTER)
+        description.set_line_wrap(True)
+        description.set_max_width_chars(48)
+        description.get_style_context().add_class('muted')
+        welcome.pack_start(description, False, False, 0)
+        self.open_vault_button = Gtk.Button(label='Open vault…')
+        self.open_vault_button.set_halign(Gtk.Align.CENTER)
+        self.open_vault_button.get_style_context().add_class('welcome-open')
+        self.open_vault_button.connect('clicked', self.choose_vault)
+        welcome.pack_start(self.open_vault_button, False, False, 4)
+        hint = Gtk.Label(label='Ctrl+O to choose a folder')
+        hint.get_style_context().add_class('welcome-hint')
+        welcome.pack_start(hint, False, False, 0)
+        self.workspace_stack.add_named(welcome, 'welcome')
         layout = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
         layout.get_style_context().add_class('workspace-split')
-        root.pack_start(layout, True, True, 0)
+        self.workspace_stack.add_named(layout, 'workspace')
         sidebar = self.sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         sidebar.get_style_context().add_class('sidebar')
         sidebar.set_border_width(14)
@@ -412,8 +752,20 @@ class Window(Gtk.ApplicationWindow):
         center = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
         center.get_style_context().add_class('workspace-split')
         self.tabs = Gtk.Notebook(scrollable=True)
-        self.tabs.connect('switch-page', lambda *_: GLib.idle_add(self.update_context))
-        center.pack1(self.tabs, True, False)
+        self.tabs.connect('switch-page', self.tab_switched)
+        self.tabs.connect('page-removed', self.tab_removed)
+        self.note_toolbars = Gtk.Stack()
+        self.note_toolbars.set_homogeneous(False)
+        self.note_toolbars.set_no_show_all(True)
+        editor_column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        editor_column.pack_start(self.note_toolbars, False, False, 0)
+        editor_column.pack_start(self.tabs, True, True, 0)
+        self.editor_split = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
+        self.editor_split.pack1(editor_column, True, False)
+        self.split_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.split_box.set_no_show_all(True)
+        self.editor_split.pack2(self.split_box, True, False)
+        center.pack1(self.editor_split, True, False)
         self.context = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
         self.context.set_border_width(12)
         self.context.set_size_request(240, -1)
@@ -425,8 +777,7 @@ class Window(Gtk.ApplicationWindow):
         center.pack2(self.details_panel, False, False)
         self.details_toggle.connect('toggled', self.set_panel_open, self.details_panel)
         layout.pack2(center, True, False)
-        layout.set_position(232)
-        center.set_position(900)
+        center.connect('size-allocate', self.initialize_panel_widths)
         self.status = Gtk.Label(label='Open a vault folder to begin.', xalign=0)
         self.status.get_style_context().add_class('status')
         statusbar = Gtk.Box()
@@ -440,11 +791,15 @@ class Window(Gtk.ApplicationWindow):
         format_label.get_style_context().add_class('status')
         statusbar.pack_end(format_label, False, False, 0)
         root.pack_end(statusbar, False, False, 0)
-        self.show_all()
-        if folder:
-            self.load_vault(folder)
         self.refresh_source = GLib.timeout_add_seconds(3, self.refresh)
+        self.workspace_source = GLib.timeout_add_seconds(5, self.persist_workspace)
         self.connect('destroy', self.cleanup)
+        self.show_all()
+        self.update_workspace_state()
+        if folder:
+            self.try_action(lambda: self.load_vault(folder))
+        else:
+            self.open_vault_button.grab_focus()
 
     def icon_button(self, icon, tooltip, action):
         button = Gtk.Button.new_from_icon_name(icon, Gtk.IconSize.MENU)
@@ -455,7 +810,20 @@ class Window(Gtk.ApplicationWindow):
         return button
 
     def cleanup(self, *_):
+        self.persist_workspace()
+        # These widgets live in implicit GtkViewports. Explicitly dispose
+        # them so native signal closures cannot retain the window.
+        self.files.destroy()
+        self.context.destroy()
+        for source in self.scroll_restore_sources.values():
+            GLib.source_remove(source)
+        self.scroll_restore_sources.clear()
+        if self.workspace_source:
+            GLib.source_remove(self.workspace_source)
+            self.workspace_source = None
         Gtk.StyleContext.remove_provider_for_screen(Gdk.Screen.get_default(), self.css_provider)
+        if self.recovery:
+            self.recovery.close()
         if self.refresh_source:
             GLib.source_remove(self.refresh_source)
             self.refresh_source = None
@@ -482,6 +850,14 @@ class Window(Gtk.ApplicationWindow):
         dialog.destroy()
 
     def confirm_panes(self, panes):
+        self.confirming_panes = True
+        try:
+            return self._confirm_panes(panes)
+        finally:
+            self.confirming_panes = False
+
+    def _confirm_panes(self, panes):
+        discarded = []
         for pane in panes:
             if not pane.dirty:
                 continue
@@ -496,7 +872,15 @@ class Window(Gtk.ApplicationWindow):
                 except (VaultError, OSError) as error:
                     self.error(error)
                     return False
-            elif result != Gtk.ResponseType.NO:
+            elif result == Gtk.ResponseType.NO:
+                discarded.append(pane)
+            else:
+                return False
+        for pane in discarded:
+            try:
+                self.recovery.remove(pane.note.path)
+            except OSError as error:
+                self.error(error)
                 return False
         return True
 
@@ -504,38 +888,69 @@ class Window(Gtk.ApplicationWindow):
         vault = Vault(folder)
         if not self.confirm_panes(list(self.panes.values())):
             return
+        self.persist_workspace()
+        self.close_split()
         while self.tabs.get_n_pages():
             self.tabs.remove_page(0)
         self.panes.clear()
+        if self.recovery:
+            self.recovery.close()
         self.vault = vault
+        self.navigation_history = NavigationHistory()
+        self.recovery = RecoveryStore(vault.root)
+        self.update_workspace_state()
         self.collapsed_folders.clear()
         self.vault_label.set_text(vault.root.name)
         self.set_title(f'{vault.root.name} · Libre Vault')
         self.search_entry.set_text('')
         self.populate_files()
         self.status.set_text(f'{len(vault.notes)} notes · {vault.root}')
-        if vault.notes:
+        self.offer_recovery()
+        restored = self.restore_workspace()
+        if vault.notes and not self.panes and not restored:
             first = 'Welcome.md' if 'Welcome.md' in vault.notes else next(iter(vault.notes))
             self.open_note(first)
         self.update_context()
 
+    def initialize_panel_widths(self, center, allocation):
+        # The workspace can start hidden behind the welcome screen. Wait for
+        # its real allocation before positioning the right-hand divider.
+        if self.panel_widths_initialized or self.vault is None or allocation.width <= 1:
+            return
+        width = max(self.notes_panel.get_preferred_width().minimum_width,
+                    self.details_panel.get_preferred_width().minimum_width)
+        self.panel_widths_initialized = True
+        self.notes_panel.position_width(width)
+        self.details_panel.position_width(width)
+
+    def update_workspace_state(self):
+        opened = self.vault is not None
+        self.workspace_stack.set_visible_child_name('workspace' if opened else 'welcome')
+        self.notes_toggle.set_visible(opened)
+        self.details_toggle.set_visible(opened)
+        self.save_button.set_visible(opened)
+        self.save_button.set_sensitive(opened and self.current() is not None)
+
     def populate_files(self):
         searching = bool(self.search_entry.get_text().strip())
-        paths = self.vault.search(self.search_entry.get_text()) if self.vault else []
+        results = {result.path: result for result in self.vault.search_results(self.search_entry.get_text())} if self.vault else {}
+        paths = list(results)
         if self.vault and not searching:
             paths = tree_paths(paths, self.vault.folders, self.collapsed_folders)
         rows = self.files.get_children()
         if [row.path for row in rows] == paths and all(
                 row.search_result == searching and
+                (not searching or getattr(row, 'search_signature', None) == results[row.path]) and
                 (not row.path.endswith('/') or row.expanded == (row.path[:-1] not in self.collapsed_folders))
                 for row in rows):
             return
         for row in rows:
-            self.files.remove(row)
+            row.destroy()
         for path in paths:
             row = Gtk.ListBoxRow()
             row.path = path
             row.search_result = searching
+            row.search_signature = results.get(path) if searching else None
             content = Gtk.Box(spacing=6)
             is_folder = path.endswith('/')
             if not searching:
@@ -566,6 +981,20 @@ class Window(Gtk.ApplicationWindow):
                 folder.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
                 folder.get_style_context().add_class('note-folder')
                 names.pack_start(folder, False, False, 0)
+            if searching and results[path].snippet:
+                result = results[path]
+                markup, start = [], 0
+                for begin, end in result.highlights:
+                    markup.append(GLib.markup_escape_text(result.snippet[start:begin]))
+                    markup.append('<b>' + GLib.markup_escape_text(result.snippet[begin:end]) + '</b>')
+                    start = end
+                markup.append(GLib.markup_escape_text(result.snippet[start:]))
+                snippet = Gtk.Label(xalign=0)
+                snippet.set_markup(''.join(markup))
+                snippet.set_ellipsize(Pango.EllipsizeMode.END)
+                snippet.set_max_width_chars(24)
+                snippet.get_style_context().add_class('note-folder')
+                names.pack_start(snippet, False, False, 0)
             content.pack_start(names, True, True, 0)
             row.add(content)
             row.set_tooltip_text(path)
@@ -639,6 +1068,15 @@ class Window(Gtk.ApplicationWindow):
             item.set_sensitive(self.vault is not None)
             item.connect('activate', lambda _, action=action: action())
             menu.append(item)
+        if row is not None:
+            menu.append(Gtk.SeparatorMenuItem())
+            for label, action in (
+                    ('Rename…', lambda: self.rename_item(row.path)),
+                    ('Move to…', lambda: self.move_item(row.path)),
+                    ('Move to trash…', lambda: self.trash_item(row.path))):
+                item = Gtk.MenuItem(label=label)
+                item.connect('activate', lambda _, action=action: action())
+                menu.append(item)
         menu.append(Gtk.SeparatorMenuItem())
         item = Gtk.MenuItem(label='Open vault…')
         item.connect('activate', self.choose_vault)
@@ -663,10 +1101,179 @@ class Window(Gtk.ApplicationWindow):
             self.files, Gdk.Gravity.NORTH_WEST, Gdk.Gravity.NORTH_WEST, None)
         return True
 
-    def open_note(self, relative, fragment=''):
+    def rename_item(self, relative):
+        self.organize_item(relative, rename=True)
+
+    def move_item(self, relative):
+        self.organize_item(relative, rename=False)
+
+    def organize_item(self, relative, rename=False):
+        relative = relative.rstrip('/')
+        dialog = Gtk.Dialog(title='Rename' if rename else 'Move to', transient_for=self, modal=True)
+        dialog.add_buttons('Cancel', Gtk.ResponseType.CANCEL, 'Rename' if rename else 'Move', Gtk.ResponseType.OK)
+        content = dialog.get_content_area()
+        content.set_border_width(16)
+        content.set_spacing(8)
+        label = Gtk.Label(label='New name' if rename else 'Destination path inside the vault', xalign=0)
+        content.pack_start(label, False, False, 0)
+        entry = Gtk.Entry(text=Path(relative).name if rename else relative)
+        entry.set_activates_default(True)
+        content.pack_start(entry, False, False, 0)
+        dialog.set_default_response(Gtk.ResponseType.OK)
+        dialog.show_all()
+        entry.grab_focus()
+        accepted = dialog.run() == Gtk.ResponseType.OK
+        value = entry.get_text().strip()
+        dialog.destroy()
+        if accepted:
+            destination = (Path(relative).parent / value).as_posix() if rename else value
+            if rename and ('/' in value or '\\' in value):
+                self.error(VaultError('Use Move to for changing folders.'))
+                return
+            self.try_action(lambda: self.move_path(relative, destination))
+
+    def move_path(self, relative, destination):
+        """UI boundary for organization: resolve dirty editors before link rewrites."""
+        if not self.confirm_panes(list(self.panes.values())):
+            return False
+        # Discard choices in confirm_panes must not leave stale dirty buffers
+        # able to autosave over incoming-link updates.
+        for pane in self.panes.values():
+            if pane.dirty:
+                pane.load_external(self.vault.read(pane.note.path))
+        mapping = self.vault.move(relative, destination)
+        renamed = {}
+        for old, pane in self.panes.items():
+            new = mapping.get(old, old)
+            note = self.vault.read(new)
+            if note.path != pane.note.path or note.revision != pane.note.revision:
+                pane.load_external(note)
+            pane.tab_label.set_text(Path(new).stem)
+            tab = self.tabs.get_tab_label(pane)
+            if tab:
+                tab.set_tooltip_text(new)
+            renamed[new] = pane
+            if self.recovery and old != new:
+                self.recovery.remove(old)
+        self.panes = renamed
+        old_folder, new_folder = relative.rstrip('/'), destination.rstrip('/')
+        self.collapsed_folders = {new_folder + path[len(old_folder):]
+                                 if path == old_folder or path.startswith(old_folder + '/') else path
+                                 for path in self.collapsed_folders}
+        self.collapsed_folders.intersection_update(self.vault.folders)
+        self.remap_navigation(mapping)
+        self.populate_files()
+        self.update_context()
+        self.status.set_text(f'Moved {relative} to {destination} · Incoming links updated')
+        if self.vault.organization_notice:
+            self.status.set_text(self.status.get_text() + ' · ' + self.vault.organization_notice)
+        return True
+
+    def trash_item(self, relative):
+        dialog = Gtk.MessageDialog(transient_for=self, modal=True, message_type=Gtk.MessageType.QUESTION,
+                                   text=f'Move {relative.rstrip("/")} to trash?')
+        dialog.format_secondary_text('The item will be kept in the vault’s hidden .trash folder.')
+        dialog.add_buttons('Cancel', Gtk.ResponseType.CANCEL, 'Move to trash', Gtk.ResponseType.OK)
+        accepted = dialog.run() == Gtk.ResponseType.OK
+        dialog.destroy()
+        if accepted:
+            self.try_action(lambda: self.trash_path(relative))
+
+    def trash_path(self, relative):
+        relative = relative.rstrip('/')
+        deleted = [path for path in self.vault.notes if path == relative or path.startswith(relative + '/')]
+        panes = [pane for path, pane in self.panes.items() if path in deleted]
+        if not self.confirm_panes(panes):
+            return False
+        target = self.vault.trash(relative)
+        for pane in panes:
+            if self.recovery:
+                self.recovery.remove(pane.note.path)
+            self.tabs.remove_page(self.tabs.page_num(pane))
+            self.panes.pop(pane.note.path, None)
+        self.remap_navigation({}, deleted=deleted)
+        self.collapsed_folders.intersection_update(self.vault.folders)
+        self.populate_files()
+        self.update_context()
+        self.status.set_text(f'Moved to trash · {target}')
+        return True
+
+    def edit_properties(self):
+        pane = self.current()
+        if pane is None:
+            return
+        dialog = Gtk.Dialog(title='Note properties', transient_for=self, modal=True)
+        dialog.add_buttons('Cancel', Gtk.ResponseType.CANCEL, 'Apply', Gtk.ResponseType.OK)
+        dialog.set_default_size(480, 360)
+        content = dialog.get_content_area()
+        content.set_border_width(16)
+        content.set_spacing(8)
+        caption = Gtk.Label(label='YAML properties · tags and aliases accept lists', xalign=0)
+        content.pack_start(caption, False, False, 0)
+        editor = Gtk.TextView(buffer=text_buffer(property_text(pane.text())))
+        editor.set_monospace(True)
+        editor.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        content.pack_start(scrolled(editor), True, True, 0)
+        problem = Gtk.Label(xalign=0)
+        problem.set_line_wrap(True)
+        content.pack_start(problem, False, False, 0)
+        dialog.show_all()
+        while dialog.run() == Gtk.ResponseType.OK:
+            source = editor.get_buffer().get_text(*editor.get_buffer().get_bounds(), True)
+            try:
+                self.set_note_properties(source)
+            except ValueError as error:
+                problem.set_text(str(error))
+                continue
+            break
+        dialog.destroy()
+
+    def set_note_properties(self, source):
+        pane = self.current()
+        if pane is None:
+            return
+        changed = with_properties(pane.text(), source)
+        if changed != pane.text():
+            pane.apply_edit(TextEdit(0, len(pane.text()), changed))
+            self.update_context()
+
+    def offer_recovery(self):
+        for draft, note, text in self.recovery.drafts():
+            if note.path in self.panes:
+                continue
+            try:
+                self.vault._path(note.path)
+            except VaultError:
+                continue
+            dialog = Gtk.MessageDialog(transient_for=self, modal=True, message_type=Gtk.MessageType.QUESTION,
+                                       text=f'Recover unsaved changes to {note.path}?')
+            dialog.format_secondary_text('The draft stays available if you choose Later. If the file changed, saving will stop to protect both versions.')
+            dialog.add_buttons('Later', Gtk.ResponseType.CANCEL, 'Discard draft', Gtk.ResponseType.NO, 'Recover', Gtk.ResponseType.YES)
+            result = dialog.run()
+            dialog.destroy()
+            if result == Gtk.ResponseType.NO:
+                try:
+                    draft.unlink()
+                except OSError as error:
+                    self.error(error)
+            elif result == Gtk.ResponseType.YES:
+                self.open_note(note.path, recovered=note)
+                pane = self.panes.get(note.path)
+                if pane:
+                    pane.buffer.set_text(text)
+                    # Only remove the old copy after the new recovery draft is durable.
+                    try:
+                        if pane.dirty:
+                            self.recovery.write(note, text)
+                        draft.unlink()
+                    except OSError as error:
+                        self.error(error)
+
+    def open_note(self, relative, fragment='', recovered=None):
+        self.remember_location()
         if relative not in self.panes:
             def action():
-                pane = NotePane(self, self.vault.read(relative))
+                pane = NotePane(self, recovered if recovered is not None else self.vault.read(relative))
                 self.panes[relative] = pane
                 tab = Gtk.Box(spacing=6)
                 tab.set_tooltip_text(relative)
@@ -676,6 +1283,8 @@ class Window(Gtk.ApplicationWindow):
                 close.set_focus_on_click(False)
                 tab.pack_end(close, False, False, 0)
                 tab.show_all()
+                self.note_toolbars.add(pane.toolbar)
+                pane.toolbar.show_all()
                 self.tabs.append_page(pane, tab)
                 pane.show_all()
             self.try_action(action)
@@ -697,8 +1306,14 @@ class Window(Gtk.ApplicationWindow):
                 pane.buffer.place_cursor(position)
                 pane.editor.scroll_to_iter(position, 0.15, False, 0, 0)
         self.update_context()
+        if not self.restoring_workspace:
+            cursor = pane.buffer.get_iter_at_mark(pane.buffer.get_insert()).get_offset()
+            self.navigation_history.visit(Location(relative, cursor))
+        return pane
 
     def current(self):
+        if self.split_view is not None and self.get_focus() is self.split_view:
+            return self.split_pane
         index = self.tabs.get_current_page()
         return self.tabs.get_nth_page(index) if index >= 0 else None
 
@@ -712,6 +1327,8 @@ class Window(Gtk.ApplicationWindow):
 
     def close_note(self, pane):
         if pane and self.confirm_panes([pane]):
+            if pane is self.split_pane:
+                self.close_split()
             self.tabs.remove_page(self.tabs.page_num(pane))
             self.panes.pop(pane.note.path, None)
             self.update_context()
@@ -791,6 +1408,9 @@ class Window(Gtk.ApplicationWindow):
                 style.remove_class('current-heading')
 
     def follow_link(self, source, target):
+        from .attachments import open_attachment
+        if open_attachment(self, source, target):
+            return
         candidates = self.vault.resolve(source, target)
         fragment = unquote(target.partition('#')[2])
         if len(candidates) == 1:
@@ -805,13 +1425,31 @@ class Window(Gtk.ApplicationWindow):
             if 1 <= result <= len(candidates):
                 self.open_note(candidates[result - 1], fragment)
         else:
-            self.status.set_text(f'Unresolved note or unsupported attachment: {target}')
+            name = unquote(target.split('#', 1)[0].split('|', 1)[0]).strip()
+            if name.startswith(('./', '../')):
+                name = posixpath.normpath(str(Path(source).parent / name))
+            if not name or Path(name).suffix.lower() not in ('', '.md'):
+                self.status.set_text(f'Unresolved note or unsupported attachment: {target}')
+                return
+            dialog = Gtk.MessageDialog(transient_for=self, modal=True,
+                                       message_type=Gtk.MessageType.QUESTION,
+                                       text=f'Create note “{name}”?')
+            dialog.add_buttons('Cancel', Gtk.ResponseType.CANCEL, 'Create note', Gtk.ResponseType.OK)
+            result = dialog.run()
+            dialog.destroy()
+            if result == Gtk.ResponseType.OK:
+                def create():
+                    note = self.vault.create(name)
+                    self.populate_files()
+                    self.open_note(note.path, fragment)
+                self.try_action(create)
 
     def update_context(self):
         self.outline_rows = []
         for child in self.context.get_children():
-            self.context.remove(child)
+            child.destroy()
         pane = self.current()
+        self.save_button.set_sensitive(pane is not None)
         if not pane or not self.vault:
             self.location_label.set_text(self.vault.root.name if self.vault else 'Local workspace')
             self.section('Outline · Links · Backlinks')
@@ -863,6 +1501,26 @@ class Window(Gtk.ApplicationWindow):
         self.section('Backlinks · Saved files')
         for path in self.vault.backlinks(pane.note.path):
             self.context_button(path.removesuffix('.md'), lambda path=path: self.open_note(path))
+        self.section('Properties')
+        metadata = note_metadata(pane.text())
+        self.context_button('Edit properties…', self.edit_properties)
+        for key, value in metadata.properties.items():
+            label = Gtk.Label(label=f'{key}: {value}', xalign=0)
+            label.set_line_wrap(True)
+            label.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            label.set_max_width_chars(24)
+            label.set_selectable(True)
+            label.get_style_context().add_class('outline-empty')
+            self.context.pack_start(label, False, False, 0)
+        if metadata.error:
+            problem = Gtk.Label(label=metadata.error, xalign=0)
+            problem.set_line_wrap(True)
+            problem.set_max_width_chars(24)
+            self.context.pack_start(problem, False, False, 0)
+        if metadata.tags:
+            self.section('Tags')
+            for tag in metadata.tags:
+                self.context_button('#' + tag, lambda tag=tag: self.search_entry.set_text('tag:#' + tag))
         self.context.show_all()
         return False
 
@@ -881,19 +1539,23 @@ class Window(Gtk.ApplicationWindow):
                     if pane.dirty:
                         self.status.set_text(f'External change to {path}. Your unsaved edits are retained; saving will stop on conflict.')
                     else:
-                        pane.note = disk_note
-                        pane.buffer.handler_block_by_func(pane.changed)
-                        pane.buffer.set_text(disk_note.text.replace('\r\n', '\n'))
-                        pane.buffer.handler_unblock_by_func(pane.changed)
-                        pane.render()
+                        pane.load_external(disk_note)
+                if pane.mode == 'reading':
+                    pane.reading.refresh()
             self.update_context()
         except (VaultError, OSError) as error:
             self.status.set_text(str(error))
         return True
 
     def key_press(self, _, event):
+        if self.quick_switcher is not None:
+            return self.quick_switcher.key_press(self.quick_switcher, event)
         if self.palette is not None:
             return self.palette.key_press(self.palette, event)
+        pane, focus = self.current(), self.get_focus()
+        if pane and focus and focus.is_ancestor(pane.findbar):
+            if pane.findbar.key_press(pane.findbar, event):
+                return True
         modifiers = event.state & Gtk.accelerator_get_default_mod_mask()
         for shortcut in APP_SHORTCUTS:
             key, mask = Gtk.accelerator_parse(shortcut.accelerator)
@@ -903,7 +1565,8 @@ class Window(Gtk.ApplicationWindow):
         return False
 
     def toggle_details(self, *_):
-        self.details_toggle.set_active(not self.details_toggle.get_active())
+        if self.vault is not None:
+            self.details_toggle.set_active(not self.details_toggle.get_active())
 
     def set_panel_open(self, button, panel):
         opened = panel.set_open(button.get_active())
@@ -911,7 +1574,8 @@ class Window(Gtk.ApplicationWindow):
             button.set_active(opened)
 
     def toggle_file_tree(self, *_):
-        self.notes_toggle.set_active(not self.notes_toggle.get_active())
+        if self.vault is not None:
+            self.notes_toggle.set_active(not self.notes_toggle.get_active())
 
     def apply_preferences(self):
         Gtk.Settings.get_default().set_property('gtk-application-prefer-dark-theme', self.preferences.theme == 'dark')
@@ -947,6 +1611,192 @@ class Window(Gtk.ApplicationWindow):
         else:
             self.palette.search.grab_focus()
 
+    def show_quick_switcher(self):
+        from .navigation_ui import QuickSwitcher
+        if self.vault is None:
+            return
+        if self.quick_switcher is None:
+            self.quick_switcher = QuickSwitcher(self)
+            self.quick_switcher.connect('destroy', lambda *_: setattr(self, 'quick_switcher', None))
+            self.overlay.add_overlay(self.quick_switcher)
+            self.quick_switcher.show_all()
+        self.quick_switcher.filter_commands()
+        self.quick_switcher.search.grab_focus()
+
+    def remember_location(self):
+        pane = self.current()
+        if pane:
+            cursor = pane.buffer.get_iter_at_mark(pane.buffer.get_insert()).get_offset()
+            self.navigation_history.update(Location(pane.note.path, cursor))
+
+    def tab_switched(self, _, pane, index):
+        self.note_toolbars.set_visible_child(pane.toolbar)
+        self.note_toolbars.show()
+        self.remember_location()
+        if not self.restoring_workspace:
+            self.navigation_history.visit(Location(pane.note.path,
+                pane.buffer.get_iter_at_mark(pane.buffer.get_insert()).get_offset()))
+        GLib.idle_add(self.update_context)
+
+    def tab_removed(self, notebook, pane, index):
+        if pane.toolbar.get_parent() is self.note_toolbars:
+            self.note_toolbars.remove(pane.toolbar)
+        self.note_toolbars.set_visible(notebook.get_n_pages() > 0)
+        if pane is self.split_pane:
+            self.close_split()
+        source = self.scroll_restore_sources.pop(pane, None)
+        if source is not None:
+            GLib.source_remove(source)
+        pane.destroy()
+
+    def navigate_back(self, *_):
+        self.navigate_history(-1)
+
+    def navigate_forward(self, *_):
+        self.navigate_history(1)
+
+    def navigate_history(self, direction):
+        self.remember_location()
+        location = self.navigation_history.step(direction)
+        if location is None:
+            return
+        self.restoring_workspace = True
+        try:
+            pane = self.open_note(location.path)
+            if pane:
+                position = pane.buffer.get_iter_at_offset(min(location.cursor, pane.buffer.get_char_count()))
+                pane.buffer.place_cursor(position)
+                pane.editor.scroll_to_iter(position, 0.15, False, 0, 0)
+        finally:
+            self.restoring_workspace = False
+
+    def close_split(self, *_):
+        for child in self.split_box.get_children():
+            child.destroy()
+        self.split_box.hide()
+        self.split_pane = self.split_view = None
+
+    def toggle_split(self, *_):
+        if self.split_view is not None:
+            self.close_split()
+            return
+        pane = self.current()
+        if pane:
+            self.open_split(pane)
+
+    def open_split(self, pane):
+        from .splitview import SplitTextView
+        self.close_split()
+        self.split_pane = pane
+        bar = Gtk.Box(spacing=6)
+        title = Gtk.Label(label=pane.note.path, xalign=0)
+        title.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+        bar.pack_start(title, True, True, 8)
+        bar.pack_end(self.icon_button('window-close-symbolic', 'Close split editor', self.close_split), False, False, 0)
+        self.split_box.pack_start(bar, False, False, 0)
+        self.split_view = SplitTextView(pane)
+        self.split_view.connect('key-press-event', self.split_key_press)
+        self.split_view.connect('copy-clipboard', pane.copy_selection)
+        self.split_view.connect('cut-clipboard', pane.cut_selection)
+        self.split_view.connect('populate-popup', pane.populate_edit_menu)
+        self.split_view.connect('paste-clipboard', pane.paste_attachment)
+        self.split_view.drag_dest_set(Gtk.DestDefaults.ALL,
+            [Gtk.TargetEntry.new('text/uri-list', 0, 1)], Gdk.DragAction.COPY)
+        self.split_view.connect('drag-data-received', pane.drop_attachments)
+        self.split_view.connect('button-release-event', pane.navigation.clicked)
+        split_scroll = scrolled(self.split_view)
+        split_scroll.get_vadjustment().connect('value-changed', self.split_view.queue_sync)
+        split_scroll.get_hadjustment().connect('value-changed', self.split_view.queue_sync)
+        self.split_box.pack_start(split_scroll, True, True, 0)
+        self.split_box.set_no_show_all(False)
+        self.split_box.show_all()
+        self.split_box.set_no_show_all(True)
+        self.editor_split.set_position(max(1, self.editor_split.get_allocated_width() // 2))
+
+    def split_key_press(self, view, event):
+        modifiers = event.state & Gtk.accelerator_get_default_mod_mask()
+        if (modifiers == Gdk.ModifierType.CONTROL_MASK
+                and Gdk.keyval_to_lower(event.keyval) in (Gdk.KEY_f, Gdk.KEY_h)):
+            # Find controls belong to the canonical pane. Bring that pane into
+            # view before its handler opens and focuses the search bar.
+            self.tabs.set_current_page(self.tabs.page_num(self.split_pane))
+        return self.split_pane.editor_key_press(view, event)
+
+    def remap_navigation(self, mapping, deleted=()):
+        self.navigation_history.remap(mapping, deleted)
+        if self.split_pane and self.split_pane.note.path in deleted:
+            self.close_split()
+        elif self.split_pane:
+            self.open_split(self.split_pane)
+        self.persist_workspace()
+
+    def persist_workspace(self):
+        if self.vault is None or self.restoring_workspace:
+            return True
+        pages = []
+        for index in range(self.tabs.get_n_pages()):
+            pane = self.tabs.get_nth_page(index)
+            pages.append({'path': pane.note.path,
+                          'cursor': pane.buffer.get_iter_at_mark(pane.buffer.get_insert()).get_offset(),
+                          'scroll': pane.scroll.get_vadjustment().get_value()})
+        index = self.tabs.get_current_page()
+        active = self.tabs.get_nth_page(index) if index >= 0 else None
+        state = {'tabs': pages, 'active': active.note.path if active else None,
+                 'collapsed_folders': sorted(self.collapsed_folders),
+                 'split': self.split_pane.note.path if self.split_pane else None}
+        try:
+            self.workspace_store.save(self.vault.root, state)
+        except OSError as error:
+            self.status.set_text(f'Could not save workspace: {error}')
+        return True
+
+    def restore_workspace(self):
+        state = self.workspace_store.load(self.vault.root)
+        pages = state.get('tabs', [])
+        if 'tabs' not in state or not isinstance(pages, list):
+            return False
+        self.restoring_workspace = True
+        try:
+            for saved in pages:
+                if (not isinstance(saved, dict) or not isinstance(saved.get('path'), str)
+                        or saved['path'] not in self.vault.notes):
+                    continue
+                pane = self.open_note(saved['path'])
+                if pane is None:
+                    continue
+                cursor = saved.get('cursor', 0)
+                if type(cursor) is int:
+                    pane.buffer.place_cursor(pane.buffer.get_iter_at_offset(max(0, min(cursor, pane.buffer.get_char_count()))))
+                scroll = saved.get('scroll', 0)
+                if type(scroll) in (int, float) and math.isfinite(scroll) and scroll >= 0:
+                    previous = self.scroll_restore_sources.pop(pane, None)
+                    if previous is not None:
+                        GLib.source_remove(previous)
+                    self.scroll_restore_sources[pane] = GLib.timeout_add(100, self.restore_scroll, pane, scroll)
+            active = state.get('active')
+            if isinstance(active, str) and active in self.panes:
+                self.open_note(active)
+            folders = state.get('collapsed_folders', [])
+            if isinstance(folders, list):
+                self.collapsed_folders = {path for path in folders if isinstance(path, str) and path in self.vault.folders}
+            split = state.get('split')
+            if isinstance(split, str) and split in self.panes:
+                self.open_split(self.panes[split])
+        finally:
+            self.restoring_workspace = False
+        self.populate_files()
+        pane = self.current()
+        if pane:
+            self.navigation_history.visit(Location(pane.note.path,
+                pane.buffer.get_iter_at_mark(pane.buffer.get_insert()).get_offset()))
+        return True
+
+    def restore_scroll(self, pane, value):
+        self.scroll_restore_sources.pop(pane, None)
+        if pane.note.path in self.panes and self.panes[pane.note.path] is pane:
+            pane.scroll.get_vadjustment().set_value(value)
+        return False
+
     def show_keybinds(self):
         if self.cheatsheet is None:
             self.cheatsheet = KeybindCheatsheet(self)
@@ -959,13 +1809,18 @@ class Window(Gtk.ApplicationWindow):
         return not self.confirm_panes(list(self.panes.values()))
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description='Open a local Markdown vault in Libre Vault.')
     parser.add_argument('vault', nargs='?', help='Path to a vault folder')
-    args = parser.parse_args()
-    app = Gtk.Application(application_id='org.librevault.Prototype')
-    app.connect('activate', lambda app: Window(app, args.vault).present())
-    return app.run([])
+    args = parser.parse_args(argv)
+    app = Gtk.Application(application_id='org.librevault.Prototype', flags=Gio.ApplicationFlags.HANDLES_OPEN)
+    app.connect('activate', lambda app: Window(app).present())
+    def open_folders(app, files, count, hint):
+        for folder in files:
+            Window(app, folder.get_path()).present()
+    app.connect('open', open_folders)
+    paths = [str(Path(args.vault).expanduser().resolve())] if args.vault else []
+    return app.run(['libre-vault', *paths])
 
 
 if __name__ == '__main__':

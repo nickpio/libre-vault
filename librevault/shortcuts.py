@@ -17,6 +17,24 @@ APP_SHORTCUTS = (
     Shortcut('<Control>w', 'Close the active note', 'close_tab'),
     Shortcut('<Control><Shift>d', 'Toggle note details panel', 'toggle_details'),
     Shortcut('<Control><Shift>e', 'Toggle file tree', 'toggle_file_tree'),
+    Shortcut('<Control><Shift>o', 'Quick switcher', 'show_quick_switcher'),
+    Shortcut('<Alt>Left', 'Navigate back', 'navigate_back'),
+    Shortcut('<Alt>Right', 'Navigate forward', 'navigate_forward'),
+    Shortcut('<Control><Shift>s', 'Toggle split editor', 'toggle_split'),
+)
+
+EDITOR_SHORTCUTS = (
+    Shortcut('<Control>z', 'Undo last edit', 'undo'),
+    Shortcut('<Control><Shift>z', 'Redo last edit', 'redo'),
+    Shortcut('<Control>b', 'Toggle bold', 'bold'),
+    Shortcut('<Control>i', 'Toggle italic', 'italic'),
+    Shortcut('<Control>k', 'Insert a Markdown link', 'insert_link'),
+    Shortcut('<Control>f', 'Find in the active note', 'show_find'),
+    Shortcut('<Control>h', 'Find and replace in the active note', 'show_replace'),
+    Shortcut('F3', 'Find next match', 'find_next'),
+    Shortcut('<Control>g', 'Find next match', 'find_next'),
+    Shortcut('<Shift>F3', 'Find previous match', 'find_previous'),
+    Shortcut('<Control><Shift>g', 'Find previous match', 'find_previous'),
 )
 
 KEYBIND_GROUPS = (
@@ -38,7 +56,13 @@ KEYBIND_GROUPS = (
         ('Ctrl+. / Ctrl+;', 'Open the emoji picker'),
         ('F7', 'Toggle cursor visibility'),
     )),
+    ('Find and replace', (
+        ('Enter / Shift+Enter', 'Find the next or previous match from the find field'),
+        ('Enter in replacement field', 'Replace the selected match'),
+        ('Escape', 'Close the find bar and return to the editor'),
+    )),
     ('Moving through a note', (
+        ('Ctrl+click', 'Follow an editor link'),
         ('Arrow keys', 'Move the cursor'),
         ('Ctrl+Left / Ctrl+Right', 'Move by word'),
         ('Ctrl+Up / Ctrl+Down', 'Move by paragraph'),
@@ -74,6 +98,7 @@ KEYBIND_GROUPS = (
         ('Escape', 'Close the cheatsheet'),
     )),
     ('Palette, dialogs, and focus', (
+        ('Up / Down, Enter / Tab', 'Choose and insert a [[link]] completion'),
         ('Up / Down', 'Select a command in the palette'),
         ('Enter', 'Run the selected command or confirm a creation dialog'),
         ('Escape', 'Close the palette, cheatsheet, dialog, or context menu'),

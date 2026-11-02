@@ -1,6 +1,7 @@
 """Source edits for Markdown keyboard actions, independent of GTK."""
 from dataclasses import dataclass
 import re
+from urllib.parse import quote
 
 from .formatting import markdown_layout
 
@@ -10,6 +11,67 @@ class TextEdit:
     start: int
     end: int
     replacement: str
+
+
+def format_inline(text, start, end, marker):
+    """Toggle emphasis while retaining a selection of the original content."""
+    selected = text[start:end]
+    if selected:
+        leading_space = len(selected) - len(selected.lstrip())
+        trailing_space = len(selected) - len(selected.rstrip())
+        if leading_space + trailing_space >= len(selected):
+            return TextEdit(start, end, selected), (start, end)
+        start += leading_space
+        end -= trailing_space
+    def stars_before(position):
+        first = position
+        while first > 0 and text[first - 1] == '*':
+            first -= 1
+        escaped = 0
+        while first > escaped and text[first - escaped - 1] == '\\':
+            escaped += 1
+        return position - first if escaped % 2 == 0 else max(0, position - first - 1)
+
+    def stars_after(position):
+        last = position
+        while last < len(text) and text[last] == '*':
+            last += 1
+        return last - position
+
+    def contains_style(count):
+        return count >= 2 if marker == '**' else count % 2 == 1
+
+    size = len(marker)
+    selected = text[start:end]
+    leading = len(selected) - len(selected.lstrip('*'))
+    trailing = len(selected) - len(selected.rstrip('*'))
+    escaped = len(text[:start]) - len(text[:start].rstrip('\\'))
+    if len(selected) >= size * 2 and contains_style(min(leading, trailing)) and escaped % 2 == 0:
+        content = selected[size:-size]
+        return TextEdit(start, end, content), (start, start + len(content))
+    if contains_style(min(stars_before(start), stars_after(end))):
+        return TextEdit(start - size, end + size, selected), (start - size, end - size)
+    return TextEdit(start, end, marker + selected + marker), (start + size, end + size)
+
+
+def markdown_link(label, target):
+    label = label or target
+    escaped, parts = False, []
+    for char in label:
+        if char in '[]' and not escaped:
+            parts.append('\\')
+        parts.append(char)
+        escaped = not escaped if char == '\\' else False
+    if escaped:
+        parts.append('\\')
+    return '[' + ''.join(parts) + '](' + quote(target, safe='/#:?&=@+%~!$*,-._') + ')'
+
+
+def find_matches(text, query, match_case=False):
+    if not query:
+        return []
+    flags = 0 if match_case else re.IGNORECASE
+    return [(match.start(), match.end()) for match in re.finditer(re.escape(query), text, flags)]
 
 
 def list_enter(text: str, cursor: int) -> TextEdit | None:

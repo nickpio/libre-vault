@@ -15,6 +15,8 @@ from urllib.parse import unquote, urlsplit
 
 from markdown_it import MarkdownIt
 
+from .metadata import matches_query, note_metadata, query_terms, search_result
+
 
 class VaultError(Exception):
     """A vault operation the UI can report without losing editor contents."""
@@ -100,6 +102,7 @@ class Vault:
             raise VaultError('Choose a folder as your vault.')
         self.notes: dict[str, Note | None] = {}
         self._link_cache: dict[str, tuple[str, list[Link]]] = {}
+        self._metadata_cache = {}
         self.refresh()
 
     def _visible_path(self, relative: str) -> Path:
@@ -142,7 +145,11 @@ class Vault:
                     continue
                 relative = path.relative_to(self.root).as_posix()
                 try:
-                    notes[relative] = self.read(relative)
+                    note = self.read(relative)
+                    previous = self.notes.get(relative)
+                    # Polling must not keep a second full copy of an unchanged
+                    # vault while building the replacement index.
+                    notes[relative] = previous if previous == note else note
                 except (VaultError, OSError):
                     # Unreadable notes are still listed; opening one reports the error.
                     notes[relative] = None
@@ -152,6 +159,8 @@ class Vault:
             path: cached for path, cached in self._link_cache.items()
             if (note := self.notes.get(path)) is not None and note.revision == cached[0]
         }
+        self._metadata_cache = {path: cached for path, cached in self._metadata_cache.items()
+                                if (note := self.notes.get(path)) is not None and note.revision == cached[0]}
 
     def save(self, note: Note, text: str) -> Note:
         path = self._path(note.path)
@@ -233,7 +242,12 @@ class Vault:
         if local in self.notes:
             return [local]
         if '/' not in target:
-            return sorted(path for path in self.notes if PurePosixPath(path).name == target)
+            candidates = sorted(path for path in self.notes if PurePosixPath(path).name == target)
+            if candidates:
+                return candidates
+            alias = target[:-3].casefold()
+            return sorted(path for path, note in self.notes.items() if note is not None and
+                          any(value.casefold() == alias for value in self.metadata(path).aliases))
         return []
 
     def backlinks(self, relative: str) -> list[str]:
@@ -250,6 +264,34 @@ class Vault:
         return cached[1]
 
     def search(self, query: str) -> list[str]:
-        words = query.casefold().split()
-        return [path for path, note in self.notes.items() if all(
-            word in (path + '\n' + (note.text if note else '')).casefold() for word in words)]
+        return [result.path for result in self.search_results(query)]
+
+    def search_results(self, query: str):
+        terms = query_terms(query)
+        if not terms:
+            from .metadata import SearchResult
+            return [SearchResult(path, '', ()) for path in self.notes]
+        return [search_result(path, note.text if note else '', terms)
+                for path, note in self.notes.items()
+                if matches_query(path, note.text if note else '', terms,
+                                 self.metadata(path))]
+
+    def metadata(self, relative: str):
+        note = self.notes.get(relative)
+        if note is None:
+            return note_metadata('')
+        cached = self._metadata_cache.get(relative)
+        if cached is None or cached[0] != note.revision:
+            cached = (note.revision, note_metadata(note.text))
+            self._metadata_cache[relative] = cached
+        return cached[1]
+
+    def move(self, relative: str, destination: str) -> dict[str, str]:
+        """Rename or move a note/folder, updating unambiguous Markdown links."""
+        from .organization import move
+        return move(self, relative, destination)
+
+    def trash(self, relative: str) -> Path:
+        """Move an item to this vault's hidden .trash folder without deleting it."""
+        from .organization import trash
+        return trash(self, relative)

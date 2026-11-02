@@ -31,6 +31,17 @@ class LinkCacheTests(unittest.TestCase):
             self.assertEqual(self.vault.backlinks('Source.md'), [])
             self.assertEqual(parse.call_count, initial_count)
 
+    def test_refresh_reuses_unchanged_note_storage(self):
+        previous = self.vault.notes.copy()
+        self.vault.refresh()
+        for path, note in previous.items():
+            self.assertIs(self.vault.notes[path], note)
+        self.write('Source.md', 'Changed text')
+        self.vault.refresh()
+        self.assertIs(self.vault.notes['Target.md'], previous['Target.md'])
+        self.assertIsNot(self.vault.notes['Source.md'], previous['Source.md'])
+        self.assertEqual(self.vault.notes['Source.md'].text, 'Changed text')
+
     def test_save_reparses_only_changed_note(self):
         self.vault.backlinks('Target.md')
         with patch.object(engine, 'parse', wraps=engine.parse) as parse:

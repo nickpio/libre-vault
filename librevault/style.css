@@ -82,6 +82,9 @@ list row:hover { background: @hover; }
 list row:selected { background: @selected; color: @bright; }
 .note-folder { color: @muted; font-size: 8pt; }
 .muted { color: @muted; }
+.welcome-title { color: @bright; font-size: 22pt; font-weight: bold; }
+.welcome-open { padding: 10px 24px; }
+.welcome-hint { color: @muted; font-size: 9pt; }
 .shortcuts { color: @muted; font-size: 8pt; padding: 12px 6px 4px; }
 frame.command-palette {
     background: @canvas;
@@ -126,6 +129,9 @@ notebook > header tab {
 notebook > header tab:hover { background: @hover; color: @ink; }
 notebook > header tab:checked { background: @selected; color: @bright; box-shadow: none; }
 textview, textview text { background: @canvas; color: @ink; caret-color: @accent; }
+.reading-view, .reading-view viewport { background: @canvas; color: @ink; }
+.reading-table { padding: 8px 0; }
+.reading-table-heading { font-weight: bold; border-bottom: 1px solid @edge; padding-bottom: 6px; }
 textview.live-editor { font-size: 11pt; }
 .list-marker { color: @soft; font-size: 11pt; }
 checkbutton.task-checkbox { padding: 0; margin: 0; min-width: 18px; min-height: 18px; }
@@ -148,7 +154,11 @@ button.outline-heading {
 button.outline-heading.outline-root { color: @bright; font-weight: bold; }
 button.outline-heading.current-heading { background: @selected; border-left-color: @accent; }
 .outline-empty { color: @muted; font-size: 9pt; padding: 6px 8px; }
-menu.explorer-menu {
+.find-bar { background: @panel; border-bottom: 1px solid @edge; padding: 8px; }
+.find-bar .muted { font-size: 9pt; }
+.find-bar button.match-case { padding: 4px 7px; }
+.find-bar button.match-case:checked { background: @selected; border-color: @accent; }
+menu.explorer-menu, menu.editor-menu {
     background: @raised;
     color: @ink;
     border: 1px solid @border;
@@ -156,7 +166,7 @@ menu.explorer-menu {
     padding: 5px;
     font-size: 10pt;
 }
-menu.explorer-menu > menuitem {
+menu.explorer-menu > menuitem, menu.editor-menu > menuitem {
     min-width: 150px;
     min-height: 18px;
     margin: 0;
@@ -164,8 +174,8 @@ menu.explorer-menu > menuitem {
     border: none;
     border-radius: 4px;
 }
-menu.explorer-menu > menuitem:hover { background: @hover; }
-menu.explorer-menu > separator {
+menu.explorer-menu > menuitem:hover, menu.editor-menu > menuitem:hover { background: @hover; }
+menu.explorer-menu > separator, menu.editor-menu > separator {
     min-height: 1px;
     margin: 5px 4px;
     padding: 0;

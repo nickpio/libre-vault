@@ -18,19 +18,20 @@ The compatibility specification starts with public documentation. These are docu
 | --- | --- |
 | Open an existing vault in place | Implemented for visible UTF-8 Markdown files; hidden paths and symlinks excluded |
 | Preserve arbitrary frontmatter and `.obsidian` settings | Frontmatter preserved as source; `.obsidian` left untouched |
-| Source editor and reading view | One formatted Markdown editor; syntax reveals on the active line |
+| Source editor and reading view | Live preview, full source, and native GTK reading modes implemented |
+| Undo/redo, find/replace, formatting commands | Per-tab grouped history, literal source find/replace, bold/italic toggles, and Markdown link insertion implemented |
 | Obsidian-style live-preview editing | Basic headings, emphasis, code, quotes, and link labels; advanced rendering planned |
 | Wikilinks and local Markdown links | Implemented subset, including display text and relative Markdown paths |
 | Heading and block links | Approximate navigation; exact anchor rules planned |
 | Backlinks and outgoing links | Implemented; backlinks index saved files |
-| Search, quick switcher, command palette | Plain-text saved-file search and Alt+P command palette with keybind cheatsheet implemented; quick switcher planned |
-| Tabs and workspace layouts | Tabs implemented; persisted layouts and split workspaces planned |
-| Expandable file tree, create, rename, delete | Expandable folder tree, note creation, and subfolder creation implemented; rename and delete planned |
-| Atomic writes, external-change handling, recovery history | Atomic replacement and revision checks implemented; stronger concurrency handling and history planned |
-| Properties, tags, aliases, unlinked mentions | Preservation only; structured behavior planned |
+| Search, quick switcher, command palette | Saved-file snippets, highlighted matches, field filters, fuzzy path/alias switcher, and command palette implemented |
+| Tabs and workspace layouts | Per-vault tab/cursor/scroll/folder restoration and shared-buffer split editor implemented |
+| Expandable file tree, create, rename, delete | Creation, rename/move with resolved-link updates, and recoverable vault-local trash implemented |
+| Atomic writes, external-change handling, recovery history | Atomic replacement, revision checks, autosave, and unsaved crash drafts implemented; saved-version history planned |
+| Properties, tags, aliases, unlinked mentions | YAML property editing, inline/frontmatter tags, alias resolution and filters implemented; unlinked mentions planned |
 | Bulleted, ordered, and task lists | Rendered with nesting and clickable task checkboxes; Markdown preserved |
-| Callouts, tables, footnotes, math, diagrams | Full rendering and interactions planned |
-| Attachment display and note transclusion | Images retain source syntax; note embeds show link labels; rendering planned |
+| Callouts, tables, footnotes, math, diagrams | Reading renders tables, callouts, footnotes, and mathtext expressions; diagrams and full LaTeX support planned |
+| Attachment display and note transclusion | Attachment import/paste/drop, local images, PDF pages, and whole-note embeds implemented; section/block embeds incomplete |
 | Graph and local graph | Planned |
 | Canvas files | Planned using JSON Canvas |
 | Templates, daily notes, bookmarks, outline | Basic outline implemented; remaining workflows planned |

@@ -1,4 +1,5 @@
 #!/bin/sh
 set -eu
-cd "$(dirname "$0")"
-exec python3 -m librevault.app "$@"
+librevault_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+export PYTHONPATH="$librevault_dir${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 -m librevault "$@"

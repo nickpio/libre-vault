@@ -4,15 +4,23 @@ An MIT-licensed native Linux prototype for editing local Markdown vaults. Libre 
 
 ## Run the app
 
-Use Python 3.10 or newer with GTK 3, PyGObject, and markdown-it-py.
+Use Python 3.10 or newer with GTK 3, PyGObject, markdown-it-py, PyYAML, and Matplotlib.
 
 On Debian or Ubuntu, install the distribution packages:
 
 ```sh
-sudo apt install python3-gi gir1.2-gtk-3.0 python3-markdown-it
+sudo apt install python3-gi gir1.2-gtk-3.0 python3-markdown-it python3-yaml python3-matplotlib gir1.2-poppler-0.18
 ```
 
-From this project folder, open the example vault:
+Launch the app without opening a vault:
+
+```sh
+./run.sh
+```
+
+The welcome screen offers **Open vault**. Press Ctrl+O or choose that button to select a vault or an empty folder. Settings and the command palette are available before a vault is opened. No folder is opened or created automatically.
+
+To open the example vault directly:
 
 ```sh
 ./run.sh example-vault
@@ -23,6 +31,8 @@ Pass an existing vault folder to open it directly:
 ```sh
 ./run.sh /path/to/vault
 ```
+
+The launcher also works from outside the project folder and resolves relative vault paths from your current directory. The Python entry point is `python3 -m librevault`, with the same optional vault argument.
 
 Use **Open vault** to select another folder. Use **New note** to create a note in an existing folder. Click a note to open a tab. Follow internal links from **Outgoing links** and **Backlinks**.
 
@@ -37,6 +47,8 @@ Both sidebars open and close with a short slide transition, preserving widths se
 
 Right-click the file explorer for **New note**, **New subfolder**, and **Open vault**. Right-clicking a folder creates inside it; right-clicking a note uses its parent folder. Right-click empty space to create at the vault root. Empty folders appear in the explorer immediately. The menu is also available with Shift+F10 or the Menu key when the explorer has focus.
 
+The same menu offers **Rename**, **Move**, and **Move to trash** for notes and folders. Rename and move update resolved incoming links and relative links inside moved notes, including local attachments. Unsaved editors offer Save, Discard, and Cancel before files change. Trashed items remain in the vault's hidden `.trash` folder and can be moved back with your file manager.
+
 Notes are grouped beneath their folders with indentation for each level. Click a folder to expand or collapse it. With the explorer focused, Right expands a folder or enters it; Left collapses it or selects its parent. Opening a note reveals any collapsed parent folders.
 
 Use these keyboard shortcuts:
@@ -50,38 +62,69 @@ Use these keyboard shortcuts:
 | Ctrl+W | Close the active tab |
 | Ctrl+Shift+D | Show or hide the note details panel |
 | Ctrl+Shift+E | Show or hide the file tree |
+| Ctrl+Shift+O | Open the fuzzy note switcher |
+| Alt+Left / Alt+Right | Navigate back / forward |
+| Ctrl+Shift+S | Open or close a split editor |
 
 Press **Alt+P** to open the compact command palette near the top of the workspace. Run **Open keybind cheatsheet** to see the full keyboard reference, grouped by application, editor, file explorer, tabs, and dialogs. Type to filter commands, press Enter to run the selected command, or press Escape or click outside to dismiss the palette and return to your previous control.
 
 The cheatsheet opens with search focused. Type a key combination, action, or section name to filter shortcuts. Use Up/Down to browse matching results while continuing to type. Press Enter to focus the list, where Left/Right jumps between matching sections and Home/End reaches the first or last result. Ctrl+F returns to search. The selected row stays in view as you navigate. Press Escape to close.
 
+The quick switcher matches note paths and frontmatter aliases. Type `[[` in an editor for note suggestions, then use Up/Down and Enter or Tab to complete the link. Ctrl-click an editor link to follow it. Following an unresolved note link offers to create the note. The command palette also exposes navigation, note creation, saving, settings, and panel controls.
+
+Opening a vault restores its tabs, cursor and scroll positions, collapsed folders, and split editor. A split shares the original note's source buffer and undo history. Keep one note in the split while selecting another tab to compare them. Workspace state is saved beside application settings in `workspaces.json`. Starting without a vault still opens the welcome screen.
+
+These shortcuts apply when the note editor has focus:
+
+| Shortcut | Action |
+| --- | --- |
+| Ctrl+Z | Undo |
+| Ctrl+Shift+Z | Redo |
+| Ctrl+B | Toggle bold on selected text, or insert paired bold markers |
+| Ctrl+I | Toggle italics on selected text, or insert paired italic markers |
+| Ctrl+K | Insert a Markdown link to a URL or note path |
+| Ctrl+F | Find in the active note |
+| Ctrl+H | Find and replace in the active note |
+| F3 or Ctrl+G | Next match |
+| Shift+F3 or Ctrl+Shift+G | Previous match |
+
+Right-click the editor for the same editing commands. Find searches the complete Markdown source, including concealed syntax and frontmatter. Searches are literal and case-insensitive by default; use **Aa** to match case. Enter in the find field advances to the next match, Shift+Enter goes back, and Escape closes the bar. Replace All applies to the active note and undoes as one action.
+
+Each tab keeps up to 500 undo actions in memory. Adjacent typing and deletion are grouped; task toggles, list continuation, formatting, and replacements form individual actions. Undo restores the cursor and selection. Saving preserves the history, and returning to the saved text clears the unsaved indicator. Reloading a clean note after an external change clears that tab's history.
+
 ## Current behavior
 
-Notes remain ordinary `.md` files. The app has one live Markdown editor, tabs, plain-text search, an outline, wikilinks, local Markdown links, and backlinks.
+Notes remain ordinary `.md` files. Each note has **Live preview**, **Source**, and **Reading** modes in its toolbar. Source exposes every Markdown character. Reading renders tables, callouts, footnotes, math, images, PDF pages, and embedded notes without changing the source.
+
+Use the attachment button to copy a file into the vault's `attachments` folder and insert its link. Pasting a screenshot or dropping local files into the editor uses the same storage. Existing files are preserved by choosing a new filename when necessary. Undo removes inserted Markdown while keeping the copied attachment. Reading displays local images and `![[note]]` embeds. PDFs embedded with `![[file.pdf]]` have page controls when Poppler is installed; an Open button uses the system viewer as a fallback. Remote images are not fetched.
 
 The outline indents nested headings, wraps long titles, and highlights the section containing the editor cursor. Click a heading to jump to it.
 
 Headings, emphasis, code, quotes, and link labels format in the writing area as you type. The line containing the cursor reveals its Markdown syntax. Move to another line to hide those markers again. Frontmatter is concealed until the cursor or selection enters it; Ctrl+Home reveals it. Copy, cut, and save retain the original Markdown.
 
-Lists display bullets or numbers with nested indentation. Task lists display checkboxes; click one to toggle it, or focus it and press Space. Completed tasks appear crossed out. Toggling a checkbox updates the Markdown in the editor; use Ctrl+S to save. List markers stay rendered while typing. Select a marker's source range to reveal it for direct Markdown editing.
+Lists display bullets or numbers with nested indentation. Task lists display checkboxes; click one to toggle it, or focus it and press Space. Completed tasks appear crossed out. Toggling a checkbox updates the Markdown in the editor and schedules an autosave. List markers stay rendered while typing. Select a marker's source range to reveal it for direct Markdown editing.
 
 Press Enter to continue a list with the same indentation and bullet style. Numbered lists advance to the next number; new tasks start unchecked. On an empty item, Enter exits the list and leaves a blank line for normal writing. Shift+Enter keeps the standard line break behavior.
+
+Edits autosave after two seconds of inactivity. Ctrl+S saves immediately. While a note has unsaved edits, the app keeps a private recovery draft under `$XDG_STATE_HOME/libre-vault/recovery`, or `~/.local/state/libre-vault/recovery` when that variable is unset. After an interrupted session, reopening the vault offers to recover or discard each draft. A recovered draft retains its original file revision, so an external edit or deletion prevents autosave from overwriting it. Recovery drafts contain note text; protect your user account and backups accordingly.
 
 The app checks for external changes every three seconds. Clean tabs reload. Dirty tabs retain local edits, and conflicting saves stop. Closing a dirty tab or window offers Save, Discard, and Cancel.
 
 Saves preserve a UTF-8 byte-order mark, uniform CRLF line endings, and Unix permission bits. Frontmatter stays in the source. The app leaves `.obsidian` settings untouched. Opening a vault does not create configuration files.
 
-Search matches all whitespace-separated words against saved note paths and saved contents, without case sensitivity. Unsaved edits are not included in search or backlink indexing. Outgoing links use the active editor contents.
+Search shows saved-note snippets with highlighted matches. Plain words match paths and contents without case sensitivity. Quoted phrases, `path:`, `file:`, `content:`, `tag:`, `alias:`, and `property:` filters narrow results. Prefix a term with `-` to exclude it. For example, `tag:work property:status=done -path:Archive` finds completed work outside Archive. `[status]` matches notes with that property. Unsaved edits are not included in search or backlink indexing. Outgoing links use the active editor contents.
+
+The details panel displays tags, aliases, and properties. **Edit properties** edits YAML frontmatter as one undoable action. Tags come from frontmatter lists or inline `#tags`, including nested tags. Aliases participate in link resolution and the quick switcher; ambiguous names still require a choice.
 
 ## Prototype limits
 
-Start with the example vault or a copy of a small vault. This prototype has no recovery history. Save checks reduce accidental overwrites but cannot lock out unrelated programs. A narrow race remains between the final comparison and atomic replacement. Hard links, extended attributes, file ownership, and arbitrary mixed line endings are not preserved as a compatibility contract.
+Start with the example vault or a copy of a small vault. Recovery keeps the latest unsaved draft, not a history of saved versions. Save checks reduce accidental overwrites but cannot lock out unrelated programs. A narrow race remains between the final comparison and atomic replacement. Hard links, extended attributes, file ownership, and arbitrary mixed line endings are not preserved as a compatibility contract.
 
-Live formatting handles a subset of CommonMark. Images and advanced constructs retain their source syntax. Note embeds show their link labels. Links are followed from the sidebar. Heading and block navigation uses a text match rather than Obsidian's full anchor rules. Search filters saved notes, hides folder entries, and displays parent paths beside results. Folder expansion lasts until another vault is opened or the app closes.
+Live formatting handles a subset of CommonMark; richer media and block rendering use Reading mode. Math uses Matplotlib's mathtext subset rather than a full LaTeX engine. Unsupported expressions display their source and a rendering message. Note embeds show whole notes; section and block transclusion remain incomplete. Heading and block navigation uses a text match rather than Obsidian's full anchor rules. Search supports the documented filters above, rather than every Obsidian query operator.
 
-Symbolic links, dotfiles, and hidden folders are excluded. Non-UTF-8 files remain unchanged and report an error when opened. Link resolution is case-sensitive and reports ambiguous basenames. Alias properties are preserved but are not interpreted as link targets.
+Symbolic links, dotfiles, and hidden folders are excluded from browsing. Non-UTF-8 files remain unchanged and report an error when opened. Link resolution is case-sensitive and reports ambiguous basenames and aliases.
 
-Graph, canvas, attachment rendering, property editing, rename and delete operations, full search syntax, plugins, sync, mobile support, and distribution packaging remain unimplemented. The app rereads visible Markdown files on each refresh and has not been optimized for large vaults.
+Graph, canvas, unlinked mentions, saved-version history, full search syntax, plugins, sync, mobile support, and distribution packaging remain unimplemented. The app rereads visible Markdown files on each refresh and has not been optimized for large vaults. Multi-file moves use revision checks and rollback after ordinary failures; they are not a crash-atomic filesystem transaction. Interrupted moves retain original rewritten-note bytes and a manifest under `.trash/.librevault-moves` for manual recovery.
 
 See [the compatibility target](docs/compatibility.md) and [the architecture decisions](docs/architecture.md).
 
@@ -99,7 +142,7 @@ To exercise the actual GTK window without a visible desktop, install Xvfb and ru
 xvfb-run -a -s '-screen 0 1600x1000x24' env GDK_BACKEND=x11 PYTHONPATH=. python3 tests/smoke_gui.py
 ```
 
-The GUI test opens a temporary copy of the example vault, follows a link, edits and saves, reads the resulting file, checks external reload and conflict handling, and exercises search. It does not modify the supplied example vault.
+The GUI test opens a temporary copy of the example vault, follows a link, edits, exercises undo/redo and find/replace, saves, reads the resulting file, checks external reload and conflict handling, and exercises search. It does not modify the supplied example vault.
 
 ## License
 

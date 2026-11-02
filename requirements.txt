@@ -1,2 +1,4 @@
 PyGObject>=3.42,<4
 markdown-it-py>=3,<5
+PyYAML>=6,<7
+matplotlib>=3.6,<4

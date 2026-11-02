@@ -4,7 +4,7 @@ import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gdk, Gtk
 
-from .shortcuts import APP_SHORTCUTS, KEYBIND_GROUPS
+from .shortcuts import APP_SHORTCUTS, EDITOR_SHORTCUTS, KEYBIND_GROUPS
 
 
 class CommandPalette(Gtk.EventBox):
@@ -35,21 +35,34 @@ class CommandPalette(Gtk.EventBox):
         self.results.set_selection_mode(Gtk.SelectionMode.SINGLE)
         self.results.set_activate_on_single_click(True)
         self.results.get_style_context().add_class('command-results')
-        content.pack_start(self.results, False, False, 0)
+        self.results_scroll = Gtk.ScrolledWindow()
+        self.results_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.results_scroll.set_max_content_height(88)
+        self.results_scroll.set_propagate_natural_height(True)
+        self.results_scroll.add(self.results)
+        content.pack_start(self.results_scroll, False, False, 0)
+        self.results.connect('row-selected', self.reveal_selected)
         # Keep the keyboard reference first as more commands are added.
-        row = Gtk.ListBoxRow()
-        row.action = owner.show_keybinds
-        row.title = 'Open keybind cheatsheet'
-        command = Gtk.Box(spacing=10)
-        icon = Gtk.Image.new_from_icon_name('input-keyboard-symbolic', Gtk.IconSize.MENU)
-        icon.get_style_context().add_class('muted')
-        command.pack_start(icon, False, False, 0)
-        command.pack_start(Gtk.Label(label=row.title, xalign=0), True, True, 0)
-        enter = Gtk.Label(label='Enter')
-        enter.get_style_context().add_class('keybind-keys')
-        command.pack_end(enter, False, False, 0)
-        row.add(command)
-        self.results.add(row)
+        actions = [('Open keybind cheatsheet', owner.show_keybinds),
+                   ('Open vault', owner.choose_vault), ('Open settings', owner.show_settings)]
+        if owner.vault:
+            actions.extend([('Quick switcher', owner.show_quick_switcher),
+                            ('New note', owner.new_note), ('New folder', owner.new_folder),
+                            ('Save note', owner.save_current), ('Close note', owner.close_tab),
+                            ('Navigate back', owner.navigate_back), ('Navigate forward', owner.navigate_forward),
+                            ('Toggle split editor', owner.toggle_split),
+                            ('Toggle file tree', owner.toggle_file_tree),
+                            ('Toggle note details', owner.toggle_details)])
+        for title, action in actions:
+            row = Gtk.ListBoxRow()
+            row.action, row.title = action, title
+            command = Gtk.Box(spacing=10)
+            icon = Gtk.Image.new_from_icon_name('system-run-symbolic', Gtk.IconSize.MENU)
+            icon.get_style_context().add_class('muted')
+            command.pack_start(icon, False, False, 0)
+            command.pack_start(Gtk.Label(label=title, xalign=0), True, True, 0)
+            row.add(command)
+            self.results.add(row)
         self.empty = Gtk.Label(label='No matching commands', xalign=0)
         self.empty.set_no_show_all(True)
         content.pack_start(self.empty, False, False, 0)
@@ -107,6 +120,16 @@ class CommandPalette(Gtk.EventBox):
             self.results.select_row(rows[index])
         return True
 
+    def reveal_selected(self, _, row):
+        if row is None:
+            return
+        adjustment = self.results_scroll.get_vadjustment()
+        allocation = row.get_allocation()
+        if allocation.y < adjustment.get_value():
+            adjustment.set_value(allocation.y)
+        elif allocation.y + allocation.height > adjustment.get_value() + adjustment.get_page_size():
+            adjustment.set_value(allocation.y + allocation.height - adjustment.get_page_size())
+
     def run_selected(self, *_):
         row = self.results.get_selected_row()
         if row and row.get_visible():
@@ -156,7 +179,9 @@ class KeybindCheatsheet(Gtk.Dialog):
         key_widths = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
         application = tuple((Gtk.accelerator_get_label(*Gtk.accelerator_parse(shortcut.accelerator)),
                              shortcut.description) for shortcut in APP_SHORTCUTS)
-        self.groups = (('Application', application), *KEYBIND_GROUPS)
+        editing = tuple((Gtk.accelerator_get_label(*Gtk.accelerator_parse(shortcut.accelerator)),
+                         shortcut.description) for shortcut in EDITOR_SHORTCUTS)
+        self.groups = (('Application', application), ('Editor commands', editing), *KEYBIND_GROUPS)
         self.bindings.set_header_func(self.section_header)
         for section, (title, bindings) in enumerate(self.groups):
             for keys, description in bindings:

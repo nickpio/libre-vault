@@ -35,8 +35,11 @@ def main():
         root = Path(folder) / 'vault'
         example = Path(__file__).resolve().parents[1] / 'example-vault'
         shutil.copytree(example, root)
-        window = Window(app, str(root))
+        window = Window(app)
         try:
+            assert window.vault is None
+            assert window.workspace_stack.get_visible_child_name() == 'welcome'
+            window.load_vault(root)
             drain_events()
             assert window.current().note.path == 'Welcome.md'
             window.follow_link('Welcome.md', 'Projects/Field notes')
@@ -47,6 +50,11 @@ def main():
             pane.buffer.insert(pane.buffer.get_end_iter(), '\nSmoke saved text\n')
             drain_events()
             assert pane.dirty
+            pane.undo()
+            assert pane.text() == original
+            assert not pane.dirty
+            pane.redo()
+            assert pane.text() == original + '\nSmoke saved text\n'
             pane.save()
             path = root / pane.note.path
             assert path.read_text(encoding='utf-8') == original + '\nSmoke saved text\n'
@@ -58,6 +66,18 @@ def main():
             drain_events()
             assert pane.text() == '# External revision\n'
             assert not pane.dirty
+            assert not pane.history.can_undo
+
+            # Find/replace updates original Markdown and undoes as one action.
+            pane.show_replace()
+            pane.findbar.query.set_text('External')
+            pane.findbar.replacement.set_text('Revised')
+            pane.findbar.replace_all()
+            assert pane.text() == '# Revised revision\n'
+            pane.undo()
+            assert pane.text() == '# External revision\n'
+            assert not pane.dirty
+            pane.findbar.close()
 
             # A dirty editor must retain its buffer and refuse a conflicting save.
             pane.buffer.insert(pane.buffer.get_end_iter(), 'Local unsaved text\n')
@@ -83,7 +103,7 @@ def main():
             window.search_entry.set_text('does-not-exist')
             window.populate_files()
             assert window.files.get_children() == []
-            print('GTK smoke passed: link, edit, save, external reload, conflict, search')
+            print('GTK smoke passed: link, edit, undo/redo, find/replace, save, external reload, conflict, search')
         finally:
             # Destroy directly so teardown cannot open a dirty-buffer dialog.
             window.destroy()
