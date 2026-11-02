@@ -77,100 +77,15 @@ Libre Vault opens a folder of Markdown files and gives you a fast, keyboard-driv
 
 ## Features
 
-<table>
-<tr>
-<td width="33%" valign="top">
-
-### Plain files, in place
-
-Notes are ordinary Markdown on disk. Opening a vault creates no configuration files, leaves `.obsidian` untouched, and keeps frontmatter as source. Saves preserve UTF-8 BOMs, uniform CRLF endings, and Unix permission bits.
-
-</td>
-<td width="33%" valign="top">
-
-### Three editing modes
-
-Every note offers **Live preview**, **Source**, and **Reading**. Live preview formats headings, emphasis, code, quotes, and links as you type, and reveals syntax only on the line you are editing.
-
-</td>
-<td width="33%" valign="top">
-
-### Links that keep meaning
-
-Wikilinks, Markdown links, aliases, outgoing links, and backlinks. `[[` completion, Ctrl-click to follow, and renames or moves that rewrite every resolved incoming link.
-
-</td>
-</tr>
-<tr>
-<td width="33%" valign="top">
-
-### Filtered search
-
-Snippets with highlighted matches. Combine phrases with `path:`, `file:`, `content:`, `tag:`, `alias:`, and `property:` filters, and exclude with `-`. Backed by SQLite FTS5 trigrams.
-
-</td>
-<td width="33%" valign="top">
-
-### Graph view
-
-Global and local graphs, sized by connection count, with search, orphan filtering, depth control, and split-view docking. Layout runs in a separate, bounded worker process.
-
-</td>
-<td width="33%" valign="top">
-
-### Crash-safe by design
-
-Two-second autosave, atomic replacement, revision checks against external edits, and private recovery drafts that survive an interrupted session.
-
-</td>
-</tr>
-<tr>
-<td width="33%" valign="top">
-
-### Attachments and embeds
-
-Paste screenshots or drop files to import them into `attachments/`, with automatic de-duplication. Reading mode renders images, PDF pages, and `![[note]]` embeds.
-
-</td>
-<td width="33%" valign="top">
-
-### Keyboard first
-
-A compact command palette, fuzzy quick switcher, searchable keybind cheatsheet, and a fully keyboard-navigable file explorer.
-
-</td>
-<td width="33%" valign="top">
-
-### Workspace memory
-
-Tabs, cursor and scroll positions, collapsed folders, split editors, and graph tabs are restored per vault. Split panes share one buffer and undo history.
-
-</td>
-</tr>
-<tr>
-<td width="33%" valign="top">
-
-### Rich reading view
-
-Tables, callouts, footnotes, task lists, mathtext expressions, images, PDFs, and embedded notes, all rendered without changing a byte of source.
-
-</td>
-<td width="33%" valign="top">
-
-### Properties and tags
-
-Edit YAML frontmatter as a single undoable action. Tags from frontmatter or inline `#nested/tags`; aliases participate in link resolution.
-
-</td>
-<td width="33%" valign="top">
-
-### Three themes
-
-**Dark**, **Light**, and **Lights Out**, a pure-black OLED theme. Live font, size, line length, and wrapping preferences apply instantly.
-
-</td>
-</tr>
-</table>
+- Edit Markdown in Live preview, Source, or Reading mode.
+- Follow wikilinks and backlinks, with link completion and updates when notes move or change names.
+- Edit properties and tags, and search by path, filename, content, tag, alias, or property.
+- Explore connections in global and local graphs.
+- Import attachments and preview images, PDFs, embedded notes, tables, callouts, and math.
+- Navigate with a command palette, quick switcher, and keyboard shortcuts.
+- Restore tabs, split panes, and cursor positions for each vault.
+- Autosave with conflict checks and recovery drafts.
+- Choose Dark, Light, or Lights Out themes and adjust fonts and layout.
 
 <p align="right"><a href="#top">back to top</a></p>
 
