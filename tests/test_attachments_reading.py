@@ -34,6 +34,24 @@ class AttachmentStorageTests(unittest.TestCase):
         self.assertEqual(attachment_markdown(first), '![Image one.png](attachments/Image%20one.png)')
         self.assertEqual(attachment_markdown('attachments/report.pdf'), '[report.pdf](attachments/report.pdf)')
 
+    def test_identical_attachments_are_reused_without_overwriting_distinct_files(self):
+        first = store_attachment(self.vault, 'image.png', b'first')
+        second = store_attachment(self.vault, 'image.png', b'other')
+        self.assertEqual(store_attachment(self.vault, 'image.png', b'other'), second)
+        self.assertEqual(store_attachment(self.vault, 'renamed.PNG', b'first'), first)
+        self.assertEqual(len(list((self.root / 'attachments').iterdir())), 2)
+        self.assertNotEqual(store_attachment(self.vault, 'image.txt', b'first'), first)
+
+    def test_duplicate_check_does_not_follow_symlinks(self):
+        directory = self.root / 'attachments'
+        directory.mkdir()
+        with TemporaryDirectory() as outside:
+            external = Path(outside) / 'external.png'
+            external.write_bytes(b'image')
+            (directory / 'alias.png').symlink_to(external)
+            stored = store_attachment(self.vault, 'new.png', b'image')
+            self.assertEqual(stored, 'attachments/new.png')
+
     def test_local_assets_refuse_remote_escape_and_symlinks(self):
         relative = store_attachment(self.vault, 'file.png', b'image')
         (self.root / 'Folder').mkdir()
@@ -93,6 +111,14 @@ class ReadingTests(unittest.TestCase):
         self.pane.undo()
         self.assertEqual(self.pane.text(), original)
         self.assertTrue((self.root / relative).exists())
+
+    def test_removing_and_reinserting_attachment_reuses_stored_file(self):
+        first = self.pane.insert_attachment_bytes('image.png', b'image')
+        self.pane.buffer.set_text('')
+        second = self.pane.insert_attachment_bytes('image.png', b'image')
+        self.assertEqual(second, first)
+        self.assertEqual(self.pane.text(), '![image.png](attachments/image.png)')
+        self.assertEqual([path.name for path in (self.root / 'attachments').iterdir()], ['image.png'])
 
     def test_nested_note_attachment_markup_cannot_resolve_to_shadowing_local_asset(self):
         (self.root / 'Folder' / 'attachments').mkdir(parents=True)
@@ -229,6 +255,52 @@ class ReadingTests(unittest.TestCase):
                   if isinstance(widget, Gtk.Label)]
         self.assertTrue(any('Could not render this expression' in label for label in labels))
         self.assertEqual(self.pane.text(), source)
+
+    def test_live_image_preview_preserves_source_and_reveals_active_line(self):
+        image = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, True, 8, 40, 20)
+        image.fill(0xff0000ff)
+        _, data = image.save_to_bufferv('png', [], [])
+        relative = store_attachment(self.window.vault, 'image.png', data)
+        source = f'Before\n![image]({relative})\nAfter\n\n- [ ] Task\n'
+        self.pane.buffer.set_text(source)
+        self.pane.buffer.place_cursor(self.pane.buffer.get_end_iter())
+        self.pane.render()
+        self.assertEqual(len(self.pane.image_widgets), 1)
+        start, end, widget, tag = self.pane.image_widgets[0]
+        self.assertTrue(widget.get_visible())
+        self.assertTrue(self.pane.buffer.get_iter_at_offset(start).has_tag(self.pane.hidden))
+        self.assertTrue(self.pane.buffer.get_iter_at_offset(start).has_tag(tag))
+        self.assertEqual(self.pane.text(), source)
+        self.assertTrue(any(item.task_offset is not None for item, _ in self.pane.list_widgets))
+        self.pane.buffer.place_cursor(self.pane.buffer.get_iter_at_offset(end))
+        self.pane.render()
+        self.assertTrue(widget.get_visible())
+        self.pane.buffer.place_cursor(self.pane.buffer.get_iter_at_offset(start + 1))
+        self.pane.render()
+        self.assertFalse(widget.get_visible())
+        self.assertFalse(self.pane.buffer.get_iter_at_offset(start).has_tag(self.pane.hidden))
+        self.pane.set_mode('source')
+        self.assertFalse(widget.get_visible())
+        self.assertEqual(self.pane.text(), source)
+
+    def test_inserted_image_in_text_gets_a_previewable_line(self):
+        image = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, True, 8, 20, 10)
+        image.fill(0xff0000ff)
+        _, data = image.save_to_bufferv('png', [], [])
+        self.pane.buffer.set_text('before after')
+        self.pane.buffer.place_cursor(self.pane.buffer.get_iter_at_offset(6))
+        self.pane.insert_attachment_bytes('image.png', data)
+        self.pane.render()
+        self.assertEqual(self.pane.text(), 'before\n![image.png](attachments/image.png)\n after')
+        self.assertEqual(len(self.pane.image_widgets), 1)
+        self.assertTrue(self.pane.image_widgets[0][2].get_visible())
+        self.pane.undo()
+        self.assertEqual(self.pane.text(), 'before after')
+
+    def test_live_image_preview_ignores_code_and_missing_images(self):
+        self.pane.buffer.set_text('```md\n![fake](missing.png)\n```\n\n![missing](missing.png)\n')
+        self.pane.render()
+        self.assertEqual(self.pane.image_widgets, [])
 
     def test_local_image_embed_is_scaled_and_remote_image_is_not_fetched(self):
         image = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, True, 8, 20, 10)
