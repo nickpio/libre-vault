@@ -8,15 +8,13 @@ PALETTES = {
         'ink': '#d5d5d5', 'muted': '#999999', 'edge': '#252525', 'accent': '#cccccc',
         'raised': '#161616', 'button_bg': '#1a1a1a', 'border': '#333333',
         'focus_edge': '#505050', 'bright': '#eeeeee', 'soft': '#aaaaaa',
-        'code_bg': '#1b1b1b', 'selection_bg': '#3a3a3a',
+        'code_bg': '#1b1b1b', 'selection_bg': '#3a3a3a', 'panel_border': '#ffffff',
     },
-    'light': {
-        'canvas': '#fafafa', 'panel': '#f2f2f2', 'hover': '#eaeaea', 'selected': '#dddddd',
-        'ink': '#292929', 'muted': '#686868', 'edge': '#dddddd', 'accent': '#484848',
-        'raised': '#ffffff', 'button_bg': '#eeeeee', 'border': '#cccccc',
-        'focus_edge': '#888888', 'bright': '#151515', 'soft': '#555555',
-        'code_bg': '#e8e8e8', 'selection_bg': '#d0d0d0',
-    },
+}
+# Preserve the dark theme's contrast and surface hierarchy in light mode.
+PALETTES['light'] = {
+    name: f'#{0xFFFFFF - int(color[1:], 16):06x}'
+    for name, color in PALETTES['dark'].items()
 }
 FONTS = {'sans': '"Inter", "Cantarell", sans-serif', 'serif': 'serif', 'monospace': 'monospace'}
 

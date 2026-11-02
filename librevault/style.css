@@ -15,6 +15,7 @@
 @define-color soft #aaaaaa;
 @define-color code_bg #1b1b1b;
 @define-color selection_bg #3a3a3a;
+@define-color panel_border #ffffff;
 
 window, dialog {
     background: @canvas;
@@ -71,6 +72,10 @@ entry {
 entry:focus { border-color: @focus_edge; }
 entry image { color: @muted; }
 .sidebar { background: @panel; }
+frame > border { border-color: @edge; }
+separator { background: @edge; min-height: 1px; border: none; }
+label link { color: @accent; }
+label link:visited { color: @soft; }
 .vault-heading { padding: 0 0 6px; }
 .vault-title { color: @bright; font-size: 9pt; font-weight: bold; padding-left: 5px; }
 .caption { color: @muted; font-size: 9pt; font-weight: normal; padding: 20px 8px 8px; }
@@ -161,14 +166,18 @@ button.outline-heading.current-heading { background: @selected; border-left-colo
 .find-bar .muted { font-size: 9pt; }
 .find-bar button.match-case { padding: 4px 7px; }
 .find-bar button.match-case:checked { background: @selected; border-color: @accent; }
-menu.explorer-menu, menu.editor-menu {
+window.popup { background: transparent; }
+menu, popover {
     background: @raised;
     color: @ink;
     border: 1px solid @border;
-    border-radius: 8px;
+    border-radius: 12px;
     padding: 5px;
     font-size: 10pt;
 }
+menu menuitem { background: transparent; color: @ink; }
+menu menuitem:hover { background: @hover; color: @bright; }
+menu menuitem:disabled { color: @muted; }
 menu.explorer-menu > menuitem, menu.editor-menu > menuitem {
     min-width: 150px;
     min-height: 18px;

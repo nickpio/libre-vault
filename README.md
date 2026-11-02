@@ -132,17 +132,21 @@ See [the compatibility target](docs/compatibility.md) and [the architecture deci
 
 ## Verify the implementation
 
-Run the filesystem and parser tests:
+Run the test suite:
 
 ```sh
 ./check.sh
 ```
 
-To exercise the actual GTK window without a visible desktop, install Xvfb and run:
+On Hyprland, GUI checks open silently on the named `librevault-tests` workspace and do not take focus. This includes dialogs and child-process probes. The rule applies only to the current test run and is disabled afterward. On other desktops, install Xvfb to run GUI checks on a private display. If neither option is available, the runner refuses to open GUI windows on your desktop unless you explicitly use `--foreground`. Without a display, existing GUI tests are skipped.
+
+Run the GUI smoke check with the same background routing:
 
 ```sh
-xvfb-run -a -s '-screen 0 1600x1000x24' env GDK_BACKEND=x11 PYTHONPATH=. python3 tests/smoke_gui.py
+./check.sh --smoke
 ```
+
+Use `./check.sh --foreground` for interactive debugging. To run a standalone Python GUI probe in the background, use `./check.sh --script /path/to/probe.py`. Test runs use temporary configuration and recovery directories, leaving your real settings and last-opened vault untouched.
 
 The GUI test opens a temporary copy of the example vault, follows a link, edits, exercises undo/redo and find/replace, saves, reads the resulting file, checks external reload and conflict handling, and exercises search. It does not modify the supplied example vault.
 

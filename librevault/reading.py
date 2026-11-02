@@ -10,6 +10,7 @@ from gi.repository import Gtk, GdkPixbuf, GLib, Gio, Pango
 from markdown_it import MarkdownIt
 
 from .attachments import local_path
+from .appearance import PALETTES
 from .vault import VaultError, wiki_rule
 
 
@@ -283,7 +284,7 @@ class ReadingView(Gtk.ScrolledWindow):
             from matplotlib import rc_context
             from matplotlib.mathtext import math_to_image
             output = BytesIO()
-            color = '#e4e4e4' if self.pane.window.preferences.theme == 'dark' else '#242424'
+            color = PALETTES[self.pane.window.preferences.theme]['bright']
             with rc_context({'savefig.transparent': True}):
                 math_to_image('$' + expression + '$', output, dpi=150, format='png', color=color)
             image = Gtk.Image.new_from_pixbuf(pixbuf_bytes(output.getvalue()))

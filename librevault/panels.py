@@ -30,9 +30,10 @@ class SlidingPanel(Gtk.Revealer):
 
     def draw_inner_border(self, _, context):
         width, height = self.get_allocated_width(), self.get_allocated_height()
+        _, color = self.get_style_context().lookup_color('panel_border')
         gradient = cairo.LinearGradient(0, 0, 0, height)
-        gradient.add_color_stop_rgba(0, 1, 1, 1, 0)
-        gradient.add_color_stop_rgba(1, 1, 1, 1, 0.12)
+        gradient.add_color_stop_rgba(0, color.red, color.green, color.blue, 0)
+        gradient.add_color_stop_rgba(1, color.red, color.green, color.blue, 0.12)
         context.set_source(gradient)
         context.rectangle(width - 1 if self.at_start else 0, 0, 1, height)
         context.fill()
