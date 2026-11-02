@@ -124,7 +124,7 @@ Live formatting handles a subset of CommonMark; richer media and block rendering
 
 Symbolic links, dotfiles, and hidden folders are excluded from browsing. Non-UTF-8 files remain unchanged and report an error when opened. Link resolution is case-sensitive and reports ambiguous basenames and aliases.
 
-Graph, canvas, unlinked mentions, saved-version history, full search syntax, plugins, sync, mobile support, and distribution packaging remain unimplemented. The app rereads visible Markdown files on each refresh and has not been optimized for large vaults. Multi-file moves use revision checks and rollback after ordinary failures; they are not a crash-atomic filesystem transaction. Interrupted moves retain original rewritten-note bytes and a manifest under `.trash/.librevault-moves` for manual recovery.
+Graph, canvas, unlinked mentions, saved-version history, full search syntax, plugins, sync, mobile support, and distribution packaging remain unimplemented. Filesystem notifications update changed notes and directory subtrees without periodic full-vault reads. Initial indexing, explicit rescans, and multi-file organization operations still scan the vault; large-vault latency has not been optimized. Multi-file moves use revision checks and rollback after ordinary failures; they are not a crash-atomic filesystem transaction. Interrupted moves retain original rewritten-note bytes and a manifest under `.trash/.librevault-moves` for manual recovery.
 
 See [the compatibility target](docs/compatibility.md) and [the architecture decisions](docs/architecture.md).
 

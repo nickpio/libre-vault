@@ -1,6 +1,7 @@
 """Short native GTK slide transitions that preserve resizable panel widths."""
 import time
 
+import cairo
 import gi
 
 gi.require_version('Gtk', '3.0')
@@ -23,8 +24,19 @@ class SlidingPanel(Gtk.Revealer):
         self.set_transition_duration(160)
         self.set_reveal_child(True)
         self.add(child)
+        self.connect_after('draw', self.draw_inner_border)
         self.connect_after('map', self.mapped)
         self.connect('destroy', self.cleanup)
+
+    def draw_inner_border(self, _, context):
+        width, height = self.get_allocated_width(), self.get_allocated_height()
+        gradient = cairo.LinearGradient(0, 0, 0, height)
+        gradient.add_color_stop_rgba(0, 1, 1, 1, 0)
+        gradient.add_color_stop_rgba(1, 1, 1, 1, 0.12)
+        context.set_source(gradient)
+        context.rectangle(width - 1 if self.at_start else 0, 0, 1, height)
+        context.fill()
+        return False
 
     def set_open(self, opened):
         if opened == self.opened:

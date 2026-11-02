@@ -27,7 +27,8 @@ saved = vault.save(note, '# Revised plan\n')
 | Module | Owns |
 | --- | --- |
 | `librevault/vault.py` | Path validation, UTF-8 reads, revision checks, atomic replacement, link parsing, resolution, search, and backlinks |
-| `librevault/app.py` | GTK windows, open tabs, dirty buffers, live text styles, user choices, and periodic refresh |
+| `librevault/monitor.py` | Recursive Gio directory watches, coalesced filesystem events, and watch cleanup |
+| `librevault/app.py` | GTK windows, open tabs, dirty buffers, live text styles, user choices, and event-driven refresh |
 | `librevault/formatting.py` | Pure source-offset formatting spans, syntax ranges, and list/task structure derived from Markdown tokens |
 | `librevault/editing.py` | Pure source edits for list continuation, emphasis toggles, link construction, and literal match offsets |
 | `librevault/history.py` | Per-buffer grouped source deltas, typing coalescence, selection restoration, and bounded undo/redo stacks |
@@ -89,7 +90,13 @@ A database as the authoritative note store would require import and export behav
 ## Risks that need evidence
 
 - No tests have compared this implementation against a running Obsidian instance. Current fixtures test documented syntax and the prototype's stated behavior.
-- Full-file polling and full backlink recomputation block the GTK thread. Large-vault support needs an incremental background index and measured latency.
+- Filesystem events reconcile only changed files or subtrees. Index updates, initial/explicit scans, and backlink recomputation still run on the GTK thread. Large-vault support needs measured latency and background work.
 - Live editing now has cursor reveal, selection, clipboard, and save checks. Embedded widgets, large-document latency, and IME interactions still need evidence before committing to GTK as the final editor.
 - Rename-with-link-updates spans multiple files. Revision checks and rollback handle ordinary failures; multi-file moves are not crash-atomic.
 - External editors do not participate in the prototype's revision protocol. Save races need a tested preservation policy before recommending use on primary vaults.
+
+## Filesystem monitoring
+
+Each open vault owns Gio directory monitors for its visible, non-symlink directories and a parent watch for root replacement. Notifications are coalesced for 100 ms, then reconciled against current disk state. File changes read only the affected Markdown notes; directory changes scan that subtree and reinstall its watches. Both sides of moves are reconciled. Non-Markdown events also refresh reading dependencies, including attachments. Buffer changes independently queue an idle reading refresh so unsaved transclusions remain current.
+
+An initial reconciliation after watch installation closes the scan/watch startup gap. Explicit `Window.refresh()` and `Vault.refresh()` remain full rescans for callers that need them, including organization operations. Switching vaults or destroying the window disconnects and cancels watches and pending callbacks. Watch-installation failures appear in the status bar; reopening the vault retries them. There is no periodic polling fallback. Gio backend support and OS watch limits therefore constrain live monitoring; unsupported filesystems or dropped notifications may require an explicit rescan or reopening the vault.

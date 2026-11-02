@@ -13,6 +13,7 @@ gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk, Gio, GLib, Pango
 
 from .vault import Vault, VaultError, links
+from .monitor import VaultMonitor
 from .recovery import RecoveryStore
 from .formatting import markdown_layout
 from .editing import TextEdit, format_inline, list_enter, markdown_link
@@ -250,6 +251,7 @@ class NotePane(Gtk.Box):
             self.buffer.end_user_action()
 
     def changed(self, *_):
+        self.window.queue_reading_refresh()
         self.dirty = self.text() != self.note.text.replace('\r\n', '\n')
         self.tab_label.set_text(('• ' if self.dirty else '') + Path(self.note.path).stem)
         self.window.status.set_text('Unsaved changes · Ctrl+S to save' if self.dirty
@@ -643,7 +645,8 @@ class Window(Gtk.ApplicationWindow):
         self.workspace_source = None
         self.scroll_restore_sources = {}
         self.quick_switcher = None
-        self.refresh_source = None
+        self.vault_monitor = None
+        self.reading_source = None
         self.panel_widths_initialized = False
         self.connect('delete-event', self.on_delete)
         self.connect('key-press-event', self.key_press)
@@ -791,7 +794,6 @@ class Window(Gtk.ApplicationWindow):
         format_label.get_style_context().add_class('status')
         statusbar.pack_end(format_label, False, False, 0)
         root.pack_end(statusbar, False, False, 0)
-        self.refresh_source = GLib.timeout_add_seconds(3, self.refresh)
         self.workspace_source = GLib.timeout_add_seconds(5, self.persist_workspace)
         self.connect('destroy', self.cleanup)
         self.show_all()
@@ -811,6 +813,9 @@ class Window(Gtk.ApplicationWindow):
 
     def cleanup(self, *_):
         self.persist_workspace()
+        if self.reading_source is not None:
+            GLib.source_remove(self.reading_source)
+            self.reading_source = None
         # These widgets live in implicit GtkViewports. Explicitly dispose
         # them so native signal closures cannot retain the window.
         self.files.destroy()
@@ -824,9 +829,9 @@ class Window(Gtk.ApplicationWindow):
         Gtk.StyleContext.remove_provider_for_screen(Gdk.Screen.get_default(), self.css_provider)
         if self.recovery:
             self.recovery.close()
-        if self.refresh_source:
-            GLib.source_remove(self.refresh_source)
-            self.refresh_source = None
+        if self.vault_monitor:
+            self.vault_monitor.close()
+            self.vault_monitor = None
 
     def error(self, error):
         self.status.set_text(str(error))
@@ -889,6 +894,8 @@ class Window(Gtk.ApplicationWindow):
         if not self.confirm_panes(list(self.panes.values())):
             return
         self.persist_workspace()
+        if self.vault_monitor:
+            self.vault_monitor.close()
         self.close_split()
         while self.tabs.get_n_pages():
             self.tabs.remove_page(0)
@@ -911,6 +918,7 @@ class Window(Gtk.ApplicationWindow):
             first = 'Welcome.md' if 'Welcome.md' in vault.notes else next(iter(vault.notes))
             self.open_note(first)
         self.update_context()
+        self.vault_monitor = VaultMonitor(vault, self.refresh, self.status.set_text)
 
     def initialize_panel_widths(self, center, allocation):
         # The workspace can start hidden behind the welcome screen. Wait for
@@ -1191,6 +1199,7 @@ class Window(Gtk.ApplicationWindow):
                 self.recovery.remove(pane.note.path)
             self.tabs.remove_page(self.tabs.page_num(pane))
             self.panes.pop(pane.note.path, None)
+        self.queue_reading_refresh()
         self.remap_navigation({}, deleted=deleted)
         self.collapsed_folders.intersection_update(self.vault.folders)
         self.populate_files()
@@ -1331,6 +1340,7 @@ class Window(Gtk.ApplicationWindow):
                 self.close_split()
             self.tabs.remove_page(self.tabs.page_num(pane))
             self.panes.pop(pane.note.path, None)
+            self.queue_reading_refresh()
             self.update_context()
 
     def new_note(self, *_, parent=''):
@@ -1524,11 +1534,25 @@ class Window(Gtk.ApplicationWindow):
         self.context.show_all()
         return False
 
-    def refresh(self):
+    def queue_reading_refresh(self):
+        if self.reading_source is None and any(pane.mode == 'reading' for pane in self.panes.values()):
+            self.reading_source = GLib.idle_add(self.refresh_reading, priority=GLib.PRIORITY_LOW)
+
+    def refresh_reading(self):
+        self.reading_source = None
+        for pane in self.panes.values():
+            if pane.mode == 'reading':
+                pane.reading.refresh()
+        return False
+
+    def refresh(self, paths=None):
         if not self.vault:
             return True
         try:
-            self.vault.refresh()
+            if paths is None:
+                self.vault.refresh()
+            else:
+                self.vault.update_paths(paths)
             self.collapsed_folders.intersection_update(self.vault.folders)
             self.populate_files()
             for path, pane in self.panes.items():

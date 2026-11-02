@@ -112,8 +112,11 @@ frame.command-palette > border { border: none; }
 .keybind-list row:selected { background: @selected; border-color: @border; }
 .keybind-list row:focus { outline: none; }
 scrolledwindow, viewport { border: none; box-shadow: none; background: transparent; }
-paned > separator { background: @edge; min-width: 1px; min-height: 1px; border: none; }
-.workspace-split > separator { background: transparent; min-width: 5px; }
+paned > separator { background: transparent; min-width: 1px; min-height: 1px; border: none; }
+.workspace-split > separator {
+    background: transparent;
+    min-width: 5px;
+}
 notebook { background: @canvas; border: none; }
 notebook > header { background: @canvas; border: none; padding: 4px 10px; box-shadow: none; }
 notebook > header tabs { border: none; }

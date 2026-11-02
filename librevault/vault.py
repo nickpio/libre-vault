@@ -111,6 +111,8 @@ class Vault:
         if path.is_absolute() or not path.parts or any(p in ('.', '..') or p.startswith('.') for p in path.parts):
             raise VaultError('Use a visible path inside the vault.')
         current = self.root
+        if current.is_symlink():
+            raise VaultError('The vault folder was replaced by a symbolic link.')
         for part in path.parts:
             current = current / part
             if current.is_symlink():
@@ -132,6 +134,12 @@ class Vault:
         return Note(relative, text, fingerprint(raw), raw.startswith(b'\xef\xbb\xbf'))
 
     def refresh(self):
+        if self.root.is_symlink():
+            self.notes.clear()
+            self.folders = []
+            self._link_cache.clear()
+            self._metadata_cache.clear()
+            return
         notes = {}
         visible_folders = []
         for directory, folders, files in os.walk(self.root, followlinks=False):
@@ -161,6 +169,63 @@ class Vault:
         }
         self._metadata_cache = {path: cached for path, cached in self._metadata_cache.items()
                                 if (note := self.notes.get(path)) is not None and note.revision == cached[0]}
+
+    def update_paths(self, paths):
+        """Reconcile reported files/subtrees against disk without reading other notes.
+
+        Notifications are hints: duplicate events and atomic replacements must
+        converge on the current disk contents, not replay event operations.
+        The empty path requests an explicit full reconciliation.
+        """
+        roots = []
+        for relative in sorted(set(paths), key=lambda value: (value.count('/'), value)):
+            if relative and any(part.startswith('.') for part in PurePosixPath(relative).parts):
+                continue
+            if not any(not parent or relative == parent or relative.startswith(parent + '/') for parent in roots):
+                roots.append(relative)
+        for relative in roots:
+            if not relative:
+                self.refresh()
+                return
+            old_paths = {name for name in self.notes if name == relative or name.startswith(relative + '/')}
+            folders = {name for name in self.folders if name != relative and not name.startswith(relative + '/')}
+            found = {}
+            try:
+                path = self._visible_path(relative)
+                if path.is_dir():
+                    folders.add(relative)
+                    for directory, children, files in os.walk(path, followlinks=False):
+                        children[:] = [name for name in children if not name.startswith('.')
+                                       and not (Path(directory) / name).is_symlink()]
+                        folders.update((Path(directory) / name).relative_to(self.root).as_posix()
+                                       for name in children)
+                        for name in files:
+                            file = Path(directory) / name
+                            if not name.startswith('.') and file.suffix.lower() == '.md' and not file.is_symlink():
+                                found[file.relative_to(self.root).as_posix()] = None
+                elif path.is_file() and path.suffix.lower() == '.md':
+                    found[relative] = None
+            except (VaultError, OSError):
+                pass
+            for name in found:
+                try:
+                    note = self.read(name)
+                    previous = self.notes.get(name)
+                    found[name] = previous if previous == note else note
+                except (VaultError, OSError):
+                    # Keep unreadable Markdown listed, as in a full scan.
+                    pass
+            for name in old_paths - found.keys():
+                self.notes.pop(name, None)
+            self.notes.update(found)
+            for name in old_paths | found.keys():
+                note = self.notes.get(name)
+                for cache in (self._link_cache, self._metadata_cache):
+                    cached = cache.get(name)
+                    if cached is not None and (note is None or note.revision != cached[0]):
+                        cache.pop(name)
+            self.folders = sorted(folders)
+        self.notes = dict(sorted(self.notes.items()))
 
     def save(self, note: Note, text: str) -> Note:
         path = self._path(note.path)
