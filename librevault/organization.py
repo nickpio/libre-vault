@@ -256,6 +256,8 @@ def move(vault, relative, destination):
         if backup:
             try:
                 shutil.rmtree(backup)
+                if backup.parent.exists() and not any(backup.parent.iterdir()):
+                    backup.parent.rmdir()
             except OSError:
                 raise VaultError(f'Move stopped. Original notes were restored; a recovery copy remains in {backup}. {error}') from error
         raise
@@ -263,6 +265,8 @@ def move(vault, relative, destination):
     if backup:
         try:
             shutil.rmtree(backup)
+            if backup.parent.exists() and not any(backup.parent.iterdir()):
+                backup.parent.rmdir()
         except OSError:
             vault.organization_notice = f'Recovery copies retained in {backup}'
     return mapping

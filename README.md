@@ -34,8 +34,8 @@ Your notes stay ordinary `.md` files in ordinary folders. No accounts, no lock-i
 [![Last commit](https://img.shields.io/github/last-commit/nickpio/libre-vault?style=flat-square&color=6e40c9)](https://github.com/nickpio/libre-vault/commits/master)
 [![Stars](https://img.shields.io/github/stars/nickpio/libre-vault?style=flat-square&color=6e40c9)](https://github.com/nickpio/libre-vault/stargazers)
 [![Issues](https://img.shields.io/github/issues/nickpio/libre-vault?style=flat-square&color=6e40c9)](https://github.com/nickpio/libre-vault/issues)
-[![Markdown](https://img.shields.io/badge/notes-plain%20markdown-111111?style=flat-square&logo=markdown&logoColor=white)](#plain-files-in-place)
-[![SQLite](https://img.shields.io/badge/index-SQLite%20FTS5-003B57?style=flat-square&logo=sqlite&logoColor=white)](#data-and-storage)
+[![Markdown](https://img.shields.io/badge/notes-plain%20markdown-111111?style=flat-square&logo=markdown&logoColor=white)](#overview)
+[![SQLite](https://img.shields.io/badge/index-SQLite%20FTS5-003B57?style=flat-square&logo=sqlite&logoColor=white)](docs/data-and-storage.md)
 [![Obsidian vaults](https://img.shields.io/badge/vault%20format-Obsidian--compatible%20target-7C3AED?style=flat-square&logo=obsidian&logoColor=white)](docs/compatibility.md)
 
 <br>
@@ -45,7 +45,7 @@ Your notes stay ordinary `.md` files in ordinary folders. No accounts, no lock-i
 [**Usage**](#usage) &nbsp;&middot;&nbsp;
 [**Shortcuts**](#keyboard-shortcuts) &nbsp;&middot;&nbsp;
 [**Graph**](#graph-view) &nbsp;&middot;&nbsp;
-[**Architecture**](#architecture) &nbsp;&middot;&nbsp;
+[**Docs**](#documentation) &nbsp;&middot;&nbsp;
 [**Roadmap**](#roadmap) &nbsp;&middot;&nbsp;
 [**Development**](#development) &nbsp;&middot;&nbsp;
 [**Testing**](#testing) &nbsp;&middot;&nbsp;
@@ -402,90 +402,11 @@ Tag nodes, custom color groups, and Obsidian's full graph filter syntax are not 
 
 <p align="right"><a href="#top">back to top</a></p>
 
-## Data and storage
+## Documentation
 
-Libre Vault never writes its own state into your vault. Everything below lives in standard XDG locations and can be deleted safely while the app is closed.
-
-| What | Where | Notes |
-| --- | --- | --- |
-| Preferences | `$XDG_CONFIG_HOME/libre-vault/settings.json` | Falls back to `~/.config/libre-vault/` |
-| Workspace layouts | `.../libre-vault/workspaces.json` | Tabs, cursors, splits, graph tabs per vault |
-| Startup vault | `.../libre-vault/session.json` | Which vault to reopen |
-| Recovery drafts | `$XDG_STATE_HOME/libre-vault/recovery` | Falls back to `~/.local/state/`; contains note text |
-| Search and link index | `$XDG_CACHE_HOME/libre-vault` | Falls back to `~/.cache/`; SQLite, mode `0600`, fully rebuildable |
-| Trashed notes | `<vault>/.trash` | Restore with your file manager |
-| Imported attachments | `<vault>/attachments` | Hidden from the tree, visible on disk |
-
-<details>
-<summary><b>Saving, autosave, and recovery</b></summary>
-<br>
-
-Edits autosave after two seconds of inactivity; <kbd>Ctrl</kbd>+<kbd>S</kbd> saves immediately. While a note has unsaved edits, a private recovery draft is kept. After an interrupted session, reopening the vault offers to recover or discard each draft. A recovered draft keeps its original file revision, so an external edit or deletion prevents autosave from overwriting it.
-
-External changes are detected through filesystem notifications. Clean tabs reload; dirty tabs keep local edits and conflicting saves stop. Closing a dirty tab or window offers Save, Discard, and Cancel.
-
-> [!CAUTION]
-> Recovery drafts contain note text. Protect your user account and backups accordingly.
-
-</details>
-
-<details>
-<summary><b>Memory and the disk index</b></summary>
-<br>
-
-A rebuildable SQLite cache stores note content, metadata, and links outside the vault. Unopened notes do not keep their full text in memory, and loaded saved-note text uses a 4 MiB cache. FTS5 trigrams narrow substring searches of three or more characters before exact matching. Delete the cache with the app closed to rebuild it on the next launch.
-
-</details>
-
-<p align="right"><a href="#top">back to top</a></p>
-
-## Architecture
-
-```mermaid
-flowchart LR
-    FS[("Markdown vault<br/>on disk")]
-    subgraph Core["Core engine"]
-        Vault["vault.py<br/>reads, atomic saves,<br/>links, search"]
-        Index[("index.py<br/>SQLite + FTS5 cache")]
-        Monitor["monitor.py<br/>Gio file watches"]
-    end
-    subgraph Editing["Pure editing logic"]
-        Formatting["formatting.py"]
-        Edits["editing.py"]
-        History["history.py"]
-    end
-    subgraph UI["GTK interface"]
-        App["app.py<br/>windows, tabs, buffers"]
-        Panels["palette, switcher,<br/>settings, explorer"]
-        Graph["graph view"]
-    end
-    Worker["layout worker<br/>process"]
-
-    FS <--> Vault
-    Vault <--> Index
-    FS -. events .-> Monitor
-    Monitor --> App
-    App <--> Vault
-    App --> Formatting
-    App --> Edits
-    App --> History
-    App --> Panels
-    App --> Graph
-    Graph <--> Worker
-    Index --> Worker
-```
-
-The UI talks to the vault engine directly:
-
-```python
-vault = Vault('/path/to/vault')
-note = vault.read('Projects/Plan.md')
-saved = vault.save(note, '# Revised plan\n')   # raises Conflict if the file changed on disk
-```
-
-Each `Note` records its relative path, text, SHA-256 revision, and BOM flag. `Vault.resolve(source, target)` returns every matching path: empty means unresolved, several means ambiguous, and the UI asks rather than guessing.
-
-Read the full design notes in [**docs/architecture.md**](docs/architecture.md).
+- [Data and storage](docs/data-and-storage.md): file locations, autosave, and recovery.
+- [Architecture](docs/architecture.md): components, design decisions, and implementation details.
+- [Compatibility target](docs/compatibility.md): feature coverage and acceptance gates.
 
 <p align="right"><a href="#top">back to top</a></p>
 
@@ -516,9 +437,10 @@ Read the full design notes in [**docs/architecture.md**](docs/architecture.md).
 | Callouts, tables, footnotes, math | ![](https://img.shields.io/badge/-partial-d29922?style=flat-square) mathtext subset, no diagrams |
 | Attachments and transclusion | ![](https://img.shields.io/badge/-partial-d29922?style=flat-square) whole-note embeds only |
 | Heading and block links | ![](https://img.shields.io/badge/-partial-d29922?style=flat-square) approximate anchors |
-| Outline, templates, daily notes, bookmarks | ![](https://img.shields.io/badge/-partial-d29922?style=flat-square) outline only |
-| Saved-version history, unlinked mentions | ![](https://img.shields.io/badge/-planned-8b949e?style=flat-square) |
-| Canvas (JSON Canvas) | ![](https://img.shields.io/badge/-planned-8b949e?style=flat-square) |
+| Outline, templates, daily notes, bookmarks | ![](https://img.shields.io/badge/-implemented-2ea44f?style=flat-square) |
+| Saved-version history, unlinked mentions | ![](https://img.shields.io/badge/-implemented-2ea44f?style=flat-square) |
+| Canvas (JSON Canvas) | ![](https://img.shields.io/badge/-implemented-2ea44f?style=flat-square) |
+| Bases, slides, format converter, named workspaces | ![](https://img.shields.io/badge/-implemented-2ea44f?style=flat-square) |
 | From-source executable and AppImage builds | ![](https://img.shields.io/badge/-implemented-2ea44f?style=flat-square) local builds; prebuilt releases pending |
 | Plugins, mobile, hosted sync | ![](https://img.shields.io/badge/-out%20of%20scope-6e7681?style=flat-square) |
 

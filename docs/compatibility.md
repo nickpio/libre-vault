@@ -25,16 +25,16 @@ The compatibility specification starts with public documentation. These are docu
 | Heading and block links | Approximate navigation; exact anchor rules planned |
 | Backlinks and outgoing links | Implemented; backlinks index saved files |
 | Search, quick switcher, command palette | Saved-file snippets, highlighted matches, field filters, fuzzy path/alias switcher, and command palette implemented |
-| Tabs and workspace layouts | Per-vault tab/cursor/scroll/folder restoration and shared-buffer split editor implemented |
+| Tabs and workspace layouts | Per-vault tab/cursor/scroll/folder restoration, named workspace profiles, and shared-buffer split editor implemented |
 | Expandable file tree, create, rename, delete | Creation, rename/move with resolved-link updates, and recoverable vault-local trash implemented |
-| Atomic writes, external-change handling, recovery history | Atomic replacement, revision checks, autosave, and unsaved crash drafts implemented; saved-version history planned |
-| Properties, tags, aliases, unlinked mentions | YAML property editing, inline/frontmatter tags, alias resolution and filters implemented; unlinked mentions planned |
+| Atomic writes, external-change handling, recovery history | Atomic replacement, revision checks, autosave, unsaved crash drafts, and saved-version history snapshots implemented |
+| Properties, tags, aliases, unlinked mentions | YAML property editing, inline/frontmatter tags, alias resolution, filters, and unlinked mentions with one-click linking implemented |
 | Bulleted, ordered, and task lists | Rendered with nesting and clickable task checkboxes; Markdown preserved |
 | Callouts, tables, footnotes, math, diagrams | Reading renders tables, callouts, footnotes, and mathtext expressions; diagrams and full LaTeX support planned |
 | Attachment display and note transclusion | Attachment import/paste/drop, local images, PDF pages, and whole-note embeds implemented; section/block embeds incomplete |
-| Graph and local graph | Planned |
-| Canvas files | Planned using JSON Canvas |
-| Templates, daily notes, bookmarks, outline | Basic outline implemented; remaining workflows planned |
+| Graph and local graph | Global and local force-directed graph views implemented |
+| Canvas files | Implemented using JSON Canvas 1.0 (`.canvas`) |
+| Templates, daily notes, bookmarks, outline | Outline, templates, daily notes, unique notes, random note, bookmarks, Bases view, slides, and format converter implemented |
 | Existing plugin and theme compatibility | Outside first-version scope |
 | Linux desktop distribution | Runs from source; `build.sh` produces a standalone executable and optionally an AppImage. Published releases and cross-distribution validation remain planned |
 | Mobile, hosted sync, publishing | Outside initial Linux release |

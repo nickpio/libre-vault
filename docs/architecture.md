@@ -2,6 +2,42 @@
 
 The initial target is Linux desktop, existing Markdown vaults, and eventual parity with Obsidian's core features. Running existing Obsidian plugins is outside the first version.
 
+## Components
+
+```mermaid
+flowchart LR
+    FS[("Markdown vault<br/>on disk")]
+    subgraph Core["Core engine"]
+        Vault["vault.py<br/>reads, atomic saves,<br/>links, search"]
+        Index[("index.py<br/>SQLite + FTS5 cache")]
+        Monitor["monitor.py<br/>Gio file watches"]
+    end
+    subgraph Editing["Pure editing logic"]
+        Formatting["formatting.py"]
+        Edits["editing.py"]
+        History["history.py"]
+    end
+    subgraph UI["GTK interface"]
+        App["app.py<br/>windows, tabs, buffers"]
+        Panels["palette, switcher,<br/>settings, explorer"]
+        Graph["graph view"]
+    end
+    Worker["layout worker<br/>process"]
+
+    FS <--> Vault
+    Vault <--> Index
+    FS -. events .-> Monitor
+    Monitor --> App
+    App <--> Vault
+    App --> Formatting
+    App --> Edits
+    App --> History
+    App --> Panels
+    App --> Graph
+    Graph <--> Worker
+    Index --> Worker
+```
+
 ## Startup and distribution
 
 The vault argument is optional. First launch shows the welcome screen. Later launches reopen the last successfully opened vault, recorded in settings-adjacent `session.json`. An explicit folder argument takes precedence. Missing or unavailable remembered folders leave the welcome screen available without a modal error. Choosing a folder switches the same window into its workspace. Close vault confirms unsaved notes, persists the workspace, cancels its watchers and callbacks, disposes its editors, and clears the remembered startup vault. The GTK application handles activation separately from file-open events, so each launch receives its own optional folder argument even when another instance is running.
@@ -51,6 +87,15 @@ saved = vault.save(note, '# Revised plan\n')
 | `librevault/attachments.py` | Collision-safe attachment copies and confined local asset resolution |
 | `librevault/reading.py` | Native Markdown reading widgets, local note/media embeds, mathtext, and optional Poppler PDF pages |
 | `librevault/shortcuts.py` | Application shortcut registry shared by key handling and the cheatsheet, plus contextual GTK bindings |
+| `librevault/canvas.py` | Pure JSON Canvas 1.0 parsing, serialization, node/edge operations, and atomic file saves |
+| `librevault/canvas_ui.py` | Interactive GTK JSON Canvas tab with pan/zoom, card editing, edge connections, and note navigation |
+| `librevault/templates.py` | Template variable expansion, daily notes, unique timestamped notes, and random note selection |
+| `librevault/bookmarks.py` | Per-vault bookmark storage, remapping, bookmark manager, and named workspace manager dialogs |
+| `librevault/mentions.py` | Plain-text unlinked mention detection and one-click wikilink conversion |
+| `librevault/bases.py` | Property database querying, sorting, and YAML property cell updates across vault notes |
+| `librevault/bases_ui.py` | Filterable and sortable GTK table view over note frontmatter properties |
+| `librevault/slides.py` | Slide deck splitting on horizontal rules and fullscreen presentation window |
+| `librevault/converter.py` | Markdown link, wikilink, and Roam/Logseq syntax conversion utilities and dialog |
 | `tests/test_editing.py` | Exact Markdown and cursor positions for list/task keyboard actions |
 | `tests/test_formatting.py` | Source offsets, nesting, escapes, literal code, and incomplete Markdown |
 | `tests/test_vault.py` | Repeatable filesystem and parsing regression cases |

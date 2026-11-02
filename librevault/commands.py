@@ -52,14 +52,37 @@ class CommandPalette(Gtk.EventBox):
                             ('Open local graph in tab', owner.show_local_graph_tab),
                             ('Graph view', owner.show_graph),
                             ('Local graph', owner.show_local_graph),
+                            ('Open Bases view', owner.show_bases),
+                            ('Start slides presentation', owner.show_slides),
+                            ('Format converter…', owner.show_converter),
                             ('Quick switcher', owner.show_quick_switcher),
-                            ('New note', owner.new_note), ('New folder', owner.new_folder),
-                            ('Save note', owner.save_current), ('Close note', owner.close_tab),
+                            ('New note', owner.new_note), ('New canvas', owner.new_canvas),
+                            ('Open canvas', owner.open_canvas_command),
+                            ('New folder', owner.new_folder),
+                            ('Open daily note', owner.open_daily_note),
+                            ('Insert template', owner.insert_template),
+                            ('New note from template', owner.create_from_template),
+                            ('New unique note', owner.new_unique_note),
+                            ('Open random note', owner.open_random_note),
+                            ('Save note', owner.save_current),
+                            ('Version history…', owner.show_version_history),
+                            ('Close note', owner.close_tab),
                             ('Close vault', owner.close_vault),
                             ('Navigate back', owner.navigate_back), ('Navigate forward', owner.navigate_forward),
                             ('Toggle split editor', owner.toggle_split),
                             ('Toggle file tree', owner.toggle_file_tree),
                             ('Toggle note details', owner.toggle_details)])
+            note = owner.current()
+            bookmarked = note is not None and owner.note_is_bookmarked(note.note.path)
+            actions.append(('Remove bookmark' if bookmarked else 'Bookmark current note',
+                            owner.remove_current_bookmark if bookmarked else owner.bookmark_current_note))
+            actions.extend([('Bookmark current search', owner.bookmark_current_search),
+                            ('Bookmark selected folder', owner.bookmark_selected_folder),
+                            ('Bookmark current graph', owner.bookmark_current_graph),
+                            ('Open bookmarks', owner.show_bookmarks),
+                            ('Save workspace layout…', owner.save_workspace_layout),
+                            ('Load workspace layout…', owner.load_workspace_layout),
+                            ('Manage workspaces…', owner.manage_workspaces)])
         for title, action in actions:
             row = Gtk.ListBoxRow()
             row.action, row.title = action, title
@@ -304,3 +327,178 @@ class KeybindCheatsheet(Gtk.Dialog):
             index = last
         self.select_binding(rows[index].get_index(), focus=not search_focused)
         return True
+
+
+class TemplatePicker(Gtk.Dialog):
+    """Choose one template note. Enter or the confirm button accepts the selection."""
+
+    def __init__(self, owner, paths, title='Insert template', confirm='Insert'):
+        super().__init__(title=title, transient_for=owner, modal=True, use_header_bar=True)
+        self.choice = None
+        self.set_default_size(520, 420)
+        self.add_button('Cancel', Gtk.ResponseType.CANCEL)
+        self.add_button(confirm, Gtk.ResponseType.OK)
+        self.set_default_response(Gtk.ResponseType.OK)
+        self.connect('response', self._capture_choice)
+        self.connect('key-press-event', self._key_press)
+        content = self.get_content_area()
+        content.set_border_width(12)
+        content.set_spacing(8)
+        self.search = Gtk.SearchEntry(placeholder_text='Find a template…')
+        self.search.get_accessible().set_name('Search templates')
+        self.search.set_activates_default(False)
+        content.pack_start(self.search, False, False, 0)
+        self.results = Gtk.ListBox()
+        self.results.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self.results.set_activate_on_single_click(True)
+        self.results.get_accessible().set_name('Templates')
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_min_content_height(220)
+        scroll.add(self.results)
+        content.pack_start(scroll, True, True, 0)
+        for path in paths:
+            row = Gtk.ListBoxRow()
+            row.path = path
+            label = Gtk.Label(label=path, xalign=0)
+            label.set_margin_top(6)
+            label.set_margin_bottom(6)
+            label.set_margin_start(8)
+            label.set_margin_end(8)
+            label.set_ellipsize(3)
+            row.add(label)
+            self.results.add(row)
+        self.empty = Gtk.Label(label='No matching templates', xalign=0)
+        self.empty.set_no_show_all(True)
+        content.pack_start(self.empty, False, False, 0)
+        self.search.connect('changed', self._filter)
+        self.search.connect('activate', self._accept)
+        self.search.connect('key-press-event', self._search_key)
+        self.results.connect('row-activated', lambda *_: self._accept())
+        self.show_all()
+        self._filter()
+        self.search.grab_focus()
+
+    def _visible_rows(self):
+        return [row for row in self.results.get_children() if row.get_visible()]
+
+    def _filter(self, *_):
+        words = self.search.get_text().casefold().split()
+        visible = []
+        for row in self.results.get_children():
+            matches = all(word in row.path.casefold() for word in words)
+            row.set_visible(matches)
+            if matches:
+                visible.append(row)
+        self.results.unselect_all()
+        if visible:
+            self.results.select_row(visible[0])
+        self.empty.set_visible(not visible)
+        self.set_response_sensitive(Gtk.ResponseType.OK, bool(visible))
+
+    def _selected(self):
+        row = self.results.get_selected_row()
+        if row is not None and row.get_visible():
+            return row
+        return None
+
+    def _accept(self, *_):
+        row = self._selected()
+        if row is None:
+            return
+        self.choice = row.path
+        self.response(Gtk.ResponseType.OK)
+
+    def _capture_choice(self, _, response):
+        if response == Gtk.ResponseType.OK and self.choice is None:
+            row = self._selected()
+            self.choice = row.path if row is not None else None
+
+    def _search_key(self, _, event):
+        if event.keyval == Gdk.KEY_Escape:
+            if self.search.get_text():
+                self.search.set_text('')
+            else:
+                self.response(Gtk.ResponseType.CANCEL)
+            return True
+        if event.keyval not in (Gdk.KEY_Up, Gdk.KEY_Down):
+            return False
+        rows = self._visible_rows()
+        if rows:
+            selected = self._selected()
+            index = rows.index(selected) if selected in rows else 0
+            index = max(0, min(len(rows) - 1, index + (1 if event.keyval == Gdk.KEY_Down else -1)))
+            self.results.select_row(rows[index])
+        return True
+
+    def _key_press(self, _, event):
+        if event.keyval == Gdk.KEY_Escape and not self.search.get_text():
+            self.response(Gtk.ResponseType.CANCEL)
+            return True
+        return False
+
+
+class NoteNameDialog(Gtk.Dialog):
+    def __init__(self, owner):
+        super().__init__(title='New note from template', transient_for=owner, modal=True, use_header_bar=True)
+        self.add_button('Cancel', Gtk.ResponseType.CANCEL)
+        self.add_button('Create', Gtk.ResponseType.OK)
+        self.set_default_response(Gtk.ResponseType.OK)
+        self.set_response_sensitive(Gtk.ResponseType.OK, False)
+        self.connect('key-press-event', self._key_press)
+        content = self.get_content_area()
+        content.set_border_width(16)
+        content.set_spacing(8)
+        self.entry = Gtk.Entry(placeholder_text='Note name or folder/Note name')
+        self.entry.set_size_request(420, -1)
+        self.entry.get_accessible().set_name('Note name')
+        self.entry.set_activates_default(True)
+        self.entry.connect('changed', lambda *_: self.set_response_sensitive(
+            Gtk.ResponseType.OK, bool(self.entry.get_text().strip())))
+        content.pack_start(self.entry, False, False, 0)
+        self.show_all()
+        self.entry.grab_focus()
+
+    def _key_press(self, _, event):
+        if event.keyval == Gdk.KEY_Escape:
+            self.response(Gtk.ResponseType.CANCEL)
+            return True
+        return False
+
+
+class UniqueNoteDialog(Gtk.Dialog):
+    def __init__(self, owner, templates):
+        super().__init__(title='New unique note', transient_for=owner, modal=True, use_header_bar=True)
+        self.add_button('Cancel', Gtk.ResponseType.CANCEL)
+        self.add_button('Create', Gtk.ResponseType.OK)
+        self.set_default_response(Gtk.ResponseType.OK)
+        self.connect('key-press-event', self._key_press)
+        content = self.get_content_area()
+        content.set_border_width(16)
+        content.set_spacing(8)
+        content.pack_start(Gtk.Label(label='Optional title', xalign=0), False, False, 0)
+        self.title_entry = Gtk.Entry(placeholder_text='Leave empty for a timestamp only')
+        self.title_entry.set_size_request(420, -1)
+        self.title_entry.get_accessible().set_name('Unique note title')
+        self.title_entry.set_activates_default(True)
+        content.pack_start(self.title_entry, False, False, 0)
+        content.pack_start(Gtk.Label(label='Template', xalign=0), False, False, 0)
+        self.template_choice = Gtk.ComboBoxText()
+        self.template_choice.append('blank', 'Blank note')
+        for path in templates:
+            self.template_choice.append(path, path)
+        self.template_choice.set_active_id('blank')
+        self.template_choice.get_accessible().set_name('Unique note template')
+        content.pack_start(self.template_choice, False, False, 0)
+        self.show_all()
+        self.title_entry.grab_focus()
+
+    def template_path(self):
+        selected = self.template_choice.get_active_id()
+        return '' if selected in (None, '', 'blank') else selected
+
+    def _key_press(self, _, event):
+        if event.keyval == Gdk.KEY_Escape:
+            self.response(Gtk.ResponseType.CANCEL)
+            return True
+        return False

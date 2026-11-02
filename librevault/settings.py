@@ -5,7 +5,7 @@ import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gdk, Gtk
 
-from .preferences import BOUNDS, OPTIONS, Preferences
+from .preferences import BOUNDS, OPTIONS, STRINGS, Preferences, normalize_string_setting
 
 
 class SettingsDialog(Gtk.Dialog):
@@ -58,6 +58,13 @@ class SettingsDialog(Gtk.Dialog):
         self.spin(editor, 'line_width', 'Writing column width', 'Maximum width when readable line length is enabled.', 'px')
         self.switch(editor, 'wrap_lines', 'Wrap long lines', 'Wrap text to the editor width instead of scrolling horizontally.')
         self.switch(editor, 'continue_lists', 'Continue lists on Enter', 'Continue bullets, numbers, and tasks. Enter on an empty item exits the list.')
+        notes = self.page('Notes', 'Choose where templates, daily notes, and unique notes are created.')
+        self.entry(notes, 'templates_folder', 'Templates folder', 'Folder whose notes can be inserted as templates. Leave empty to use the vault root.')
+        self.entry(notes, 'daily_notes_folder', 'Daily notes folder', 'Where the daily note for today is created. Leave empty to use the vault root.')
+        self.entry(notes, 'daily_notes_format', 'Daily note date format', 'Moment-style tokens such as YYYY, MM, DD, ddd, and dddd. Slashes create folders.')
+        self.entry(notes, 'daily_notes_template', 'Daily note template', 'Optional template note, for example Templates/Daily.md. Leave empty for a blank note.')
+        self.entry(notes, 'unique_notes_folder', 'Unique notes folder', 'Where Zettelkasten notes are created. Leave empty to use the vault root.')
+        self.entry(notes, 'unique_notes_format', 'Unique note format', 'Timestamp prefix, for example YYYYMMDDHHmm.')
         self.error = Gtk.Label(xalign=0)
         self.error.set_line_wrap(True)
         self.error.set_no_show_all(True)
@@ -135,6 +142,12 @@ class SettingsDialog(Gtk.Dialog):
         control.connect('notify::active', lambda *_: self.change(key, control.get_active()))
         self.setting_row(page, key, title, description, control)
 
+    def entry(self, page, key, title, description):
+        control = Gtk.Entry()
+        control.set_width_chars(24)
+        control.connect('changed', lambda *_: self.change(key, control.get_text()))
+        self.setting_row(page, key, title, description, control)
+
     def sync_controls(self):
         self.updating = True
         try:
@@ -144,6 +157,10 @@ class SettingsDialog(Gtk.Dialog):
                     control.set_active_id(value)
                 elif key in BOUNDS:
                     control.set_value(value)
+                elif key in STRINGS:
+                    # Leave an in-progress edit alone so trailing spaces can still be typed.
+                    if not control.has_focus() and control.get_text() != value:
+                        control.set_text(value)
                 else:
                     control.set_active(value)
             self.controls['line_width'].set_sensitive(self.owner.preferences.readable_length)
@@ -151,8 +168,16 @@ class SettingsDialog(Gtk.Dialog):
             self.updating = False
 
     def change(self, key, value):
-        if not self.updating:
-            self.save(replace(self.owner.preferences, **{key: value}))
+        if self.updating:
+            return
+        if key in STRINGS:
+            normalized = normalize_string_setting(key, value)
+            if normalized is None:
+                self.error.set_text('Use a vault path without "..", hidden names, or an empty date format.')
+                self.error.show()
+                return
+            value = normalized
+        self.save(replace(self.owner.preferences, **{key: value}))
 
     def save(self, preferences):
         try:

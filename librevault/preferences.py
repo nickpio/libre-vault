@@ -11,6 +11,51 @@ OPTIONS = {
     'editor_font': (('sans', 'Sans serif'), ('serif', 'Serif'), ('monospace', 'Monospace')),
 }
 BOUNDS = {'interface_size': (8, 18), 'editor_size': (8, 32), 'line_width': (480, 1200)}
+STRINGS = frozenset({
+    'templates_folder', 'daily_notes_folder', 'daily_notes_format', 'daily_notes_template',
+    'unique_notes_folder', 'unique_notes_format',
+})
+_FOLDERS = frozenset({'templates_folder', 'daily_notes_folder', 'unique_notes_folder'})
+_FORMATS = frozenset({'daily_notes_format', 'unique_notes_format'})
+_TEMPLATE_FILES = frozenset({'daily_notes_template'})
+_MAX_SETTING = 240
+
+
+def _safe_relative(text):
+    if not text or '\\' in text or text.startswith('/') or '//' in text:
+        return False
+    return all(part and part not in ('.', '..') and not part.startswith('.') for part in text.split('/'))
+
+
+def normalize_string_setting(key, value):
+    """Return a stored path or format, or None when the value cannot be kept.
+
+    Folders may be empty, which means the vault root. Date formats may contain
+    slashes. Hidden segments and parent traversal are rejected.
+    """
+    if type(value) is not str or any(char in value for char in '\x00\r\n'):
+        return None
+    raw = value.strip()
+    if len(raw) > _MAX_SETTING or raw.startswith('/') or '\\' in raw or '//' in raw:
+        return None
+    if key in _FOLDERS:
+        text = raw.strip('/')
+        if text and not _safe_relative(text):
+            return None
+        return text
+    if key in _FORMATS:
+        if not _safe_relative(raw):
+            return None
+        return raw
+    if key in _TEMPLATE_FILES:
+        text = raw.strip('/')
+        if not text:
+            return ''
+        candidate = text if text.lower().endswith('.md') else f'{text}.md'
+        if not _safe_relative(candidate):
+            return None
+        return text
+    return None
 
 
 @dataclass(frozen=True)
@@ -23,6 +68,12 @@ class Preferences:
     line_width: int = 780
     wrap_lines: bool = True
     continue_lists: bool = True
+    templates_folder: str = 'Templates'
+    daily_notes_folder: str = 'Daily'
+    daily_notes_format: str = 'YYYY-MM-DD'
+    daily_notes_template: str = ''
+    unique_notes_folder: str = ''
+    unique_notes_format: str = 'YYYYMMDDHHmm'
 
     @classmethod
     def from_dict(cls, data):
@@ -38,6 +89,11 @@ class Preferences:
             elif key in BOUNDS:
                 low, high = BOUNDS[key]
                 valid = type(value) is int and low <= value <= high
+            elif key in STRINGS:
+                normalized = normalize_string_setting(key, value)
+                valid = normalized is not None
+                if valid:
+                    value = normalized
             else:
                 valid = type(value) is bool
             values[key] = value if valid else getattr(defaults, key)

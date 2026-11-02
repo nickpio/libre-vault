@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
+from datetime import datetime, timezone
+import difflib
 import math
 import posixpath
 from pathlib import Path
@@ -13,16 +16,21 @@ gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk, GdkPixbuf, Gio, GLib, Pango
 
 from .vault import Vault, VaultError, links
+from .mentions import link_mention
 from .monitor import VaultMonitor
-from .recovery import RecoveryStore
+from .recovery import RecoveryStore, VersionHistoryStore
 from .formatting import markdown_layout
 from .editing import TextEdit, format_inline, list_enter, markdown_link
 from .history import BufferHistory
 from .findbar import FindBar
 from .graph_ui import GraphView
+from .bases_ui import BasesView
+from .canvas_ui import CanvasView
+from .converter import ConverterDialog
+from .slides import SlidesWindow
 from .filetree import tree_paths
 from .metadata import note_metadata, property_text, with_properties
-from .commands import CommandPalette, KeybindCheatsheet
+from .commands import CommandPalette, KeybindCheatsheet, NoteNameDialog, TemplatePicker, UniqueNoteDialog
 from .shortcuts import APP_SHORTCUTS, EDITOR_SHORTCUTS
 from .settings import SettingsDialog
 from .preferences import PreferencesStore
@@ -32,7 +40,13 @@ from .attachments import attachment_markdown, local_path, store_attachment
 from .reading import ReadingView
 from .navigation_ui import EditorNavigation
 from .navigation import Location, NavigationHistory
-from .workspace import LastVaultStore, WorkspaceStore
+from .bookmarks import (BOOKMARK_ICONS, Bookmark, BookmarkManager, BookmarkStore, WorkspaceManager,
+                        ask_text, confirm, graph_open_state, with_moved_root)
+from .workspace import LastVaultStore, SavedWorkspacesStore, WorkspaceStore
+from .templates import (
+    create_note_from_template, create_unique_note, ensure_daily_note,
+    expand_template, random_note_path, read_template, template_paths,
+)
 
 
 CSS = Path(__file__).with_name('style.css').read_bytes()
@@ -51,6 +65,29 @@ def text_buffer(text):
     buffer = Gtk.TextBuffer()
     buffer.set_text(text)
     return buffer
+
+
+def count_summary(text, lines):
+    """Words, characters, and lines for the active note."""
+    words = len(text.split())
+    characters = len(text)
+
+    def unit(count, singular, plural):
+        return f'{count} {singular if count == 1 else plural}'
+
+    return (f'{unit(words, "word", "words")} · '
+            f'{unit(characters, "character", "characters")} · '
+            f'{unit(lines, "line", "lines")}')
+
+
+def format_timestamp(value):
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return value
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone().strftime('%Y-%m-%d %H:%M:%S')
 
 
 class NotePane(Gtk.Box):
@@ -126,6 +163,12 @@ class NotePane(Gtk.Box):
         attach.set_tooltip_text('Insert attachment')
         attach.connect('clicked', lambda *_: self.choose_attachment())
         toolbar.pack_end(attach, False, False, 0)
+        self.bookmark_button = Gtk.Button.new_from_icon_name('non-starred-symbolic', Gtk.IconSize.BUTTON)
+        self.bookmark_button.get_style_context().add_class('icon-button')
+        self.bookmark_button.set_tooltip_text('Bookmark current note')
+        self.bookmark_button.get_accessible().set_name('Bookmark current note')
+        self.bookmark_button.connect('clicked', lambda *_: self.window.toggle_note_bookmark(self))
+        toolbar.pack_end(self.bookmark_button, False, False, 0)
         self.tab_label = Gtk.Label(label=Path(note.path).stem)
         self.history = BufferHistory(self.buffer)
         self.findbar = FindBar(self)
@@ -137,6 +180,22 @@ class NotePane(Gtk.Box):
         self.apply_preferences()
         self.render()
         self.navigation = EditorNavigation(self)
+        self.sync_bookmark_button()
+
+    def sync_bookmark_button(self):
+        if self.in_destruction():
+            return
+        marked = self.window.note_is_bookmarked(self.note.path)
+        icon = 'starred-symbolic' if marked else 'non-starred-symbolic'
+        self.bookmark_button.set_image(Gtk.Image.new_from_icon_name(icon, Gtk.IconSize.BUTTON))
+        label = 'Remove bookmark' if marked else 'Bookmark current note'
+        self.bookmark_button.set_tooltip_text(label)
+        self.bookmark_button.get_accessible().set_name(label)
+        style = self.bookmark_button.get_style_context()
+        if marked:
+            style.add_class('bookmarked')
+        else:
+            style.remove_class('bookmarked')
 
     def set_mode(self, mode):
         if mode not in ('live', 'source', 'reading'):
@@ -282,6 +341,8 @@ class NotePane(Gtk.Box):
         if self.dirty:
             self.autosave_source = GLib.timeout_add_seconds(2, self.autosave)
         self.queue_format()
+        if not self.window.in_destruction():
+            self.window.update_counts()
 
     def autosave(self):
         self.autosave_source = None
@@ -588,6 +649,9 @@ class NotePane(Gtk.Box):
     def italic(self):
         self.emphasize('*')
 
+    def insert_template(self):
+        self.window.insert_template(pane=self)
+
     def insert_link(self):
         original = self.text()
         selection = self.buffer.get_selection_bounds()
@@ -646,6 +710,7 @@ class NotePane(Gtk.Box):
                 ('Undo', self.undo, self.history.can_undo), ('Redo', self.redo, self.history.can_redo),
                 ('Bold', self.bold, True), ('Italic', self.italic, True),
                 ('Insert link…', self.insert_link, True),
+                ('Insert template…', self.insert_template, True),
                 ('Insert attachment…', self.choose_attachment, True),
                 ('Live preview', lambda: self.set_mode('live'), True),
                 ('Source mode', lambda: self.set_mode('source'), True),
@@ -679,12 +744,149 @@ class NotePane(Gtk.Box):
         self.findbar.refresh()
 
 
+class VersionHistoryDialog(Gtk.Dialog):
+    """Saved snapshots for one note, with a single undoable restore."""
+
+    def __init__(self, window, path):
+        super().__init__(title='Version history', transient_for=window, modal=True, use_header_bar=True)
+        self.owner = window
+        self.path = path
+        self.store = window.version_history
+        self.set_default_size(780, 560)
+        self.set_destroy_with_parent(True)
+        self.restore_button = self.add_button('Restore version', Gtk.ResponseType.APPLY)
+        self.add_button('Close', Gtk.ResponseType.CLOSE)
+        self.connect('response', self._respond)
+        content = self.get_content_area()
+        content.set_border_width(12)
+        content.set_spacing(8)
+        heading = Gtk.Label(label=path, xalign=0)
+        heading.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+        heading.set_selectable(True)
+        heading.get_style_context().add_class('muted')
+        content.pack_start(heading, False, False, 0)
+        body = Gtk.Box(spacing=12)
+        content.pack_start(body, True, True, 0)
+        self.version_list = Gtk.ListBox()
+        self.version_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self.empty_history = Gtk.Label(label='No saved versions yet.', xalign=0, wrap=True)
+        self.empty_history.get_style_context().add_class('muted')
+        self.version_list.set_placeholder(self.empty_history)
+        list_scroll = Gtk.ScrolledWindow()
+        list_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        list_scroll.set_size_request(240, -1)
+        list_scroll.add(self.version_list)
+        body.pack_start(list_scroll, False, False, 0)
+        preview_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        body.pack_start(preview_box, True, True, 0)
+        self.diff_toggle = Gtk.CheckButton.new_with_label('Show differences from the current note')
+        self.diff_toggle.connect('toggled', self._show_preview)
+        preview_box.pack_start(self.diff_toggle, False, False, 0)
+        self.preview = Gtk.TextView()
+        self.preview.set_editable(False)
+        self.preview.set_cursor_visible(False)
+        self.preview.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        self.preview.set_monospace(True)
+        self.preview.set_left_margin(8)
+        self.preview.set_right_margin(8)
+        self.preview.set_top_margin(8)
+        preview_box.pack_start(scrolled(self.preview), True, True, 0)
+        self.version_list.connect('row-selected', self._show_preview)
+        self._reload()
+
+    def _reload(self):
+        for row in self.version_list.get_children():
+            row.destroy()
+        snapshots = [] if self.store is None else self.store.versions(self.path)
+        for snapshot in reversed(snapshots):
+            self._add_row(snapshot)
+        rows = self.version_list.get_children()
+        if not rows:
+            self.restore_button.set_sensitive(False)
+            self.preview.get_buffer().set_text('No saved versions yet.')
+            return
+        current = self._current_text()
+        chosen = rows[0]
+        for row in rows:
+            if row.snapshot.text.replace('\r\n', '\n') != current:
+                chosen = row
+                break
+        self.version_list.select_row(chosen)
+        self._show_preview()
+
+    def _add_row(self, snapshot):
+        row = Gtk.ListBoxRow()
+        row.snapshot = snapshot
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        box.set_margin_top(6)
+        box.set_margin_bottom(6)
+        box.set_margin_start(8)
+        box.set_margin_end(8)
+        when = Gtk.Label(label=format_timestamp(snapshot.timestamp), xalign=0)
+        excerpt_source = snapshot.text.replace('\r\n', '\n').strip()
+        excerpt = excerpt_source.split('\n', 1)[0][:72] if excerpt_source else '(empty)'
+        summary = Gtk.Label(label=excerpt, xalign=0)
+        summary.set_ellipsize(Pango.EllipsizeMode.END)
+        summary.get_style_context().add_class('muted')
+        box.pack_start(when, False, False, 0)
+        box.pack_start(summary, False, False, 0)
+        row.add(box)
+        row.get_accessible().set_name(f'Saved version {format_timestamp(snapshot.timestamp)}')
+        self.version_list.add(row)
+
+    def _current_text(self):
+        pane = self.owner.panes.get(self.path)
+        if pane is not None:
+            return pane.text()
+        try:
+            return self.owner.vault.read(self.path).text.replace('\r\n', '\n')
+        except (OSError, VaultError):
+            return ''
+
+    def _show_preview(self, *_):
+        row = self.version_list.get_selected_row()
+        self.restore_button.set_sensitive(row is not None)
+        buffer = self.preview.get_buffer()
+        if row is None:
+            buffer.set_text('No saved versions yet.')
+            return
+        saved = row.snapshot.text.replace('\r\n', '\n')
+        if self.diff_toggle.get_active():
+            diff = ''.join(difflib.unified_diff(
+                self._current_text().splitlines(keepends=True), saved.splitlines(keepends=True),
+                fromfile='Current note', tofile='Saved version', n=3))
+            buffer.set_text(diff or 'No differences from the current note.')
+        else:
+            buffer.set_text(saved)
+
+    def restore(self):
+        row = self.version_list.get_selected_row()
+        pane = self.owner.panes.get(self.path)
+        if row is None or pane is None:
+            self.owner.status.set_text('Open this note to restore a version.')
+            return
+        restored = row.snapshot.text.replace('\r\n', '\n')
+        current = pane.text()
+        if restored != current:
+            pane.apply_edit(TextEdit(0, len(current), restored))
+        self.owner.status.set_text('Restored a saved version. Undo returns to the text you were editing.')
+        self._show_preview()
+
+    def _respond(self, _, response):
+        if response == Gtk.ResponseType.APPLY:
+            self.restore()
+            return
+        self.destroy()
+
+
 class Window(Gtk.ApplicationWindow):
     def __init__(self, app, folder=None, preferences_path=None):
         super().__init__(application=app, title='Libre Vault')
         self.set_default_size(1360, 850)
         self.vault = None
         self.recovery = None
+        self.version_history = None
+        self.version_dialog = None
         self.confirming_panes = False
         self.panes = {}
         self.outline_rows = []
@@ -694,9 +896,18 @@ class Window(Gtk.ApplicationWindow):
         self.settings_dialog = None
         self.graph_window = None
         self.graph_views = set()
+        self.bases_views = set()
+        self.canvas_views = set()
+        self.slides_window = None
+        self.converter_dialog = None
         self.preferences_store = PreferencesStore(preferences_path)
         self.preferences = self.preferences_store.load()
         self.workspace_store = WorkspaceStore(self.preferences_store.path)
+        self.saved_workspaces = SavedWorkspacesStore(self.preferences_store.path)
+        self.bookmark_store = BookmarkStore(self.preferences_store.path)
+        self.bookmark_items = []
+        self.bookmark_manager = None
+        self.workspace_manager = None
         self.last_vault_store = LastVaultStore(self.preferences_store.path)
         self.navigation_history = NavigationHistory()
         self.restoring_workspace = False
@@ -793,6 +1004,26 @@ class Window(Gtk.ApplicationWindow):
         self.search_entry = Gtk.SearchEntry(placeholder_text='Search notes…')
         self.search_entry.connect('search-changed', lambda *_: self.populate_files())
         sidebar.pack_start(self.search_entry, False, False, 0)
+        self.bookmarks_heading = Gtk.Label(label='Bookmarks', xalign=0)
+        self.bookmarks_heading.get_style_context().add_class('caption')
+        sidebar.pack_start(self.bookmarks_heading, False, False, 0)
+        self.bookmarks_empty = Gtk.Label(label='No bookmarks yet', xalign=0)
+        self.bookmarks_empty.get_style_context().add_class('bookmark-empty')
+        self.bookmarks_empty.set_no_show_all(True)
+        sidebar.pack_start(self.bookmarks_empty, False, False, 0)
+        self.bookmark_list = Gtk.ListBox()
+        self.bookmark_list.get_style_context().add_class('note-list')
+        self.bookmark_list.get_style_context().add_class('bookmark-list')
+        self.bookmark_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self.bookmark_list.set_activate_on_single_click(True)
+        self.bookmark_list.connect('row-activated', self.activate_bookmark)
+        self.bookmarks_scroll = Gtk.ScrolledWindow()
+        self.bookmarks_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.bookmarks_scroll.set_propagate_natural_height(True)
+        self.bookmarks_scroll.set_max_content_height(160)
+        self.bookmarks_scroll.set_no_show_all(True)
+        self.bookmarks_scroll.add(self.bookmark_list)
+        sidebar.pack_start(self.bookmarks_scroll, False, False, 0)
         files_heading = Gtk.Label(label='Files', xalign=0)
         files_heading.get_style_context().add_class('caption')
         sidebar.pack_start(files_heading, False, False, 0)
@@ -867,11 +1098,17 @@ class Window(Gtk.ApplicationWindow):
         statusbar.pack_start(self.status, True, True, 0)
         format_label = Gtk.Label(label='Markdown   ·   UTF-8')
         format_label.get_style_context().add_class('status')
+        self.counts = Gtk.Label(xalign=1)
+        self.counts.get_style_context().add_class('status')
+        self.counts.get_accessible().set_name('Word and character count')
+        self.counts.set_tooltip_text('Words, characters, and lines in the active note')
         statusbar.pack_end(format_label, False, False, 0)
+        statusbar.pack_end(self.counts, False, False, 0)
         root.pack_end(statusbar, False, False, 0)
         self.workspace_source = GLib.timeout_add_seconds(5, self.persist_workspace)
         self.connect('destroy', self.cleanup)
         self.show_all()
+        self.refresh_bookmark_list()
         self.update_workspace_state()
         if folder:
             self.try_action(lambda: self.load_vault(folder))
@@ -894,8 +1131,12 @@ class Window(Gtk.ApplicationWindow):
         return button
 
     def cleanup(self, *_):
-        if self.graph_window:
-            self.graph_window.destroy()
+        for view in tuple(getattr(self, 'canvas_views', ())):
+            view.cancel_autosave()
+        for window in (self.version_dialog, self.graph_window, self.slides_window,
+                       self.converter_dialog, self.bookmark_manager, self.workspace_manager):
+            if window is not None:
+                window.destroy()
         self.persist_workspace()
         if self.reading_source is not None:
             GLib.source_remove(self.reading_source)
@@ -940,6 +1181,9 @@ class Window(Gtk.ApplicationWindow):
             self.try_action(lambda: self.load_vault(dialog.get_filename()))
         dialog.destroy()
 
+    def editors(self):
+        return [*self.panes.values(), *self.canvas_views]
+
     def confirm_panes(self, panes):
         self.confirming_panes = True
         try:
@@ -977,14 +1221,17 @@ class Window(Gtk.ApplicationWindow):
 
     def load_vault(self, folder):
         vault = Vault(folder)
-        if not self.confirm_panes(list(self.panes.values())):
+        if not self.confirm_panes(self.editors()):
             vault.close()
             return
         self.persist_workspace()
         self.release_vault()
         self.vault = vault
+        self.bookmark_items = self.bookmark_store.load(vault.root)
         self.navigation_history = NavigationHistory()
         self.recovery = RecoveryStore(vault.root)
+        self.version_history = VersionHistoryStore(vault.root)
+        vault.version_history = self.version_history
         self.update_workspace_state()
         self.collapsed_folders.clear()
         self.vault_label.set_text(vault.root.name)
@@ -998,43 +1245,52 @@ class Window(Gtk.ApplicationWindow):
             first = 'Welcome.md' if 'Welcome.md' in vault.notes else next(iter(vault.notes))
             self.open_note(first)
         self.update_context()
+        self.refresh_bookmark_list()
         self.vault_monitor = VaultMonitor(vault, self.refresh, self.status.set_text)
         try:
             self.last_vault_store.save(vault.root)
         except OSError as error:
             self.status.set_text(f'Could not remember the opened vault: {error}')
 
+    def clear_editors(self):
+        self.close_split()
+        for source in self.scroll_restore_sources.values():
+            GLib.source_remove(source)
+        self.scroll_restore_sources.clear()
+        while self.tabs.get_n_pages():
+            pane = self.tabs.get_nth_page(0)
+            self.tabs.remove_page(0)
+            pane.destroy()
+        self.panes.clear()
+
     def release_vault(self):
-        if self.graph_window:
-            self.graph_window.destroy()
+        for window in (self.version_dialog, self.graph_window, self.slides_window,
+                       self.converter_dialog, self.bookmark_manager, self.workspace_manager):
+            if window is not None:
+                window.destroy()
         if self.vault_monitor:
             self.vault_monitor.close()
             self.vault_monitor = None
         if self.reading_source is not None:
             GLib.source_remove(self.reading_source)
             self.reading_source = None
-        for source in self.scroll_restore_sources.values():
-            GLib.source_remove(source)
-        self.scroll_restore_sources.clear()
         for overlay in (self.palette, self.quick_switcher):
             if overlay is not None:
                 overlay.destroy()
-        self.close_split()
-        while self.tabs.get_n_pages():
-            pane = self.tabs.get_nth_page(0)
-            self.tabs.remove_page(0)
-            pane.destroy()
-        self.panes.clear()
+        self.clear_editors()
+        self.version_history = None
         if self.recovery:
             self.recovery.close()
             self.recovery = None
         if self.vault:
             self.vault.close()
+        self.bookmark_items = []
+        self.refresh_bookmark_list()
 
     def close_vault(self, *_):
         if self.vault is None:
             return True
-        if not self.confirm_panes(list(self.panes.values())):
+        if not self.confirm_panes(self.editors()):
             return False
         try:
             self.last_vault_store.save(None)
@@ -1080,7 +1336,7 @@ class Window(Gtk.ApplicationWindow):
         results = {result.path: result for result in self.vault.search_results(self.search_entry.get_text())} if self.vault else {}
         paths = list(results)
         if self.vault and not searching:
-            paths = tree_paths(paths, self.vault.folders, self.collapsed_folders)
+            paths = tree_paths([*paths, *self.vault.canvases], self.vault.folders, self.collapsed_folders)
         rows = self.files.get_children()
         if [row.path for row in rows] == paths and all(
                 row.search_result == searching and
@@ -1110,12 +1366,13 @@ class Window(Gtk.ApplicationWindow):
                     indicator = Gtk.Box()
                 indicator.set_size_request(16, -1)
                 content.pack_start(indicator, False, False, 0)
-            icon = Gtk.Image.new_from_icon_name(
-                'folder-symbolic' if is_folder else 'text-x-generic-symbolic', Gtk.IconSize.MENU)
+            icon_name = 'folder-symbolic' if is_folder else 'x-office-drawing-symbolic' if path.lower().endswith('.canvas') else 'text-x-generic-symbolic'
+            icon = Gtk.Image.new_from_icon_name(icon_name, Gtk.IconSize.MENU)
             icon.get_style_context().add_class('muted')
             content.pack_start(icon, False, False, 0)
             names = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
-            label = Gtk.Label(label=Path(path).name if is_folder else Path(path).stem, xalign=0)
+            show_name = is_folder or path.lower().endswith('.canvas')
+            label = Gtk.Label(label=Path(path).name if show_name else Path(path).stem, xalign=0)
             label.set_ellipsize(Pango.EllipsizeMode.END)
             if is_folder:
                 label.get_style_context().add_class('tree-folder')
@@ -1144,9 +1401,14 @@ class Window(Gtk.ApplicationWindow):
             row.set_tooltip_text(path)
             self.files.add(row)
         pane = self.current()
-        if pane:
+        selected_path = pane.note.path if pane else None
+        if selected_path is None:
+            page = self.active_page()
+            if isinstance(page, CanvasView):
+                selected_path = page.path
+        if selected_path:
             for row in self.files.get_children():
-                if row.path == pane.note.path:
+                if row.path == selected_path:
                     self.files.select_row(row)
                     break
         self.files.show_all()
@@ -1154,6 +1416,8 @@ class Window(Gtk.ApplicationWindow):
     def activate_file(self, _, row):
         if row.path.endswith('/'):
             self.toggle_folder(row.path)
+        elif row.path.lower().endswith('.canvas'):
+            self.open_canvas(row.path)
         else:
             self.open_note(row.path)
 
@@ -1282,13 +1546,16 @@ class Window(Gtk.ApplicationWindow):
 
     def move_path(self, relative, destination):
         """UI boundary for organization: resolve dirty editors before link rewrites."""
-        if not self.confirm_panes(list(self.panes.values())):
+        if not self.confirm_panes(self.editors()):
             return False
         # Discard choices in confirm_panes must not leave stale dirty buffers
         # able to autosave over incoming-link updates.
         for pane in self.panes.values():
             if pane.dirty:
                 pane.load_external(self.vault.read(pane.note.path))
+        for view in tuple(self.canvas_views):
+            if view.dirty:
+                view.reload_from_disk()
         mapping = self.vault.move(relative, destination)
         renamed = {}
         for old, pane in self.panes.items():
@@ -1304,11 +1571,16 @@ class Window(Gtk.ApplicationWindow):
             if self.recovery and old != new:
                 self.recovery.remove(old)
         self.panes = renamed
+        for view in tuple(self.canvas_views):
+            moved = mapping.get(view.path)
+            if moved and moved != view.path:
+                view.retarget(moved)
         old_folder, new_folder = relative.rstrip('/'), destination.rstrip('/')
         self.collapsed_folders = {new_folder + path[len(old_folder):]
                                  if path == old_folder or path.startswith(old_folder + '/') else path
                                  for path in self.collapsed_folders}
         self.collapsed_folders.intersection_update(self.vault.folders)
+        mapping = with_moved_root(mapping, relative, destination)
         self.remap_navigation(mapping)
         self.populate_files()
         self.update_context()
@@ -1330,15 +1602,26 @@ class Window(Gtk.ApplicationWindow):
     def trash_path(self, relative):
         relative = relative.rstrip('/')
         deleted = [path for path in self.vault.notes if path == relative or path.startswith(relative + '/')]
+        if relative and relative not in deleted:
+            deleted.append(relative)
         panes = [pane for path, pane in self.panes.items() if path in deleted]
-        if not self.confirm_panes(panes):
+        canvases = [view for view in self.canvas_views
+                    if view.path == relative or view.path.startswith(relative + '/')]
+        if not self.confirm_panes([*panes, *canvases]):
             return False
+        for view in canvases:
+            view.cancel_autosave()
+            view.dirty = False
         target = self.vault.trash(relative)
         for pane in panes:
             if self.recovery:
                 self.recovery.remove(pane.note.path)
             self.tabs.remove_page(self.tabs.page_num(pane))
             self.panes.pop(pane.note.path, None)
+        for view in canvases:
+            page_number = self.tabs.page_num(view)
+            if page_number >= 0:
+                self.tabs.remove_page(page_number)
         self.queue_reading_refresh()
         self.remap_navigation({}, deleted=deleted)
         self.collapsed_folders.intersection_update(self.vault.folders)
@@ -1472,6 +1755,10 @@ class Window(Gtk.ApplicationWindow):
         return page if isinstance(page, NotePane) else None
 
     def save_current(self, *_):
+        page = self.active_page()
+        if isinstance(page, CanvasView):
+            self.try_action(page.save)
+            return
         pane = self.current()
         if pane:
             self.try_action(pane.save)
@@ -1480,9 +1767,12 @@ class Window(Gtk.ApplicationWindow):
         self.close_note(self.active_page())
 
     def close_note(self, pane):
-        if isinstance(pane, GraphView):
-            self.tabs.remove_page(self.tabs.page_num(pane))
-            self.update_context()
+        if not isinstance(pane, NotePane):
+            if pane is not None:
+                page = self.tabs.page_num(pane)
+                if page >= 0:
+                    self.tabs.remove_page(page)
+                    self.update_context()
             return
         if pane and self.confirm_panes([pane]):
             if pane is self.split_pane:
@@ -1497,6 +1787,9 @@ class Window(Gtk.ApplicationWindow):
 
     def new_folder(self, *_, parent=''):
         self.new_item('folder', parent)
+
+    def new_canvas(self, *_, parent=''):
+        self.new_item('canvas', parent)
 
     def new_item(self, kind, parent):
         if not self.vault:
@@ -1515,16 +1808,23 @@ class Window(Gtk.ApplicationWindow):
         dialog.get_content_area().add(entry)
         dialog.show_all()
         if dialog.run() == Gtk.ResponseType.OK:
-            create = self.vault.create if kind == 'note' else self.vault.create_folder
+            if kind == 'note':
+                create = self.vault.create
+            elif kind == 'canvas':
+                create = self.vault.create_canvas
+            else:
+                create = self.vault.create_folder
             created = self.try_action(lambda: create(entry.get_text()))
             if created is not None:
-                path = created.path if kind == 'note' else created
+                path = created if kind == 'folder' else created.path
                 self.collapsed_folders.difference_update(str(parent) for parent in Path(path).parents)
                 self.collapsed_folders.discard(path)
                 self.search_entry.set_text('')
                 self.populate_files()
                 if kind == 'note':
                     self.open_note(created.path)
+                elif kind == 'canvas':
+                    self.open_canvas(created.path)
                 else:
                     for row in self.files.get_children():
                         if row.path == created + '/':
@@ -1532,6 +1832,134 @@ class Window(Gtk.ApplicationWindow):
                             break
                     self.status.set_text(f'Created folder · {created}')
         dialog.destroy()
+
+    def reveal_note(self, path):
+        self.collapsed_folders.difference_update(str(parent) for parent in Path(path).parents)
+        self.collapsed_folders.discard(path)
+        if self.search_entry.get_text():
+            self.search_entry.set_text('')
+        else:
+            self.populate_files()
+        return self.open_note(path)
+
+    def open_daily_note(self, *_):
+        if not self.vault:
+            self.choose_vault()
+            return
+
+        def action():
+            note, created = ensure_daily_note(self.vault, self.preferences)
+            pane = self.reveal_note(note.path)
+            if pane:
+                verb = 'Created daily note' if created else 'Opened daily note'
+                self.status.set_text(f'{verb} · {note.path}')
+        self.try_action(action)
+
+    def insert_template(self, *_, path=None, pane=None):
+        if not self.vault:
+            self.choose_vault()
+            return
+        pane = pane or self.current()
+        if pane is None:
+            self.status.set_text('Open a note before inserting a template.')
+            return
+        original = pane.text()
+        bounds = pane.buffer.get_selection_bounds()
+        if bounds:
+            start, end = (item.get_offset() for item in bounds)
+        else:
+            start = end = pane.buffer.get_iter_at_mark(pane.buffer.get_insert()).get_offset()
+        if path is None:
+            paths = template_paths(self.vault, self.preferences.templates_folder)
+            if not paths:
+                folder = self.preferences.templates_folder or 'the vault root'
+                self.status.set_text(f'No templates in {folder}.')
+                return
+            dialog = TemplatePicker(self, paths)
+            try:
+                accepted = dialog.run() == Gtk.ResponseType.OK and bool(dialog.choice)
+                path = dialog.choice
+            finally:
+                dialog.destroy()
+            if not accepted:
+                return
+
+        def action():
+            if pane.text() != original:
+                self.status.set_text('The note changed while choosing a template. Try again.')
+                return
+            replacement = expand_template(read_template(self.vault, path), title=Path(pane.note.path).stem)
+            pane.apply_edit(TextEdit(start, end, replacement))
+            pane.editor.grab_focus()
+            self.status.set_text(f'Inserted template · {path}')
+        self.try_action(action)
+
+    def create_from_template(self, *_, template=None, name=None):
+        if not self.vault:
+            self.choose_vault()
+            return
+        if template is None:
+            paths = template_paths(self.vault, self.preferences.templates_folder)
+            if not paths:
+                folder = self.preferences.templates_folder or 'the vault root'
+                self.status.set_text(f'No templates in {folder}.')
+                return
+            dialog = TemplatePicker(self, paths, title='Choose a template', confirm='Choose')
+            try:
+                accepted = dialog.run() == Gtk.ResponseType.OK and bool(dialog.choice)
+                template = dialog.choice
+            finally:
+                dialog.destroy()
+            if not accepted:
+                return
+        if name is None:
+            dialog = NoteNameDialog(self)
+            try:
+                if dialog.run() != Gtk.ResponseType.OK:
+                    return
+                name = dialog.entry.get_text().strip()
+            finally:
+                dialog.destroy()
+            if not name:
+                return
+
+        def action():
+            note = create_note_from_template(self.vault, template, name)
+            if self.reveal_note(note.path):
+                self.status.set_text(f'Created note · {note.path}')
+        self.try_action(action)
+
+    def new_unique_note(self, *_, title=None, template=None):
+        if not self.vault:
+            self.choose_vault()
+            return
+        if title is None and template is None:
+            paths = template_paths(self.vault, self.preferences.templates_folder)
+            dialog = UniqueNoteDialog(self, paths)
+            try:
+                if dialog.run() != Gtk.ResponseType.OK:
+                    return
+                title = dialog.title_entry.get_text()
+                template = dialog.template_path()
+            finally:
+                dialog.destroy()
+
+        def action():
+            note = create_unique_note(self.vault, self.preferences, title=title or '', template=template or '')
+            if self.reveal_note(note.path):
+                self.status.set_text(f'Unique note · {note.path}')
+        self.try_action(action)
+
+    def open_random_note(self, *_):
+        if not self.vault:
+            self.choose_vault()
+            return
+        path = random_note_path(self.vault)
+        if not path:
+            self.status.set_text('No readable notes to open.')
+            return
+        if self.open_note(path):
+            self.status.set_text(f'Random note · {path}')
 
     def section(self, title):
         label = Gtk.Label(label=title, xalign=0)
@@ -1603,22 +2031,162 @@ class Window(Gtk.ApplicationWindow):
                     self.open_note(note.path, fragment)
                 self.try_action(create)
 
+    def mention_target(self, relative):
+        stem = Path(relative).stem
+        filename = Path(relative).name
+        matches = [path for path in self.vault.notes if Path(path).name == filename]
+        if len(matches) == 1:
+            return stem
+        if relative.lower().endswith('.md'):
+            return relative[:-3]
+        return relative
+
+    def add_unlinked_mention(self, mention):
+        row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        row.set_margin_bottom(6)
+        location = Gtk.Label(label=f'{mention.source_path}:{mention.line_number}', xalign=0)
+        location.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+        location.set_tooltip_text(mention.source_path)
+        location.get_style_context().add_class('outline-empty')
+        snippet = Gtk.Label(label=mention.snippet, xalign=0)
+        snippet.set_line_wrap(True)
+        snippet.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        snippet.set_max_width_chars(28)
+        snippet.set_selectable(True)
+        actions = Gtk.Box(spacing=4)
+        open_button = Gtk.Button(label='Open')
+        open_button.mention = mention
+        open_button.mention_action = 'open'
+        open_button.get_style_context().add_class('context-link')
+        open_button.get_accessible().set_name(f'Open mention {mention.source_path}:{mention.line_number}')
+        open_button.set_tooltip_text(f'Open {mention.source_path} at this mention')
+        open_button.connect('clicked', lambda *_: self.open_mention(mention))
+        link_button = Gtk.Button(label='Link')
+        link_button.mention = mention
+        link_button.mention_action = 'link'
+        link_button.get_style_context().add_class('context-link')
+        link_button.get_accessible().set_name(f'Link mention {mention.source_path}:{mention.line_number}')
+        link_button.set_tooltip_text(f'Link “{mention.matched_term}” to this note')
+        link_button.connect('clicked', lambda *_: self.link_unlinked_mention(mention))
+        actions.pack_start(open_button, False, False, 0)
+        actions.pack_start(link_button, False, False, 0)
+        row.pack_start(location, False, False, 0)
+        row.pack_start(snippet, False, False, 0)
+        row.pack_start(actions, False, False, 0)
+        self.context.pack_start(row, False, False, 0)
+
+    def open_mention(self, mention):
+        pane = self.open_note(mention.source_path)
+        if pane is None:
+            return
+        text = pane.text()
+        offset = mention.match_start
+        if text[offset:offset + len(mention.matched_term)] != mention.matched_term:
+            offset = text.find(mention.matched_term)
+            if offset < 0:
+                offset = 0
+        position = pane.buffer.get_iter_at_offset(min(offset, len(text)))
+        pane.buffer.place_cursor(position)
+        pane.editor.scroll_to_iter(position, 0.15, False, 0, 0)
+        pane.editor.grab_focus()
+
+    def link_unlinked_mention(self, mention):
+        target = self.current()
+        if target is None or self.vault is None:
+            return
+        target_name = self.mention_target(target.note.path)
+
+        def replacement_for(text):
+            if text[mention.match_start:mention.match_end] != mention.matched_term:
+                return None
+            updated = link_mention(text, mention.match_start, mention.match_end, target_name)
+            delta = len(updated) - len(text)
+            return updated[mention.match_start:mention.match_end + delta]
+
+        source = self.panes.get(mention.source_path)
+        if source is not None:
+            replacement = replacement_for(source.text())
+            if replacement is None:
+                self.status.set_text(f'The mention in {mention.source_path} changed. It was not linked.')
+                self.update_context()
+                return
+            source.apply_edit(TextEdit(mention.match_start, mention.match_end, replacement))
+            self.status.set_text(f'Linked “{mention.matched_term}” in {mention.source_path}')
+            self.update_context()
+            return
+
+        def action():
+            note = self.vault.read(mention.source_path)
+            if replacement_for(note.text) is None:
+                raise VaultError(f'The mention in {mention.source_path} changed. It was not linked.')
+            return self.vault.save(note, link_mention(
+                note.text, mention.match_start, mention.match_end, target_name))
+
+        if self.try_action(action) is not None:
+            self.status.set_text(f'Linked “{mention.matched_term}” in {mention.source_path}')
+            self.update_context()
+
+    def show_version_history(self, *_):
+        pane = self.current()
+        if pane is None or self.vault is None or self.version_history is None:
+            self.status.set_text('Open a note to see its version history.')
+            return None
+        if self.version_dialog is not None:
+            self.version_dialog.destroy()
+        self.version_dialog = VersionHistoryDialog(self, pane.note.path)
+        self.version_dialog.connect('destroy', self._forget_version_dialog)
+        self.version_dialog.show_all()
+        return self.version_dialog
+
+    def _forget_version_dialog(self, dialog):
+        if self.version_dialog is dialog:
+            self.version_dialog = None
+
+    def update_counts(self):
+        if self.in_destruction():
+            return
+        pane = self.current()
+        if pane is None:
+            self.counts.set_text('')
+            return
+        self.counts.set_text(count_summary(pane.text(), pane.buffer.get_line_count()))
+
     def update_context(self):
         if self.vault:
             for graph in tuple(self.graph_views):
                 graph.refresh_if_changed()
+            for bases in tuple(self.bases_views):
+                bases.refresh_if_changed()
         self.outline_rows = []
         for child in self.context.get_children():
             child.destroy()
+        page = self.active_page()
+        if isinstance(page, CanvasView) and self.vault:
+            self.save_button.set_sensitive(True)
+            self.location_label.set_text(f'{self.vault.root.name}  /  {page.path}')
+            self.location_label.set_tooltip_text(str(self.vault.root / page.path))
+            for row in self.files.get_children():
+                if row.path == page.path:
+                    self.files.select_row(row)
+                    break
+            self.section('Canvas')
+            summary = Gtk.Label(label=f'{len(page.document.nodes)} cards · {len(page.document.edges)} connections', xalign=0)
+            summary.set_line_wrap(True)
+            summary.get_style_context().add_class('outline-empty')
+            self.context.pack_start(summary, False, False, 0)
+            self.context.show_all()
+            return False
         pane = self.current()
         self.save_button.set_sensitive(pane is not None)
         if not pane or not self.vault:
             self.location_label.set_text(self.vault.root.name if self.vault else 'Local workspace')
             self.section('Outline · Links · Backlinks')
             self.context.show_all()
+            self.update_counts()
             return False
         self.location_label.set_text(f'{self.vault.root.name}  /  {pane.note.path}')
         self.location_label.set_tooltip_text(str(self.vault.root / pane.note.path))
+        pane.sync_bookmark_button()
         for row in self.files.get_children():
             if row.path == pane.note.path:
                 self.files.select_row(row)
@@ -1663,6 +2231,25 @@ class Window(Gtk.ApplicationWindow):
         self.section('Backlinks · Saved files')
         for path in self.vault.backlinks(pane.note.path):
             self.context_button(path.removesuffix('.md'), lambda path=path: self.open_note(path))
+        self.section('Unlinked mentions')
+        texts = {path: item.text() for path, item in self.panes.items()}
+        mentions = self.vault.unlinked_mentions(pane.note.path, texts)
+        if not mentions:
+            empty = Gtk.Label(label='No unlinked mentions.', xalign=0)
+            empty.get_style_context().add_class('outline-empty')
+            self.context.pack_start(empty, False, False, 0)
+        else:
+            shown = mentions[:100]
+            for mention in shown:
+                self.add_unlinked_mention(mention)
+            if len(mentions) > len(shown):
+                more = Gtk.Label(
+                    label=f'{len(shown)} of {len(mentions)} unlinked mentions are shown.', xalign=0)
+                more.set_line_wrap(True)
+                more.set_max_width_chars(28)
+                more.get_style_context().add_class('outline-empty')
+                self.context.pack_start(more, False, False, 0)
+        self.context_button('Version history…', self.show_version_history)
         self.section('Properties')
         metadata = note_metadata(pane.text())
         self.context_button('Edit properties…', self.edit_properties)
@@ -1684,6 +2271,7 @@ class Window(Gtk.ApplicationWindow):
             for tag in metadata.tags:
                 self.context_button('#' + tag, lambda tag=tag: self.search_entry.set_text('tag:#' + tag))
         self.context.show_all()
+        self.update_counts()
         return False
 
     def queue_reading_refresh(self):
@@ -1718,6 +2306,17 @@ class Window(Gtk.ApplicationWindow):
                         pane.load_external(self.vault.indexed_note(path))
                 if pane.mode == 'reading':
                     pane.reading.refresh()
+            for view in tuple(self.canvas_views):
+                revision = self.vault.canvases.get(view.path)
+                if view.path not in self.vault.canvases or revision is None:
+                    self.status.set_text(f'{view.path} was removed or cannot be read. Open canvas edits are retained.')
+                elif revision != view.record.revision and view.dirty:
+                    self.status.set_text(f'External change to {view.path}. Your unsaved edits are retained; saving will stop on conflict.')
+                elif revision != view.record.revision:
+                    try:
+                        view.reload_from_disk()
+                    except (VaultError, OSError) as error:
+                        self.status.set_text(str(error))
             self.update_context()
         except (VaultError, OSError) as error:
             self.status.set_text(str(error))
@@ -1810,6 +2409,125 @@ class Window(Gtk.ApplicationWindow):
     def show_local_graph(self, *_):
         self.show_graph(local=True)
 
+    def show_bases(self, *_, state=None):
+        if not self.vault:
+            return None
+        if state is None:
+            for index in range(self.tabs.get_n_pages()):
+                page = self.tabs.get_nth_page(index)
+                if isinstance(page, BasesView):
+                    self.tabs.set_current_page(index)
+                    page.search.grab_focus()
+                    return page
+        self.remember_location()
+        bases = BasesView(self, state=state)
+        tab = Gtk.Box(spacing=6)
+        tab.pack_start(Gtk.Label(label='Bases'), True, True, 0)
+        close = self.icon_button('window-close-symbolic', 'Close bases tab · Ctrl+W',
+                                 lambda *_: self.close_note(bases))
+        close.set_focus_on_click(False)
+        tab.pack_end(close, False, False, 0)
+        tab.show_all()
+        self.tabs.append_page(bases, tab)
+        self.tabs.set_current_page(self.tabs.page_num(bases))
+        bases.search.grab_focus()
+        self.update_context()
+        return bases
+
+    def show_slides(self, *_):
+        if not self.vault:
+            return None
+        pane = self.current()
+        if pane is None:
+            self.status.set_text('Open a note to start the slides presentation.')
+            return None
+        if self.slides_window is not None:
+            self.slides_window.destroy()
+        self.slides_window = SlidesWindow(self, pane.note.path, pane.text())
+        return self.slides_window
+
+    def show_converter(self, *_):
+        if not self.vault:
+            return None
+        if self.converter_dialog is None:
+            self.converter_dialog = ConverterDialog(self)
+            self.converter_dialog.connect('destroy', lambda *_: setattr(self, 'converter_dialog', None))
+            self.converter_dialog.show_all()
+        else:
+            self.converter_dialog.present()
+        return self.converter_dialog
+
+    def open_canvas(self, relative):
+        if not self.vault:
+            return None
+        for view in self.canvas_views:
+            if view.path == relative and self.tabs.page_num(view) >= 0:
+                self.tabs.set_current_page(self.tabs.page_num(view))
+                view.drawing.grab_focus()
+                self.update_context()
+                return view
+        opened = []
+
+        def action():
+            record = self.vault.read_canvas(relative)
+            view = CanvasView(self, record)
+            opened.append(view)
+            tab = Gtk.Box(spacing=6)
+            tab.set_tooltip_text(relative)
+            tab.pack_start(view.tab_label, True, True, 0)
+            close = self.icon_button('window-close-symbolic', 'Close canvas · Ctrl+W',
+                                     lambda *_: self.close_note(view))
+            close.set_focus_on_click(False)
+            tab.pack_end(close, False, False, 0)
+            tab.show_all()
+            self.tabs.append_page(view, tab)
+            self.tabs.set_current_page(self.tabs.page_num(view))
+            view.drawing.grab_focus()
+
+        self.remember_location()
+        self.try_action(action)
+        if not opened:
+            return None
+        self.update_context()
+        return opened[0]
+
+    def open_canvas_command(self, *_):
+        if not self.vault:
+            return
+        paths = [path for path, revision in self.vault.canvases.items() if isinstance(revision, str)]
+        if not paths:
+            self.status.set_text('No canvas files in this vault.')
+            return
+        if len(paths) == 1:
+            self.open_canvas(paths[0])
+            return
+        dialog = Gtk.Dialog(title='Open canvas', transient_for=self, modal=True)
+        dialog.add_buttons('Cancel', Gtk.ResponseType.CANCEL, 'Open', Gtk.ResponseType.OK)
+        dialog.set_default_size(440, 320)
+        listing = Gtk.ListBox()
+        listing.set_selection_mode(Gtk.SelectionMode.BROWSE)
+        for path in paths:
+            row = Gtk.ListBoxRow()
+            row.canvas_path = path
+            label = Gtk.Label(label=path, xalign=0)
+            label.set_margin_start(8)
+            label.set_margin_top(4)
+            label.set_margin_bottom(4)
+            row.add(label)
+            listing.add(row)
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_min_content_height(200)
+        scroll.add(listing)
+        dialog.get_content_area().set_border_width(12)
+        dialog.get_content_area().add(scroll)
+        dialog.show_all()
+        listing.select_row(listing.get_row_at_index(0))
+        accepted = dialog.run() == Gtk.ResponseType.OK
+        selected = listing.get_selected_row()
+        dialog.destroy()
+        if accepted and selected is not None:
+            self.open_canvas(selected.canvas_path)
+
     def show_settings(self, *_):
         if self.settings_dialog is None:
             self.settings_dialog = SettingsDialog(self)
@@ -1848,7 +2566,7 @@ class Window(Gtk.ApplicationWindow):
             self.navigation_history.update(Location(pane.note.path, cursor))
 
     def tab_switched(self, _, pane, index):
-        if isinstance(pane, GraphView):
+        if not isinstance(pane, NotePane):
             self.note_toolbars.hide()
             GLib.idle_add(self.update_context)
             return
@@ -1903,15 +2621,23 @@ class Window(Gtk.ApplicationWindow):
             self.close_split()
             return
         pane = self.active_page()
+        if isinstance(pane, CanvasView):
+            self.status.set_text('Canvas files stay in their own tab.')
+            return
         if pane:
             self.open_split(pane)
 
     def open_split(self, pane):
+        if isinstance(pane, CanvasView):
+            self.status.set_text('Canvas files stay in their own tab.')
+            return
+        if not isinstance(pane, (NotePane, GraphView)):
+            return
         from .splitview import SplitTextView
         self.close_split()
         self.split_pane = pane
         bar = Gtk.Box(spacing=6)
-        title = Gtk.Label(label='Graph' if isinstance(pane, GraphView) else pane.note.path, xalign=0)
+        title = Gtk.Label(label='Graph' if isinstance(pane, GraphView) else pane.path if isinstance(pane, CanvasView) else pane.note.path, xalign=0)
         title.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
         bar.pack_start(title, True, True, 8)
         bar.pack_end(self.icon_button('window-close-symbolic', 'Close split editor', self.close_split), False, False, 0)
@@ -1952,52 +2678,389 @@ class Window(Gtk.ApplicationWindow):
             self.tabs.set_current_page(self.tabs.page_num(self.split_pane))
         return self.split_pane.editor_key_press(view, event)
 
+    def note_is_bookmarked(self, path, fragment=''):
+        return any(item.type == 'note' and item.path == path and item.fragment == fragment
+                   for item in self.bookmark_items)
+
+    def persist_bookmarks(self):
+        if self.vault is None:
+            return
+        try:
+            self.bookmark_store.save(self.vault.root, self.bookmark_items)
+        except OSError as error:
+            self.status.set_text(f'Could not save bookmarks: {error}')
+
+    def refresh_bookmark_list(self, select=0):
+        for row in self.bookmark_list.get_children():
+            row.destroy()
+        for index, bookmark in enumerate(self.bookmark_items):
+            row = Gtk.ListBoxRow()
+            row.index = index
+            row.title = bookmark.display_title()
+            content = Gtk.Box(spacing=6)
+            icon_name = BOOKMARK_ICONS.get(bookmark.type, 'emblem-favorite-symbolic')
+            icon = Gtk.Image.new_from_icon_name(icon_name, Gtk.IconSize.MENU)
+            icon.get_style_context().add_class('muted')
+            content.pack_start(icon, False, False, 0)
+            label = Gtk.Label(label=bookmark.display_title(), xalign=0)
+            label.set_ellipsize(Pango.EllipsizeMode.END)
+            content.pack_start(label, True, True, 0)
+            row.add(content)
+            row.set_tooltip_text(bookmark.detail())
+            row.get_accessible().set_name(bookmark.display_title())
+            self.bookmark_list.add(row)
+        if self.bookmark_items:
+            self.bookmarks_empty.hide()
+            self.bookmark_list.show_all()
+            self.bookmarks_scroll.show()
+        else:
+            self.bookmarks_scroll.hide()
+            self.bookmarks_empty.show()
+        if self.bookmark_manager is not None:
+            self.bookmark_manager.reload(select)
+        self.sync_bookmark_buttons()
+
+    def sync_bookmark_buttons(self):
+        for pane in self.panes.values():
+            pane.sync_bookmark_button()
+
+    def activate_bookmark(self, _, row):
+        if 0 <= row.index < len(self.bookmark_items):
+            self.open_bookmark(self.bookmark_items[row.index])
+
+    def open_bookmark(self, bookmark):
+        if self.vault is None:
+            return
+        if bookmark.type == 'note':
+            if bookmark.path not in self.vault.notes:
+                self.status.set_text(f'Bookmarked note is missing · {bookmark.path}')
+                return
+            self.open_note(bookmark.path, bookmark.fragment)
+            self.status.set_text(f'Opened bookmark · {bookmark.display_title()}')
+            return
+        if bookmark.type == 'search':
+            self.search_entry.set_text(bookmark.query)
+            self.search_entry.grab_focus()
+            self.status.set_text(f'Search · {bookmark.display_title()}')
+            return
+        if bookmark.type == 'folder':
+            self.reveal_folder(bookmark.path)
+            return
+        if bookmark.type == 'graph':
+            self.show_graph_tab(state=graph_open_state(bookmark))
+            self.status.set_text(f'Opened bookmark · {bookmark.display_title()}')
+
+    def reveal_folder(self, path):
+        folder = path.strip().rstrip('/')
+        if folder not in self.vault.folders:
+            self.status.set_text(f'Bookmarked folder is missing · {folder}')
+            return
+        ancestors = {str(parent) for parent in Path(folder).parents if str(parent) not in ('.', '')}
+        self.collapsed_folders.difference_update(ancestors)
+        self.collapsed_folders.discard(folder)
+        if self.search_entry.get_text():
+            self.search_entry.set_text('')
+        else:
+            self.populate_files()
+        target = folder + '/'
+        for row in self.files.get_children():
+            if row.path == target:
+                self.files.select_row(row)
+                row.grab_focus()
+                break
+        self.status.set_text(f'Folder · {folder}')
+
+    def toggle_note_bookmark(self, pane=None):
+        if not isinstance(pane, NotePane):
+            pane = self.current()
+        if pane is None:
+            self.status.set_text('Open a note to bookmark it.')
+            return
+        if self.note_is_bookmarked(pane.note.path):
+            self.remove_note_bookmark(pane.note.path)
+        else:
+            self.add_note_bookmark(pane.note.path)
+
+    def bookmark_current_note(self, *_):
+        pane = self.current()
+        if pane is None:
+            self.status.set_text('Open a note to bookmark it.')
+            return
+        self.add_note_bookmark(pane.note.path)
+
+    def remove_current_bookmark(self, *_):
+        pane = self.current()
+        if pane is None:
+            self.status.set_text('Open a note to remove its bookmark.')
+            return
+        self.remove_note_bookmark(pane.note.path)
+
+    def add_note_bookmark(self, path, fragment=''):
+        if self.vault is None:
+            return
+        if self.note_is_bookmarked(path, fragment):
+            self.status.set_text('That note is already bookmarked.')
+            return
+        self.bookmark_items.append(Bookmark(type='note', path=path, fragment=fragment))
+        self.persist_bookmarks()
+        self.refresh_bookmark_list()
+        self.status.set_text(f'Bookmarked · {path}')
+
+    def remove_note_bookmark(self, path, fragment=''):
+        before = len(self.bookmark_items)
+        self.bookmark_items = [item for item in self.bookmark_items
+                               if not (item.type == 'note' and item.path == path and item.fragment == fragment)]
+        if len(self.bookmark_items) == before:
+            self.status.set_text('That note is not bookmarked.')
+            return
+        self.persist_bookmarks()
+        self.refresh_bookmark_list()
+        self.status.set_text(f'Removed bookmark · {path}')
+
+    def bookmark_current_search(self, *_):
+        if self.vault is None:
+            return
+        query = self.search_entry.get_text()
+        if not query.strip():
+            self.status.set_text('Enter a search before bookmarking it.')
+            return
+        if any(item.type == 'search' and item.query == query for item in self.bookmark_items):
+            self.status.set_text('That search is already bookmarked.')
+            return
+        self.bookmark_items.append(Bookmark(type='search', query=query))
+        self.persist_bookmarks()
+        self.refresh_bookmark_list()
+        self.status.set_text('Bookmarked search')
+
+    def bookmark_selected_folder(self, *_):
+        if self.vault is None:
+            return
+        row = self.files.get_selected_row()
+        if row is None or not row.path.endswith('/'):
+            self.status.set_text('Select a folder to bookmark it.')
+            return
+        path = row.path.rstrip('/')
+        if any(item.type == 'folder' and item.path == path for item in self.bookmark_items):
+            self.status.set_text('That folder is already bookmarked.')
+            return
+        self.bookmark_items.append(Bookmark(type='folder', path=path))
+        self.persist_bookmarks()
+        self.refresh_bookmark_list()
+        self.status.set_text(f'Bookmarked folder · {path}')
+
+    def bookmark_current_graph(self, *_):
+        page = self.active_page()
+        if not isinstance(page, GraphView):
+            self.status.set_text('Open a graph tab to bookmark it.')
+            return
+        state = page.snapshot()
+        state.pop('id', None)
+        self.bookmark_items.append(Bookmark(type='graph', state=state))
+        self.persist_bookmarks()
+        self.refresh_bookmark_list()
+        self.status.set_text('Bookmarked graph')
+
+    def show_bookmarks(self, *_):
+        if self.vault is None:
+            return
+        if self.bookmark_manager is None:
+            self.bookmark_manager = BookmarkManager(self)
+            self.bookmark_manager.connect('destroy', lambda *_: setattr(self, 'bookmark_manager', None))
+        else:
+            self.bookmark_manager.present()
+
+    def rename_bookmark(self, index, title):
+        if not 0 <= index < len(self.bookmark_items):
+            return
+        if type(title) is not str or '\x00' in title or len(title.strip()) > 200:
+            self.status.set_text('Enter a shorter bookmark title.')
+            return
+        self.bookmark_items[index] = replace(self.bookmark_items[index], title=title.strip())
+        self.persist_bookmarks()
+        self.refresh_bookmark_list(select=index)
+
+    def move_bookmark(self, index, delta):
+        target = index + delta
+        if not 0 <= index < len(self.bookmark_items) or not 0 <= target < len(self.bookmark_items):
+            return
+        item = self.bookmark_items.pop(index)
+        self.bookmark_items.insert(target, item)
+        self.persist_bookmarks()
+        self.refresh_bookmark_list(select=target)
+
+    def remove_bookmark_at(self, index):
+        if not 0 <= index < len(self.bookmark_items):
+            return
+        removed = self.bookmark_items.pop(index)
+        self.persist_bookmarks()
+        self.refresh_bookmark_list(select=index)
+        self.status.set_text(f'Removed bookmark · {removed.display_title()}')
+
+    def saved_workspace_names(self):
+        if self.vault is None:
+            return []
+        return self.saved_workspaces.names(self.vault.root)
+
+    def save_workspace_layout(self, *_):
+        if self.vault is None:
+            return
+        name = ask_text(self, 'Save workspace layout', 'Name this layout', accept='Save')
+        if name is None:
+            return
+        if not name:
+            self.status.set_text('Enter a workspace name.')
+            return
+        if name in self.saved_workspaces.names(self.vault.root):
+            if not confirm(self, f'Replace the saved layout “{name}”?', 'Replace'):
+                return
+        self.save_named_workspace(name)
+
+    def save_named_workspace(self, name):
+        if self.vault is None:
+            return False
+        try:
+            self.saved_workspaces.save(self.vault.root, name, self.capture_workspace_state())
+        except (OSError, ValueError) as error:
+            self.status.set_text(str(error))
+            return False
+        self.status.set_text(f'Saved workspace · {name.strip()}')
+        if self.workspace_manager is not None:
+            self.workspace_manager.reload()
+        return True
+
+    def load_workspace_layout(self, *_):
+        self.manage_workspaces()
+
+    def manage_workspaces(self, *_):
+        if self.vault is None:
+            return
+        if self.workspace_manager is None:
+            self.workspace_manager = WorkspaceManager(self)
+            self.workspace_manager.connect('destroy', lambda *_: setattr(self, 'workspace_manager', None))
+        else:
+            self.workspace_manager.present()
+
+    def load_named_workspace(self, name):
+        if self.vault is None:
+            return False
+        state = self.saved_workspaces.get(self.vault.root, name)
+        if not isinstance(state, dict) or not isinstance(state.get('tabs'), list):
+            self.status.set_text('That workspace layout could not be read.')
+            return False
+        if not self.confirm_panes(self.editors()):
+            return False
+        self.restoring_workspace = True
+        try:
+            self.clear_editors()
+            self.navigation_history = NavigationHistory()
+            self.collapsed_folders.clear()
+            applied = self.restore_workspace(state)
+        finally:
+            self.restoring_workspace = False
+        self.persist_workspace()
+        self.sync_bookmark_buttons()
+        if applied:
+            self.status.set_text(f'Loaded workspace · {name}')
+        return bool(applied)
+
+    def delete_named_workspace(self, name):
+        if self.vault is None:
+            return False
+        try:
+            removed = self.saved_workspaces.delete(self.vault.root, name)
+        except OSError as error:
+            self.status.set_text(f'Could not delete workspace: {error}')
+            return False
+        if removed:
+            self.status.set_text(f'Deleted workspace · {name}')
+        if self.workspace_manager is not None:
+            self.workspace_manager.reload()
+        return removed
+
     def remap_navigation(self, mapping, deleted=()):
         self.navigation_history.remap(mapping, deleted)
+        if self.vault is not None:
+            try:
+                self.bookmark_items = self.bookmark_store.remap(self.vault.root, mapping, deleted)
+            except OSError as error:
+                self.status.set_text(f'Could not update bookmarks: {error}')
+            else:
+                self.refresh_bookmark_list()
         if isinstance(self.split_pane, NotePane) and self.split_pane.note.path in deleted:
             self.close_split()
         elif isinstance(self.split_pane, NotePane):
             self.open_split(self.split_pane)
         self.persist_workspace()
 
-    def persist_workspace(self):
-        if self.vault is None or self.restoring_workspace:
-            return True
+    def capture_workspace_state(self):
         pages = []
         for index in range(self.tabs.get_n_pages()):
             pane = self.tabs.get_nth_page(index)
-            if isinstance(pane, GraphView):
+            if isinstance(pane, (GraphView, BasesView, CanvasView)):
                 pages.append(pane.snapshot())
-                continue
-            pages.append({'path': pane.note.path,
-                          'cursor': pane.buffer.get_iter_at_mark(pane.buffer.get_insert()).get_offset(),
-                          'scroll': pane.scroll.get_vadjustment().get_value()})
+            elif isinstance(pane, NotePane):
+                pages.append({'path': pane.note.path,
+                              'cursor': pane.buffer.get_iter_at_mark(pane.buffer.get_insert()).get_offset(),
+                              'scroll': pane.scroll.get_vadjustment().get_value()})
         index = self.tabs.get_current_page()
         active = self.tabs.get_nth_page(index) if index >= 0 else None
-        active_key = {'graph': active.workspace_id} if isinstance(active, GraphView) else active.note.path if active else None
-        split_key = ({'graph': self.split_pane.workspace_id, 'state': self.split_view.snapshot()}
-                     if isinstance(self.split_pane, GraphView) else self.split_pane.note.path if self.split_pane else None)
-        state = {'tabs': pages, 'active': active_key,
-                 'collapsed_folders': sorted(self.collapsed_folders),
-                 'split': split_key}
+        if isinstance(active, GraphView):
+            active_key = {'graph': active.workspace_id}
+        elif isinstance(active, BasesView):
+            active_key = {'bases': active.workspace_id}
+        elif isinstance(active, CanvasView):
+            active_key = {'canvas': active.path}
+        elif isinstance(active, NotePane):
+            active_key = active.note.path
+        else:
+            active_key = None
+        if isinstance(self.split_pane, GraphView):
+            split_key = {'graph': self.split_pane.workspace_id, 'state': self.split_view.snapshot()}
+        elif isinstance(self.split_pane, NotePane):
+            split_key = self.split_pane.note.path
+        else:
+            split_key = None
+        return {'tabs': pages, 'active': active_key,
+                'collapsed_folders': sorted(self.collapsed_folders),
+                'split': split_key,
+                'search': self.search_entry.get_text()}
+
+    def persist_workspace(self):
+        if self.vault is None or self.restoring_workspace:
+            return True
         try:
-            self.workspace_store.save(self.vault.root, state)
+            self.workspace_store.save(self.vault.root, self.capture_workspace_state())
         except OSError as error:
             self.status.set_text(f'Could not save workspace: {error}')
         return True
 
-    def restore_workspace(self):
-        state = self.workspace_store.load(self.vault.root)
+    def restore_workspace(self, state=None):
+        if state is None:
+            state = self.workspace_store.load(self.vault.root)
         pages = state.get('tabs', [])
         if 'tabs' not in state or not isinstance(pages, list):
             return False
-        self.restoring_workspace = True
+        own_flag = not self.restoring_workspace
+        if own_flag:
+            self.restoring_workspace = True
         try:
-            graphs = {}
+            graphs, bases, canvases = {}, {}, {}
             for saved in pages:
                 if isinstance(saved, dict) and saved.get('kind') == 'graph':
                     graph = self.show_graph_tab(state=saved)
                     graphs[graph.workspace_id] = graph
+                    continue
+                if isinstance(saved, dict) and saved.get('kind') == 'bases':
+                    view = self.show_bases(state=saved)
+                    if view is not None:
+                        bases[view.workspace_id] = view
+                    continue
+                if isinstance(saved, dict) and saved.get('kind') == 'canvas':
+                    path = saved.get('path')
+                    if isinstance(path, str) and isinstance(self.vault.canvases.get(path), str):
+                        canvas = self.open_canvas(path)
+                        if canvas is not None:
+                            canvases[path] = canvas
                     continue
                 if (not isinstance(saved, dict) or not isinstance(saved.get('path'), str)
                         or saved['path'] not in self.vault.notes):
@@ -2019,6 +3082,10 @@ class Window(Gtk.ApplicationWindow):
                 self.open_note(active)
             if isinstance(active, dict) and isinstance(active.get('graph'), str) and active['graph'] in graphs:
                 self.tabs.set_current_page(self.tabs.page_num(graphs[active['graph']]))
+            if isinstance(active, dict) and isinstance(active.get('bases'), str) and active['bases'] in bases:
+                self.tabs.set_current_page(self.tabs.page_num(bases[active['bases']]))
+            if isinstance(active, dict) and isinstance(active.get('canvas'), str) and active['canvas'] in canvases:
+                self.tabs.set_current_page(self.tabs.page_num(canvases[active['canvas']]))
             folders = state.get('collapsed_folders', [])
             if isinstance(folders, list):
                 self.collapsed_folders = {path for path in folders if isinstance(path, str) and path in self.vault.folders}
@@ -2029,13 +3096,18 @@ class Window(Gtk.ApplicationWindow):
                 self.open_split(graphs[split['graph']])
                 if isinstance(split.get('state'), dict):
                     self.split_view.restore_state(split['state'])
+            search = state.get('search')
+            if isinstance(search, str):
+                self.search_entry.set_text(search)
         finally:
-            self.restoring_workspace = False
+            if own_flag:
+                self.restoring_workspace = False
         self.populate_files()
         pane = self.current()
         if pane:
             self.navigation_history.visit(Location(pane.note.path,
                 pane.buffer.get_iter_at_mark(pane.buffer.get_insert()).get_offset()))
+        self.sync_bookmark_buttons()
         return True
 
     def restore_scroll(self, pane, value):
@@ -2053,7 +3125,7 @@ class Window(Gtk.ApplicationWindow):
             self.cheatsheet.present()
 
     def on_delete(self, *_):
-        return not self.confirm_panes(list(self.panes.values()))
+        return not self.confirm_panes(self.editors())
 
 
 def main(argv=None):

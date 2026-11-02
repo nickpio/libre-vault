@@ -3,10 +3,18 @@ from pathlib import PurePosixPath
 
 
 def tree_paths(notes, folders, collapsed):
+    # A file can appear before its parent is recorded (a canvas created in a
+    # folder the vault has not scanned yet). Keep that file under its folder.
+    known = set(folders)
+    for path in [*folders, *notes]:
+        parent = PurePosixPath(path).parent
+        while str(parent) not in ('.', ''):
+            known.add(str(parent))
+            parent = parent.parent
     children = {'': []}
-    for folder in folders:
+    for folder in known:
         children[folder] = []
-    for path in [*(folder + '/' for folder in folders), *notes]:
+    for path in [*(folder + '/' for folder in known), *notes]:
         parent = str(PurePosixPath(path).parent)
         children['' if parent == '.' else parent].append(path)
 

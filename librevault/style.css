@@ -217,6 +217,15 @@ menu.explorer-menu > separator, menu.editor-menu > separator {
 .settings-dialog switch:checked { background: @accent; }
 .settings-dialog switch slider { background: @raised; border: 1px solid @border; border-radius: 14px; min-width: 22px; min-height: 22px; }
 .status { padding: 5px 12px; color: @muted; font-size: 8pt; }
+.bases-view { background: @canvas; }
+.bases-view treeview { background: @canvas; color: @ink; }
+.bases-view treeview:selected, .bases-view treeview:selected:focus { background: @selected; color: @bright; }
+.slides-window, .slides-window .reading-view { background: @canvas; }
+.slides-bar { background: @panel; border-top: 1px solid @edge; }
+.slides-counter { color: @soft; font-size: 11pt; }
+.bookmark-list row { border-radius: 6px; margin: 1px 0; padding: 4px 8px; }
+.bookmark-empty { color: @muted; font-size: 9pt; padding: 0 8px 8px; }
+button.icon-button.bookmarked { color: @bright; }
 scrollbar { background: transparent; border: none; }
 scrollbar slider { background: @border; min-width: 5px; min-height: 5px; border: 2px solid transparent; border-radius: 8px; }
 scrollbar slider:hover { background: @focus_edge; }

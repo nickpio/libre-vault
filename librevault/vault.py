@@ -17,6 +17,7 @@ from urllib.parse import unquote, urlsplit
 from markdown_it import MarkdownIt
 
 from .index import NoteIndex, TextCache
+from .mentions import Mention, find_mentions
 from .metadata import matches_query, note_metadata, query_terms, search_result
 
 
@@ -110,6 +111,8 @@ class Vault:
         if not self.root.is_dir():
             raise VaultError('Choose a folder as your vault.')
         self.notes: dict[str, NoteRecord | None] = {}
+        self.canvases: dict[str, str | None] = {}
+        self.version_history = None
         try:
             self.index = NoteIndex(self.root, cache_dir)
         except (OSError, sqlite3.Error) as error:
@@ -141,6 +144,24 @@ class Vault:
             raise VaultError('This editor opens Markdown (.md) notes.')
         return current
 
+    def _canvas_path(self, relative: str) -> Path:
+        current = self._visible_path(relative)
+        if current.suffix.lower() != '.canvas':
+            raise VaultError('Canvas files use the .canvas extension.')
+        return current
+
+    def _canvas_fingerprint(self, path: Path):
+        try:
+            raw = path.read_bytes()
+        except OSError:
+            return None
+        try:
+            from .canvas import parse_canvas
+            parse_canvas(raw.decode('utf-8-sig'))
+        except (UnicodeDecodeError, VaultError):
+            return None
+        return fingerprint(raw)
+
     def read(self, relative: str) -> Note:
         raw = self._path(relative).read_bytes()
         try:
@@ -152,29 +173,36 @@ class Vault:
     def refresh(self):
         if self.root.is_symlink():
             self.notes.clear()
+            self.canvases.clear()
             self.folders = []
             self.index.prune({})
             self.index.connection.commit()
             self.text_cache.clear()
             return
         notes = {}
+        canvases = {}
         visible_folders = []
         for directory, folders, files in os.walk(self.root, followlinks=False):
             folders[:] = sorted(f for f in folders if not f.startswith('.') and not (Path(directory) / f).is_symlink())
             visible_folders.extend((Path(directory) / name).relative_to(self.root).as_posix() for name in folders)
             for name in sorted(files):
-                if name.startswith('.') or not name.lower().endswith('.md'):
+                if name.startswith('.'):
                     continue
                 path = Path(directory) / name
                 if path.is_symlink():
                     continue
                 relative = path.relative_to(self.root).as_posix()
-                try:
-                    notes[relative] = self._index_note(self.read(relative))
-                except (VaultError, OSError):
-                    # Unreadable notes are still listed; opening one reports the error.
-                    notes[relative] = None
+                lower = name.lower()
+                if lower.endswith('.md'):
+                    try:
+                        notes[relative] = self._index_note(self.read(relative))
+                    except (VaultError, OSError):
+                        # Unreadable notes are still listed; opening one reports the error.
+                        notes[relative] = None
+                elif lower.endswith('.canvas'):
+                    canvases[relative] = self._canvas_fingerprint(path)
         self.notes = dict(sorted(notes.items()))
+        self.canvases = dict(sorted(canvases.items()))
         self.folders = sorted(visible_folders)
         self.index.prune({path for path, note in self.notes.items() if note is not None})
         self.index.connection.commit()
@@ -229,8 +257,10 @@ class Vault:
                 self.refresh()
                 return
             old_paths = {name for name in self.notes if name == relative or name.startswith(relative + '/')}
+            old_canvases = {name for name in self.canvases if name == relative or name.startswith(relative + '/')}
             folders = {name for name in self.folders if name != relative and not name.startswith(relative + '/')}
             found = {}
+            found_canvases = {}
             try:
                 path = self._visible_path(relative)
                 if path.is_dir():
@@ -242,10 +272,17 @@ class Vault:
                                        for name in children)
                         for name in files:
                             file = Path(directory) / name
-                            if not name.startswith('.') and file.suffix.lower() == '.md' and not file.is_symlink():
-                                found[file.relative_to(self.root).as_posix()] = None
+                            if name.startswith('.') or file.is_symlink():
+                                continue
+                            listed = file.relative_to(self.root).as_posix()
+                            if file.suffix.lower() == '.md':
+                                found[listed] = None
+                            elif file.suffix.lower() == '.canvas':
+                                found_canvases[listed] = self._canvas_fingerprint(file)
                 elif path.is_file() and path.suffix.lower() == '.md':
                     found[relative] = None
+                elif path.is_file() and path.suffix.lower() == '.canvas':
+                    found_canvases[relative] = self._canvas_fingerprint(path)
             except (VaultError, OSError):
                 pass
             for name in found:
@@ -263,7 +300,11 @@ class Vault:
                     self.index.remove(name)
                     self.text_cache.remove(name)
             self.folders = sorted(folders)
+            for name in old_canvases - found_canvases.keys():
+                self.canvases.pop(name, None)
+            self.canvases.update(found_canvases)
         self.notes = dict(sorted(self.notes.items()))
+        self.canvases = dict(sorted(self.canvases.items()))
         self.index.connection.commit()
 
     def save(self, note: Note, text: str) -> Note:
@@ -291,6 +332,9 @@ class Vault:
             if fingerprint(path.read_bytes()) != note.revision:
                 raise Conflict('The file changed during save. Your edits remain in the editor.')
             self._path(note.path)
+            # Record history before replacing the note. A history failure leaves
+            # the saved file untouched, so the editor revision stays valid.
+            self._remember_version(note, fingerprint(output), text, path.stat().st_mtime)
             os.replace(temporary, path)
         finally:
             if os.path.exists(temporary):
@@ -299,6 +343,39 @@ class Vault:
         self.notes[note.path] = self._index_note(saved)
         self.index.connection.commit()
         return saved
+
+    def _remember_version(self, note, revision, text, previous_mtime):
+        store = self.version_history
+        if store is None or text == note.text:
+            return
+        try:
+            store.record(note.path, revision, text, previous=(note.revision, note.text),
+                         previous_mtime=previous_mtime)
+        except OSError as error:
+            raise VaultError(f'Could not record version history: {error}') from error
+
+    def unlinked_mentions(self, relative: str, texts: dict[str, str] | None = None) -> list[Mention]:
+        """Plain-text mentions of this note's name or aliases in other notes.
+
+        texts replaces indexed text for those paths, so an open editor is
+        searched instead of the last saved copy. Offsets match that text.
+        """
+        if relative not in self.notes:
+            return []
+        terms = (PurePosixPath(relative).stem, *self.metadata(relative).aliases)
+        overrides = texts or {}
+        found = []
+        for path, record in self.notes.items():
+            if path == relative or record is None:
+                continue
+            text = overrides.get(path)
+            if text is None:
+                text = self.index.text(path)
+            if text is None:
+                continue
+            found.extend(find_mentions(path, text, terms))
+        found.sort(key=lambda mention: (mention.source_path, mention.match_start))
+        return found
 
     def create(self, relative: str) -> Note:
         relative = relative.strip()
@@ -328,6 +405,21 @@ class Vault:
         relative = path.relative_to(self.root).as_posix()
         self.folders = sorted({*self.folders, relative})
         return relative
+
+    def list_canvases(self) -> list[str]:
+        return list(self.canvases)
+
+    def read_canvas(self, relative: str):
+        from .canvas import read_canvas
+        return read_canvas(self, relative)
+
+    def save_canvas(self, canvas, document=None):
+        from .canvas import save_canvas
+        return save_canvas(self, canvas, document)
+
+    def create_canvas(self, relative: str):
+        from .canvas import create_canvas
+        return create_canvas(self, relative)
 
     def resolve(self, source: str, target: str) -> list[str]:
         """Return candidates. Never silently choose between ambiguous basenames."""
