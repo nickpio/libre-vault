@@ -175,7 +175,7 @@ Edit YAML frontmatter as a single undoable action. Tags from frontmatter or inli
 
 ## Installation
 
-Libre Vault will ship in two ways: a **portable AppImage** that runs on most Linux distributions with nothing to install, and a **standalone executable you build from source**. Neither is ready yet, so for now you run it straight from a checkout with `run.sh`.
+Build a **standalone executable** or an **AppImage** from a git checkout, or run the Python source directly with `run.sh`. Prebuilt AppImage releases are not published yet.
 
 <table>
 <tr>
@@ -192,7 +192,7 @@ Libre Vault will ship in two ways: a **portable AppImage** that runs on most Lin
 
 <h3>Build from source</h3>
 
-![](https://img.shields.io/badge/-coming%20soon-f97316?style=flat-square)
+![](https://img.shields.io/badge/-available%20now-2ea44f?style=flat-square)
 
 **For packagers and contributors.** Build the same standalone executable, or the AppImage itself, from a git checkout using your own toolchain.
 
@@ -203,7 +203,7 @@ Libre Vault will ship in two ways: a **portable AppImage** that runs on most Lin
 
 ![](https://img.shields.io/badge/-available%20now-2ea44f?style=flat-square)
 
-**The current way to run it.** Install the dependencies from your distribution and start the app with `./run.sh`. No build step.
+Install the dependencies from your distribution and start the app with `./run.sh`. No build step.
 
 </td>
 </tr>
@@ -214,19 +214,57 @@ Libre Vault will ship in two ways: a **portable AppImage** that runs on most Lin
 Once releases are published, the AppImage will be on the [**Releases**](https://github.com/nickpio/libre-vault/releases) page. Running it will follow the usual AppImage pattern:
 
 ```sh
-chmod +x LibreVault-*-x86_64.AppImage
-./LibreVault-*-x86_64.AppImage                 # welcome screen, or the last vault
-./LibreVault-*-x86_64.AppImage /path/to/vault  # open a vault directly
+chmod +x LibreVault-x86_64.AppImage
+./LibreVault-x86_64.AppImage                 # welcome screen, or the last vault
+./LibreVault-x86_64.AppImage /path/to/vault  # open a vault directly
 ```
 
 The AppImage will keep the same startup behavior and storage locations as running from source. The bundle stays read-only: settings, workspaces, recovery drafts, and the index go to the usual XDG directories, and you never have to pass a vault path.
 
 > [!NOTE]
-> No AppImage has been published yet. Until one is, any file claiming to be a Libre Vault AppImage did not come from this project.
+> No official AppImage has been published yet. You can build your own using the instructions below.
 
-### Build from source (coming soon)
+### Build from source
 
-A build script will produce a standalone Libre Vault executable from a git checkout, plus the AppImage for anyone who wants to package it themselves. Build instructions will go here when the tooling lands. Until then, use [Run from source](#run-from-source) below.
+On Linux, install the [runtime dependencies](#2-install-dependencies), Python's `venv` and `pip` tools, and `binutils` from your distribution. Include the PyGObject Cairo bridge, provided by `python3-gi-cairo` on Debian/Ubuntu or `python-cairo` on Arch. Debian/Ubuntu also need `python3-venv` for the environment below.
+
+From the checkout root, create a build environment that can access your distribution's GTK bindings:
+
+```sh
+python3 -m venv --system-site-packages .venv-build
+.venv-build/bin/python -m pip install -r requirements-build.txt
+PYTHON=.venv-build/bin/python ./build.sh
+```
+
+The build produces `dist/libre-vault`, a single executable containing Python, GTK, the Python dependencies, and application resources. Poppler PDF previews are bundled when Poppler's introspection bindings are installed at build time. Rebuilding replaces the executable and requires no root access.
+
+```sh
+./dist/libre-vault                 # welcome screen, or the last vault
+./dist/libre-vault /path/to/vault  # open a vault directly
+./dist/libre-vault --help
+```
+
+You can move the executable outside the checkout. It uses the same XDG storage locations as `run.sh`. PyInstaller extracts the bundle to a temporary directory on startup, so that directory must allow executable files.
+
+To also build an AppImage, install [appimagetool](https://github.com/AppImage/appimagetool) and pass its executable path:
+
+```sh
+PYTHON=.venv-build/bin/python ./build.sh --appimage --appimagetool /path/to/appimagetool
+```
+
+If `appimagetool` is on `PATH`, omit `--appimagetool`. The output is `dist/LibreVault-<architecture>.AppImage`. AppImage runtimes may need FUSE; supported runtimes also offer `--appimage-extract-and-run` on systems without it. The build does not download packaging tools automatically.
+
+Build on the oldest Linux distribution you intend to support, using the target CPU architecture. These builds retain the build system's glibc and native-library compatibility requirements; wrapping the executable in an AppImage does not remove them. Cross-distribution validation, reproducible builds, and a complete dependency license inventory remain release work. Dependencies retain their own licenses.
+
+Verify the actual executable with an isolated GUI smoke test:
+
+```sh
+./check.sh --script scripts/check_build.py
+# Or verify a built AppImage:
+./check.sh --script scripts/check_build.py dist/LibreVault-x86_64.AppImage
+```
+
+This copies the artifact outside the checkout, clears `PYTHONPATH`, and checks GTK startup, editing and saving, YAML aliases, Cairo, math rendering, image loading, and a spawned graph worker. It follows the background-display rules in [Testing](#testing).
 
 ### Run from source
 
@@ -641,7 +679,7 @@ Read the full design notes in [**docs/architecture.md**](docs/architecture.md).
 | Outline, templates, daily notes, bookmarks | ![](https://img.shields.io/badge/-partial-d29922?style=flat-square) outline only |
 | Saved-version history, unlinked mentions | ![](https://img.shields.io/badge/-planned-8b949e?style=flat-square) |
 | Canvas (JSON Canvas) | ![](https://img.shields.io/badge/-planned-8b949e?style=flat-square) |
-| AppImage and from-source executable builds | ![](https://img.shields.io/badge/-planned-8b949e?style=flat-square) |
+| From-source executable and AppImage builds | ![](https://img.shields.io/badge/-implemented-2ea44f?style=flat-square) local builds; prebuilt releases pending |
 | Plugins, mobile, hosted sync | ![](https://img.shields.io/badge/-out%20of%20scope-6e7681?style=flat-square) |
 
 The full matrix and acceptance gates live in [**docs/compatibility.md**](docs/compatibility.md).
@@ -658,7 +696,7 @@ The full matrix and acceptance gates live in [**docs/compatibility.md**](docs/co
 - **Files.** Symbolic links, dotfiles, and hidden folders are excluded from browsing. Non-UTF-8 files are left unchanged and report an error when opened.
 - **Scale.** Filesystem notifications update changed notes and subtrees without periodic full-vault reads, but initial indexing, explicit rescans, and multi-file organization still scan the vault. Large-vault latency has not been optimized.
 - **Moves.** Multi-file moves use revision checks and roll back after ordinary failures, but are not a crash-atomic transaction. Interrupted moves keep original rewritten-note bytes and a manifest under `.trash/.librevault-moves` for manual recovery.
-- **Not yet built.** Canvas, unlinked mentions, saved-version history, full search syntax, plugins, sync, mobile support, and the AppImage and executable builds.
+- **Not yet built.** Canvas, unlinked mentions, saved-version history, full search syntax, plugins, sync, mobile support, and published AppImage releases.
 
 </details>
 

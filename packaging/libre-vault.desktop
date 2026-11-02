@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Libre Vault
+Comment=Edit local Markdown vaults
+Exec=libre-vault %f
+Icon=libre-vault
+Terminal=false
+Categories=Office;TextEditor;

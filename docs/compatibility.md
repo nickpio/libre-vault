@@ -36,7 +36,7 @@ The compatibility specification starts with public documentation. These are docu
 | Canvas files | Planned using JSON Canvas |
 | Templates, daily notes, bookmarks, outline | Basic outline implemented; remaining workflows planned |
 | Existing plugin and theme compatibility | Outside first-version scope |
-| Linux desktop distribution | Runs from source; packaging planned |
+| Linux desktop distribution | Runs from source; `build.sh` produces a standalone executable and optionally an AppImage. Published releases and cross-distribution validation remain planned |
 | Mobile, hosted sync, publishing | Outside initial Linux release |
 
 ## Milestones
