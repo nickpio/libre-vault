@@ -54,6 +54,80 @@ class WindowImprovementTests(unittest.TestCase):
             context.iteration(False)
         self.fail('GTK did not become idle')
 
+    def test_autosave_indicator_leaves_operation_message_alone(self):
+        pane = self.window.current()
+        self.window.status.set_text('Inserted template')
+        self.assertEqual(self.window.save_status.get_text(), 'Saved')
+        pane.buffer.insert_at_cursor('updated ')
+        expected = pane.text()
+        self.assertEqual(self.window.save_status.get_text(), 'Saving…')
+        self.assertEqual(self.window.status.get_text(), 'Inserted template')
+        self.assertIsNotNone(pane.autosave_source)
+        # Exercise the real debounce callback and check the file it writes.
+        loop = GLib.MainLoop()
+        GLib.timeout_add_seconds(4, lambda: (loop.quit(), False)[1])
+        loop.run()
+        self.assertFalse(pane.dirty)
+        self.assertIsNone(pane.autosave_source)
+        self.assertEqual((self.root / pane.note.path).read_text(), expected)
+        self.assertEqual(self.window.save_status.get_text(), 'Saved')
+        self.assertEqual(self.window.status.get_text(), 'Inserted template')
+
+    def test_failed_save_persists_until_manual_retry_succeeds(self):
+        pane = self.window.current()
+        self.window.status.set_text('Inserted template')
+        pane.buffer.insert_at_cursor('updated ')
+        with patch.object(self.window.vault, 'save', side_effect=OSError('Disk full')):
+            GLib.source_remove(pane.autosave_source)
+            pane.autosave()
+            self.assertEqual(self.window.save_status.get_text(), 'Couldn’t save')
+            self.assertIn('Disk full', self.window.save_status.get_tooltip_text())
+            self.assertTrue(self.window.save_status.get_style_context().has_class('save-error'))
+            pane.buffer.insert_at_cursor('more ')
+            self.assertEqual(self.window.save_status.get_text(), 'Couldn’t save')
+            self.window.save_current()
+            self.assertEqual(self.window.save_status.get_text(), 'Couldn’t save')
+        self.assertTrue(pane.dirty)
+        self.window.save_current()
+        self.assertEqual((self.root / pane.note.path).read_text(), pane.text())
+        self.assertEqual(self.window.save_status.get_text(), 'Saved')
+        self.assertFalse(self.window.save_status.get_style_context().has_class('save-error'))
+        self.assertNotIn('Disk full', self.window.save_status.get_tooltip_text())
+        self.assertEqual(self.window.status.get_text(), 'Inserted template')
+
+    def test_save_indicator_follows_active_note(self):
+        first = self.window.current()
+        first.buffer.insert_at_cursor('updated ')
+        with patch.object(self.window.vault, 'save', side_effect=OSError('Read only')):
+            GLib.source_remove(first.autosave_source)
+            first.autosave()
+        self.window.open_note('B.md')
+        self.drain_events()
+        self.assertEqual(self.window.save_status.get_text(), 'Saved')
+        self.window.open_note(first.note.path)
+        self.drain_events()
+        self.assertEqual(self.window.save_status.get_text(), 'Couldn’t save')
+        self.window.open_note('B.md')
+        self.drain_events()
+        self.window.current().buffer.insert_at_cursor('second ')
+        first.save()
+        self.assertEqual(self.window.save_status.get_text(), 'Saving…')
+        self.window.open_note(first.note.path)
+        self.drain_events()
+        self.assertEqual(self.window.save_status.get_text(), 'Saved')
+        self.window.show_graph_tab()
+        self.drain_events()
+        self.assertEqual(self.window.save_status.get_text(), '')
+
+    def test_saved_indicator_survives_recovery_cleanup_failure(self):
+        pane = self.window.current()
+        pane.buffer.insert_at_cursor('updated ')
+        with patch.object(self.window.recovery, 'remove', side_effect=OSError('Read only')):
+            self.window.save_current()
+        self.assertEqual(self.window.save_status.get_text(), 'Saved')
+        self.assertIn('could not remove recovery draft', self.window.status.get_text())
+        self.assertEqual((self.root / pane.note.path).read_text(), pane.text())
+
     def test_cursor_movement_does_not_rebuild_context_but_edits_do(self):
         pane = self.window.current()
         with patch.object(self.window, 'update_context', wraps=self.window.update_context) as update:

@@ -177,6 +177,7 @@ class NotePane(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.window, self.note = window, note
         self.dirty = False
+        self.save_error = None
         self.autosave_source = None
         self.format_source = None
         self.formatted_text = None
@@ -472,8 +473,9 @@ class NotePane(Gtk.Box):
         self.window.queue_reading_refresh()
         self.dirty = self.text() != self.note.text.replace('\r\n', '\n')
         self.tab_label.set_text(('• ' if self.dirty else '') + Path(self.note.path).stem)
-        self.window.status.set_text('Unsaved changes · Ctrl+S to save' if self.dirty
-                                    else f'No unsaved changes · {self.note.path}')
+        if not self.dirty:
+            self.save_error = None
+        self.window.update_save_status()
         if self.autosave_source is not None:
             GLib.source_remove(self.autosave_source)
             self.autosave_source = None
@@ -500,8 +502,9 @@ class NotePane(Gtk.Box):
             return False
         try:
             self.save()
-        except (VaultError, OSError) as error:
-            self.window.status.set_text(f'Autosave failed: {error}')
+        except (VaultError, OSError):
+            # save() retains the failure in the dedicated indicator.
+            pass
         return False
 
     def editor_key_press(self, view, event):
@@ -1527,16 +1530,22 @@ class NotePane(Gtk.Box):
 
     def save(self):
         if self.dirty:
-            self.note = self.window.vault.save(self.note, self.text())
+            try:
+                self.note = self.window.vault.save(self.note, self.text())
+            except (VaultError, OSError) as error:
+                self.save_error = str(error)
+                self.window.update_save_status()
+                raise
             self.dirty = False
+            self.save_error = None
+            self.window.update_save_status()
             self.tab_label.set_text(Path(self.note.path).stem)
             try:
                 self.window.recovery.remove(self.note.path)
             except OSError as error:
                 self.window.status.set_text(f'Saved, but could not remove recovery draft: {error}')
-                return
         self.history.break_group()
-        self.window.status.set_text(f'Saved · {self.note.path}')
+        self.window.update_save_status()
         self.window.update_context()
 
     def undo(self):
@@ -1796,6 +1805,8 @@ class NotePane(Gtk.Box):
             self.buffer.handler_unblock_by_func(self.changed)
         self.history.reset()
         self.dirty = False
+        self.save_error = None
+        self.window.update_save_status()
         self.tab_label.set_text(Path(note.path).stem)
         self.render()
         self.findbar.refresh()
@@ -2106,19 +2117,36 @@ class Window(Gtk.ApplicationWindow):
         from .tags_ui import TagPane
         self.tag_pane = TagPane(self)
         sidebar.pack_start(self.tag_pane, False, False, 0)
-        files_heading = Gtk.Label(label='Files', xalign=0)
-        files_heading.get_style_context().add_class('caption')
-        sidebar.pack_start(files_heading, False, False, 0)
-        self.files = Gtk.ListBox()
-        self.files.get_style_context().add_class('note-list')
-        self.files.set_activate_on_single_click(True)
-        self.files.connect('row-activated', self.activate_file)
-        self.files.connect('key-press-event', self.files_key_press)
-        self.files.connect('button-press-event', self.explorer_button_press)
-        self.files.connect('popup-menu', self.explorer_popup_menu)
-        files_scroll = scrolled(self.files)
-        files_scroll.connect('button-press-event', self.explorer_button_press)
-        sidebar.pack_start(files_scroll, True, True, 0)
+        self.files_heading = Gtk.Label(label='Files', xalign=0)
+        self.files_heading.get_style_context().add_class('caption')
+        sidebar.pack_start(self.files_heading, False, False, 0)
+        self.file_views = Gtk.Stack()
+        self.file_lists = {}
+        for name in ('tree', 'search'):
+            file_list = Gtk.ListBox()
+            file_list.get_style_context().add_class('note-list')
+            file_list.set_activate_on_single_click(True)
+            file_list.connect('row-activated', self.activate_file)
+            file_list.connect('key-press-event', self.files_key_press)
+            file_list.connect('button-press-event', self.explorer_button_press)
+            file_list.connect('popup-menu', self.explorer_popup_menu)
+            files_scroll = scrolled(file_list)
+            files_scroll.connect('button-press-event', self.explorer_button_press)
+            self.file_lists[name] = file_list
+            self.file_views.add_named(files_scroll, name)
+        self.files = self.file_lists['tree']
+        empty = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        empty.set_valign(Gtk.Align.START)
+        self.search_empty_label = Gtk.Label(xalign=0)
+        self.search_empty_label.set_line_wrap(True)
+        self.search_empty_label.set_max_width_chars(28)
+        empty.pack_start(self.search_empty_label, False, False, 0)
+        clear_search = Gtk.Button(label='Clear search')
+        clear_search.set_halign(Gtk.Align.START)
+        clear_search.connect('clicked', lambda *_: self.search_entry.set_text(''))
+        empty.pack_start(clear_search, False, False, 0)
+        self.file_views.add_named(empty, 'empty')
+        sidebar.pack_start(self.file_views, True, True, 0)
         hint = self.keybind_hint = Gtk.Button()
         hint.get_style_context().add_class('sidebar-command')
         hint.set_margin_top(12)
@@ -2224,6 +2252,11 @@ class Window(Gtk.ApplicationWindow):
         statusbar.pack_start(self.settings_button, False, False, 0)
         self.status.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
         statusbar.pack_start(self.status, True, True, 0)
+        self.save_status = Gtk.Label(xalign=1)
+        self.save_status.set_width_chars(13)
+        self.save_status.get_style_context().add_class('status')
+        self.save_status.get_accessible().set_name('Note save status')
+        statusbar.pack_start(self.save_status, False, False, 0)
         format_label = Gtk.Label(label='Markdown   ·   UTF-8')
         format_label.get_style_context().add_class('status')
         self.counts = Gtk.Label(xalign=1)
@@ -2566,6 +2599,15 @@ class Window(Gtk.ApplicationWindow):
         searching = bool(self.search_entry.get_text().strip())
         results = {result.path: result for result in self.vault.search_results(self.search_entry.get_text())} if self.vault else {}
         paths = list(results)
+        self.files = self.file_lists['search' if searching else 'tree']
+        if searching:
+            count = len(paths)
+            self.files_heading.set_text(f'Search results ({count})')
+            self.search_empty_label.set_text(f'No notes match ‘{self.search_entry.get_text().strip()}’')
+            self.file_views.set_visible_child_name('search' if count else 'empty')
+        else:
+            self.files_heading.set_text('Files')
+            self.file_views.set_visible_child_name('tree')
         if self.vault and not searching:
             paths = tree_paths([*paths, *self.vault.canvases], self.vault.folders, self.collapsed_folders)
         rows = self.files.get_children()
@@ -3032,7 +3074,11 @@ class Window(Gtk.ApplicationWindow):
             return
         pane = self.current()
         if pane:
-            self.try_action(pane.save)
+            try:
+                pane.save()
+            except (VaultError, OSError):
+                # The save indicator keeps the error visible with retry details.
+                pass
 
     def toggle_highlight(self, *_):
         pane = self.current()
@@ -3445,6 +3491,25 @@ class Window(Gtk.ApplicationWindow):
             return
         self.counts.set_text(count_summary(pane.text(), pane.buffer.get_line_count()))
 
+    def update_save_status(self):
+        if self.in_destruction():
+            return
+        pane = self.current()
+        label = self.save_status
+        style = label.get_style_context()
+        style.remove_class('save-error')
+        if pane is None:
+            label.set_text('')
+            label.set_tooltip_text(None)
+        elif pane.save_error is not None:
+            label.set_text('Couldn’t save')
+            label.set_tooltip_text(f'{pane.note.path}: {pane.save_error}\nRetry with Ctrl+S.')
+            style.add_class('save-error')
+        else:
+            label.set_text('Saving…' if pane.dirty else 'Saved')
+            label.set_tooltip_text('Changes save automatically after you stop typing.'
+                                   if pane.dirty else f'All changes saved · {pane.note.path}')
+
     def update_vim_status(self):
         label = getattr(self, 'vim_status', None)
         if label is None or self.in_destruction():
@@ -3467,6 +3532,7 @@ class Window(Gtk.ApplicationWindow):
         if self.closed:
             return False
         self.update_vim_status()
+        self.update_save_status()
         if self.vault:
             self.tag_pane.refresh()
             for graph in tuple(self.graph_views):
