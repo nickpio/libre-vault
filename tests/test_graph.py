@@ -57,7 +57,7 @@ class GraphTests(unittest.TestCase):
 
 
 try:
-    from librevault.app import Gtk, GLib, Window
+    from librevault.app import Gdk, Gtk, GLib, Window
     from gi.repository import Gio
     GTK_AVAILABLE = Gtk.init_check()[0]
 except (ImportError, ValueError):
@@ -182,6 +182,30 @@ class GraphUITests(unittest.TestCase):
             self.assertNotIn(restored_graph, restored.graph_views)
             self.assertEqual(len(restored.graph_views), 0)
             self.assertIn('A.md', restored.panes)
+
+    def test_ctrl_alt_g_toggles_the_graph_window_like_the_header_button(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'A.md').write_text('[[B]]')
+            (root / 'B.md').write_text('hello')
+            window = self.make_window(root)
+            event = Gdk.Event.new(Gdk.EventType.KEY_PRESS)
+            event.keyval = Gdk.KEY_g
+            event.state = Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.MOD1_MASK
+            self.assertTrue(window.emit('key-press-event', event))
+            self.assertIsNotNone(window.graph_window)
+            # The canvas does not consume the shortcut, and the graph window
+            # closes itself because it now has keyboard focus.
+            self.assertFalse(window.graph_window.graph.canvas.emit('key-press-event', event))
+            self.assertIsNotNone(window.graph_window)
+            self.assertTrue(window.graph_window.emit('key-press-event', event))
+            self.assertIsNone(window.graph_window)
+            self.assertTrue(window.emit('key-press-event', event))
+            graph = window.graph_window
+            # The shortcut still toggles when the graph's search field is focused.
+            graph.graph.search.grab_focus()
+            self.assertTrue(graph.emit('key-press-event', event))
+            self.assertIsNone(window.graph_window)
 
     def test_main_graph_keeps_clicked_note_in_split_and_window_can_be_tabbed(self):
         with TemporaryDirectory() as directory:

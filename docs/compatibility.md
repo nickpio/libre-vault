@@ -28,11 +28,11 @@ The compatibility specification starts with public documentation. These are docu
 | Tabs and workspace layouts | Per-vault tab/cursor/scroll/folder restoration, named workspace profiles, and shared-buffer split editor implemented |
 | Expandable file tree, create, rename, delete | Creation, rename/move with resolved-link updates, and recoverable vault-local trash implemented |
 | Atomic writes, external-change handling, recovery history | Atomic replacement, revision checks, autosave, unsaved crash drafts, and saved-version history snapshots implemented |
-| Properties, tags, aliases, unlinked mentions | YAML property editing, inline/frontmatter tags, alias resolution, filters, and unlinked mentions with one-click linking implemented |
+| Properties, tags, aliases, unlinked mentions | Typed property forms with a vault-wide type registry, raw YAML editing, nested tag tree and bulk rename, alias resolution, advanced search operators, and unlinked mentions with one-click linking implemented |
 | Bulleted, ordered, and task lists | Rendered with nesting and clickable task checkboxes; Markdown preserved |
 | Callouts, tables, footnotes, math, diagrams | Live preview and Reading render tables, collapsible callouts, clickable footnotes, mathtext with common environments, Mermaid flowcharts/sequence/state/class diagrams, safe inline HTML, fenced-code syntax highlighting with copy buttons, and audio/video cards; full LaTeX and the rest of Mermaid remain out of scope |
 | Attachment display and note transclusion | Attachment import/paste/drop, local images with `|width` and `|widthxheight` sizing, PDF pages (`#page=N`), audio/video media cards, and whole-note, `#Heading` section, and `#^block-id` block embeds implemented |
-| Graph and local graph | Global and local force-directed graph views implemented |
+| Graph and local graph | Global and local force-directed graphs with tag, attachment and ghost nodes, directional arrows, query color groups, and shared search filters implemented |
 | Canvas files | Implemented using JSON Canvas 1.0 (`.canvas`) |
 | Templates, daily notes, bookmarks, outline | Outline, templates, daily notes, unique notes, random note, bookmarks, Bases view, slides, and format converter implemented |
 | Existing plugin and theme compatibility | Outside first-version scope |

@@ -49,7 +49,7 @@ from .settings import SettingsDialog
 from .preferences import PreferencesStore
 from .appearance import PALETTES, stylesheet
 from .syntax import TOKEN_STYLES
-from .panels import SlidingPanel
+from .panels import SIDEBAR_DEFAULT_RATIO, SIDEBAR_MAX, SIDEBAR_OPEN_LIMIT, SlidingPanel, sidebar_widths
 from .tabs import WorkspaceTabs
 from .attachments import attachment_markdown, local_path, store_attachment
 from .mermaid import render_mermaid
@@ -250,6 +250,8 @@ class NotePane(Gtk.Box):
         self.content_stack.add_named(self.reading, 'reading')
         self.pack_start(self.content_stack, True, True, 0)
         toolbar = self.toolbar = Gtk.Box(spacing=8)
+        self.pack_start(toolbar, False, False, 0)
+        self.reorder_child(toolbar, 0)
         toolbar.set_border_width(6)
         mode = self.mode_selector = Gtk.ComboBoxText()
         for value, title in [('live', 'Live preview'), ('source', 'Source'), ('reading', 'Reading')]:
@@ -272,7 +274,7 @@ class NotePane(Gtk.Box):
         self.history = BufferHistory(self.buffer)
         self.findbar = FindBar(self)
         self.pack_start(self.findbar, False, False, 0)
-        self.reorder_child(self.findbar, 0)
+        self.reorder_child(self.findbar, 1)
         self.buffer_handlers = [self.buffer.connect('changed', self.changed),
                                 self.buffer.connect('mark-set', self.cursor_moved),
                                 self.buffer.connect('insert-text', self._remap_folds_insert),
@@ -1955,6 +1957,13 @@ class Window(Gtk.ApplicationWindow):
         self.vault_monitor = None
         self.reading_source = None
         self.panel_widths_initialized = False
+        self.sidebar_span = 0
+        self.sidebar_refit = False
+        self.sidebar_custom = False
+        self._fitting_sidebars = False
+        self._sidebar_dragging = False
+        self.notes_ratio = SIDEBAR_DEFAULT_RATIO
+        self.details_ratio = SIDEBAR_DEFAULT_RATIO
         self.connect('delete-event', self.on_delete)
         self.connect('key-press-event', self.key_press)
         self.css_provider = Gtk.CssProvider()
@@ -2038,12 +2047,15 @@ class Window(Gtk.ApplicationWindow):
         vault_heading.pack_end(self.icon_button('folder-open-symbolic', 'Open vault · Ctrl+O', self.choose_vault), False, False, 0)
         sidebar.pack_start(vault_heading, False, False, 0)
         self.search_entry = Gtk.SearchEntry(placeholder_text='Search notes…')
+        # Let the file tree become narrower than the entry's default width.
+        self.search_entry.set_width_chars(8)
         self.search_entry.connect('search-changed', lambda *_: self.populate_files())
         sidebar.pack_start(self.search_entry, False, False, 0)
         self.bookmarks_heading = Gtk.Label(label='Bookmarks', xalign=0)
         self.bookmarks_heading.get_style_context().add_class('caption')
         sidebar.pack_start(self.bookmarks_heading, False, False, 0)
         self.bookmarks_empty = Gtk.Label(label='No bookmarks yet', xalign=0)
+        self.bookmarks_empty.set_ellipsize(Pango.EllipsizeMode.END)
         self.bookmarks_empty.get_style_context().add_class('bookmark-empty')
         self.bookmarks_empty.set_no_show_all(True)
         sidebar.pack_start(self.bookmarks_empty, False, False, 0)
@@ -2060,6 +2072,9 @@ class Window(Gtk.ApplicationWindow):
         self.bookmarks_scroll.set_no_show_all(True)
         self.bookmarks_scroll.add(self.bookmark_list)
         sidebar.pack_start(self.bookmarks_scroll, False, False, 0)
+        from .tags_ui import TagPane
+        self.tag_pane = TagPane(self)
+        sidebar.pack_start(self.tag_pane, False, False, 0)
         files_heading = Gtk.Label(label='Files', xalign=0)
         files_heading.get_style_context().add_class('caption')
         sidebar.pack_start(files_heading, False, False, 0)
@@ -2070,7 +2085,7 @@ class Window(Gtk.ApplicationWindow):
         self.files.connect('key-press-event', self.files_key_press)
         self.files.connect('button-press-event', self.explorer_button_press)
         self.files.connect('popup-menu', self.explorer_popup_menu)
-        files_scroll = scrolled(self.files, 212)
+        files_scroll = scrolled(self.files)
         files_scroll.connect('button-press-event', self.explorer_button_press)
         sidebar.pack_start(files_scroll, True, True, 0)
         hint = Gtk.Button()
@@ -2084,6 +2099,7 @@ class Window(Gtk.ApplicationWindow):
         icon.get_style_context().add_class('muted')
         hint_content.pack_start(icon, False, False, 0)
         label = Gtk.Label(label='Commands', xalign=0)
+        label.set_ellipsize(Pango.EllipsizeMode.END)
         label.get_style_context().add_class('sidebar-command-label')
         hint_content.pack_start(label, True, True, 0)
         keys = Gtk.Label(label='Alt+P')
@@ -2100,11 +2116,7 @@ class Window(Gtk.ApplicationWindow):
         self.tabs.connect('switch-page', self.tab_switched)
         self.tabs.connect('page-removed', self.tab_removed)
         self.tabs.connect('page-reordered', lambda *_: self.persist_workspace())
-        self.note_toolbars = Gtk.Stack()
-        self.note_toolbars.set_homogeneous(False)
-        self.note_toolbars.set_no_show_all(True)
         editor_column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        editor_column.pack_start(self.note_toolbars, False, False, 0)
         editor_column.pack_start(self.tabs, True, True, 0)
         self.editor_split = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
         self.editor_split.pack1(editor_column, True, False)
@@ -2114,16 +2126,17 @@ class Window(Gtk.ApplicationWindow):
         center.pack1(self.editor_split, True, False)
         self.context = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
         self.context.set_border_width(12)
-        self.context.set_size_request(240, -1)
         self.context.get_style_context().add_class('sidebar')
         self.details_scroll = scrolled(self.context)
         self.details_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        self.details_scroll.set_min_content_width(240)
         self.details_panel = SlidingPanel(self.details_scroll, center, at_start=False)
         center.pack2(self.details_panel, False, False)
         self.details_toggle.connect('toggled', self.set_panel_open, self.details_panel)
         layout.pack2(center, True, False)
-        center.connect('size-allocate', self.initialize_panel_widths)
+        layout.connect('size-allocate', self.allocate_sidebars)
+        for paned in (layout, center):
+            paned.connect('button-press-event', self._sidebar_drag_begin)
+            paned.connect('button-release-event', self._sidebar_drag_end)
         self.status = Gtk.Label(label='Open a vault folder to begin.', xalign=0)
         self.status.get_style_context().add_class('status')
         statusbar = Gtk.Box()
@@ -2353,16 +2366,96 @@ class Window(Gtk.ApplicationWindow):
         self.open_vault_button.grab_focus()
         return True
 
-    def initialize_panel_widths(self, center, allocation):
+    def allocate_sidebars(self, _layout, allocation):
         # The workspace can start hidden behind the welcome screen. Wait for
-        # its real allocation before positioning the right-hand divider.
-        if self.panel_widths_initialized or self.vault is None or allocation.width <= 1:
+        # its real allocation before positioning the dividers.
+        width = allocation.width
+        if self.vault is None or width <= 1 or self._fitting_sidebars:
             return
-        width = max(self.notes_panel.get_preferred_width().minimum_width,
-                    self.details_panel.get_preferred_width().minimum_width)
+        if self.notes_panel.transitioning or self.details_panel.transitioning:
+            # Remember a resize that arrives mid-slide, but let the animation
+            # keep a dragged width when the window itself did not change.
+            if self.panel_widths_initialized and abs(width - self.sidebar_span) > 1:
+                self.sidebar_refit = True
+            return
+        unchanged = self.panel_widths_initialized and abs(width - self.sidebar_span) <= 1
+        if unchanged and not self.sidebar_refit:
+            return
+        self.sidebar_refit = False
+        self.fit_sidebars(width)
+
+    def fit_sidebars(self, width=None):
+        """Place open sidebars from their share of the workspace width."""
+        if width is None:
+            width = self.notes_panel.paned.get_allocated_width()
+        if width <= 1:
+            return
+        limit = SIDEBAR_MAX if self.sidebar_custom else SIDEBAR_OPEN_LIMIT
+        # Measure both as open so a hidden sidebar reopens at the adapted width.
+        left, right = sidebar_widths(width, self.notes_ratio, self.details_ratio, limit=limit)
+        self._fitting_sidebars = True
+        self.sidebar_span = width
         self.panel_widths_initialized = True
-        self.notes_panel.position_width(width)
-        self.details_panel.position_width(width)
+        self._place_sidebar(self.notes_panel, left)
+        # The details divider sits in the center pane, whose width changes
+        # after the file tree moves. Apply it once that allocation settles.
+        GLib.idle_add(self._finish_sidebar_fit, right)
+
+    def _place_sidebar(self, panel, width):
+        if width < 1:
+            return
+        if panel.get_visible() and panel.get_child_revealed():
+            panel.position_width(width)
+        elif not panel.get_visible():
+            panel.get_child().set_size_request(width, -1)
+
+    def _finish_sidebar_fit(self, right):
+        if not self.in_destruction():
+            self._place_sidebar(self.details_panel, right)
+        GLib.idle_add(self._release_sidebar_fit)
+        return False
+
+    def _release_sidebar_fit(self):
+        if self.in_destruction():
+            return False
+        self._fitting_sidebars = False
+        if self.sidebar_refit and not (self.notes_panel.transitioning or self.details_panel.transitioning):
+            self.sidebar_refit = False
+            self.fit_sidebars()
+        return False
+
+    def _sidebar_drag_begin(self, _paned, event):
+        if event.button == 1:
+            self._sidebar_dragging = True
+        return False
+
+    def _sidebar_drag_end(self, _paned, event):
+        if event.button == 1 and self._sidebar_dragging:
+            self._sidebar_dragging = False
+            GLib.idle_add(self._store_sidebar_ratios)
+        return False
+
+    def _store_sidebar_ratios(self):
+        if self.in_destruction() or self._fitting_sidebars:
+            return False
+        workspace = self.notes_panel.paned.get_allocated_width()
+        if workspace <= 1:
+            return False
+        changed = False
+        if self.notes_panel.get_child_revealed():
+            changed = self._remember_ratio('notes_ratio', self.notes_panel.get_allocated_width(), workspace) or changed
+        if self.details_panel.get_child_revealed():
+            changed = self._remember_ratio('details_ratio', self.details_panel.get_allocated_width(), workspace) or changed
+        if changed:
+            self.sidebar_custom = True
+        return False
+
+    def _remember_ratio(self, name, width, workspace):
+        ratio = width / workspace
+        if abs(ratio - getattr(self, name)) <= 1 / workspace:
+            return False
+        setattr(self, name, ratio)
+        return True
 
     def update_workspace_state(self):
         opened = self.vault is not None
@@ -2373,6 +2466,11 @@ class Window(Gtk.ApplicationWindow):
         self.save_button.set_sensitive(opened and self.current() is not None)
 
     def populate_files(self):
+        from .metadata import query_terms
+        error = query_terms(self.search_entry.get_text()).error
+        self.search_entry.set_tooltip_text('Invalid search: ' + error if error else 'Search saved notes')
+        if hasattr(self, 'tag_pane'):
+            self.tag_pane.refresh()
         searching = bool(self.search_entry.get_text().strip())
         results = {result.path: result for result in self.vault.search_results(self.search_entry.get_text())} if self.vault else {}
         paths = list(results)
@@ -2681,21 +2779,50 @@ class Window(Gtk.ApplicationWindow):
         content = dialog.get_content_area()
         content.set_border_width(16)
         content.set_spacing(8)
-        caption = Gtk.Label(label='YAML properties · tags and aliases accept lists', xalign=0)
-        content.pack_start(caption, False, False, 0)
+        from .properties_ui import PropertyForm
+        metadata = note_metadata(pane.text())
+        notebook = Gtk.Notebook()
+        form = PropertyForm(metadata.properties, self.vault.root)
+        notebook.append_page(scrolled(form), Gtk.Label(label='Properties'))
         editor = Gtk.TextView(buffer=text_buffer(property_text(pane.text())))
         editor.set_monospace(True)
-        editor.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
-        content.pack_start(scrolled(editor), True, True, 0)
+        notebook.append_page(scrolled(editor), Gtk.Label(label='YAML'))
+        # Synchronize both views when switching, preserving raw YAML until the
+        # structured form is actually edited and applied.
+        def switch(_, page, index):
+            try:
+                if index == 1:
+                    editor.get_buffer().set_text(form.source())
+                else:
+                    from .metadata import property_mapping
+                    values = property_mapping(editor.get_buffer().get_text(*editor.get_buffer().get_bounds(), True))
+                    for record in list(form.rows):
+                        form.rows.remove(record)
+                        record[0].destroy()
+                    for key, value in values.items():
+                        form.add_property(key, value)
+                problem.set_text('')
+            except ValueError as error:
+                problem.set_text(str(error))
+                notebook.handler_block_by_func(switch)
+                notebook.set_current_page(1 if index == 0 else 0)
+                notebook.handler_unblock_by_func(switch)
+        content.pack_start(notebook, True, True, 0)
         problem = Gtk.Label(xalign=0)
         problem.set_line_wrap(True)
         content.pack_start(problem, False, False, 0)
         dialog.show_all()
+        if metadata.error:
+            notebook.set_current_page(1)
+        notebook.connect_after('switch-page', switch)
         while dialog.run() == Gtk.ResponseType.OK:
-            source = editor.get_buffer().get_text(*editor.get_buffer().get_bounds(), True)
             try:
+                source = (form.source() if notebook.get_current_page() == 0 else
+                          editor.get_buffer().get_text(*editor.get_buffer().get_bounds(), True))
                 self.set_note_properties(source)
-            except ValueError as error:
+                if notebook.get_current_page() == 0:
+                    form.save_registry()
+            except (ValueError, OSError) as error:
                 problem.set_text(str(error))
                 continue
             break
@@ -2756,8 +2883,6 @@ class Window(Gtk.ApplicationWindow):
                 close.set_focus_on_click(False)
                 tab.pack_end(close, False, False, 0)
                 tab.show_all()
-                self.note_toolbars.add(pane.toolbar)
-                pane.toolbar.show_all()
                 self.tabs.append_page(pane, tab)
                 pane.show_all()
             self.try_action(action)
@@ -3034,6 +3159,7 @@ class Window(Gtk.ApplicationWindow):
 
     def section(self, title):
         label = Gtk.Label(label=title, xalign=0)
+        label.set_ellipsize(Pango.EllipsizeMode.END)
         label.get_style_context().add_class('caption')
         self.context.pack_start(label, False, False, 0)
 
@@ -3235,6 +3361,7 @@ class Window(Gtk.ApplicationWindow):
     def update_context(self):
         self.update_vim_status()
         if self.vault:
+            self.tag_pane.refresh()
             for graph in tuple(self.graph_views):
                 graph.refresh_if_changed()
             for bases in tuple(self.bases_views):
@@ -3303,6 +3430,7 @@ class Window(Gtk.ApplicationWindow):
             self.outline_rows.append((offset, button))
         if not pane.headings:
             empty = Gtk.Label(label='No headings in this note.', xalign=0)
+            empty.set_ellipsize(Pango.EllipsizeMode.END)
             empty.get_style_context().add_class('outline-empty')
             self.context.pack_start(empty, False, False, 0)
         self.update_outline_selection()
@@ -3318,6 +3446,7 @@ class Window(Gtk.ApplicationWindow):
         mentions = self.vault.unlinked_mentions(pane.note.path, texts)
         if not mentions:
             empty = Gtk.Label(label='No unlinked mentions.', xalign=0)
+            empty.set_ellipsize(Pango.EllipsizeMode.END)
             empty.get_style_context().add_class('outline-empty')
             self.context.pack_start(empty, False, False, 0)
         else:
@@ -3335,14 +3464,21 @@ class Window(Gtk.ApplicationWindow):
         self.section('Properties')
         metadata = note_metadata(pane.text())
         self.context_button('Edit properties…', self.edit_properties)
-        for key, value in metadata.properties.items():
-            label = Gtk.Label(label=f'{key}: {value}', xalign=0)
-            label.set_line_wrap(True)
-            label.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
-            label.set_max_width_chars(24)
-            label.set_selectable(True)
-            label.get_style_context().add_class('outline-empty')
-            self.context.pack_start(label, False, False, 0)
+        if not metadata.error:
+            from .properties_ui import PropertyForm
+            form = PropertyForm(metadata.properties, self.vault.root)
+            self.context.pack_start(form, False, False, 0)
+            problem = Gtk.Label(xalign=0)
+            problem.set_line_wrap(True)
+            self.context.pack_start(problem, False, False, 0)
+            def apply_properties():
+                try:
+                    source = form.source()
+                    form.save_registry()
+                    self.set_note_properties(source)
+                except (ValueError, OSError) as error:
+                    problem.set_text(str(error))
+            self.context_button('Apply properties', apply_properties)
         if metadata.error:
             problem = Gtk.Label(label=metadata.error, xalign=0)
             problem.set_line_wrap(True)
@@ -3650,11 +3786,8 @@ class Window(Gtk.ApplicationWindow):
 
     def tab_switched(self, _, pane, index):
         if not isinstance(pane, NotePane):
-            self.note_toolbars.hide()
             GLib.idle_add(self.update_context)
             return
-        self.note_toolbars.set_visible_child(pane.toolbar)
-        self.note_toolbars.show()
         self.remember_location()
         if not self.restoring_workspace:
             self.navigation_history.visit(Location(pane.note.path,
@@ -3662,9 +3795,6 @@ class Window(Gtk.ApplicationWindow):
         GLib.idle_add(self.update_context)
 
     def tab_removed(self, notebook, pane, index):
-        if isinstance(pane, NotePane) and pane.toolbar.get_parent() is self.note_toolbars:
-            self.note_toolbars.remove(pane.toolbar)
-        self.note_toolbars.set_visible(isinstance(notebook.get_nth_page(notebook.get_current_page()), NotePane))
         if pane is self.split_pane:
             self.close_split()
         source = self.scroll_restore_sources.pop(pane, None)

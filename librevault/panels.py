@@ -1,4 +1,4 @@
-"""Short native GTK slide transitions that preserve resizable panel widths."""
+"""Sidebar widths that follow the window, plus slide transitions for the splitters."""
 import time
 
 import cairo
@@ -6,6 +6,53 @@ import gi
 
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk
+
+# Share of the workspace used until someone drags a splitter.
+SIDEBAR_DEFAULT_RATIO = 0.2
+# The outline stays compact on a large window until the splitter is dragged.
+SIDEBAR_OPEN_LIMIT = 300
+SIDEBAR_MAX = 520
+# Keep this much of the workspace for the note when both sidebars are open.
+EDITOR_MIN = 320
+SPLITTER_HANDLE = 5
+
+
+def sidebar_widths(workspace, notes_ratio, details_ratio, notes_open=True, details_open=True,
+                   limit=SIDEBAR_MAX):
+    """Pixel widths for the file tree and the details sidebar.
+
+    Ratios are fractions of the workspace. Open sidebars shrink together when
+    the window is too narrow to keep the editor readable.
+    """
+    if workspace <= 0:
+        return (0, 0)
+    slots = []
+    if notes_open:
+        slots.append(notes_ratio)
+    if details_open:
+        slots.append(details_ratio)
+    if not slots:
+        return (0, 0)
+    chosen = [min(limit, max(0, int(round(max(0.0, ratio) * workspace)))) for ratio in slots]
+    room = max(0, workspace - SPLITTER_HANDLE * len(slots) - min(EDITOR_MIN, max(0, workspace)))
+    total = sum(chosen)
+    if total > room:
+        if room <= 0 or total <= 0:
+            chosen = [0 for _ in chosen]
+        else:
+            scaled = [int(width * room / total) for width in chosen]
+            spare = room - sum(scaled)
+            for index in range(spare):
+                scaled[index % len(scaled)] += 1
+            chosen = scaled
+    widths = [0, 0]
+    cursor = 0
+    if notes_open:
+        widths[0] = chosen[cursor]
+        cursor += 1
+    if details_open:
+        widths[1] = chosen[cursor]
+    return tuple(widths)
 
 
 class SlidingPanel(Gtk.Revealer):

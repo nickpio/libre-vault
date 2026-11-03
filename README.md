@@ -260,7 +260,16 @@ Search shows saved-note snippets with highlighted matches. Plain words match pat
 | `alias:roadmap` | Frontmatter alias |
 | `property:status=done` | A property with a value |
 | `[status]` | Notes that have the property at all |
-| `-term` | Excludes anything matching `term` |
+| `-term` / `-(foo OR bar)` | Excludes a term or group |
+| `foo OR bar` / `(foo OR bar) baz` | Alternatives and grouped conditions; adjacent terms mean AND |
+| `/regex/` / `content:/foo\s+bar/` | Regular expressions, case-insensitive by default |
+| `line:(foo bar)` | Both terms on the same line |
+| `block:(foo bar)` | Both terms in the same blank-line-delimited block |
+| `section:(foo bar)` | Both terms between the same Markdown headings |
+| `task:release` | A checkbox task containing the text |
+| `task-todo:release` / `task-done:release` | Unchecked or checked tasks |
+| `match-case:Foo` / `match-case:(Foo OR Bar)` | Case-sensitive terms or groups |
+| `ignore-case:Foo` | Explicitly case-insensitive matching |
 
 For example, `tag:work property:status=done -path:Archive` finds completed work outside `Archive`. Unsaved edits are not included in search or backlink indexing; outgoing links use the active editor contents.
 
@@ -282,7 +291,9 @@ Reading mode displays local images (including `|width` and `|widthxheight` sizin
 <summary><b>Properties, tags, and aliases</b></summary>
 <br>
 
-The details panel shows tags, aliases, and properties. **Edit properties** edits YAML frontmatter as one undoable action. Tags come from frontmatter lists or inline `#tags`, including nested tags. Aliases participate in link resolution and the quick switcher; ambiguous names still prompt for a choice.
+The details panel and **Edit properties** provide typed controls for text, numbers, checkboxes, dates and date-times, and lists with removable item pills. Choose a property type beside its name, add or remove properties, and use **Apply properties** to update frontmatter as one undoable action. Date controls offer a calendar; nested values have a YAML value editor. **Edit properties → YAML** keeps the raw frontmatter editor available, including when existing YAML needs repair. Applying structured edits serializes the frontmatter and can change its formatting; the note body is preserved. Type choices are shared by property name within the vault and saved in `.librevault/property-types.json`.
+
+Expand **Tags** in the left sidebar to browse a nested tree with per-note counts. Activate a tag to search it and its descendants. **Rename selected tag** changes frontmatter and inline tags across the vault, including nested descendants, while preserving code, link fragments, and unrelated YAML. Open notes are saved before renaming; normal save conflict checks still apply. Tags come from frontmatter lists or inline `#tags`. Aliases participate in link resolution and the quick switcher; ambiguous names still prompt for a choice.
 
 </details>
 
@@ -343,7 +354,7 @@ Changes apply immediately to open notes and future tabs. **Restore defaults** re
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> | Fuzzy note switcher |
 | <kbd>Alt</kbd>+<kbd>Left</kbd> / <kbd>Right</kbd> | Navigate back / forward |
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> | Open or close a split editor |
-| <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>G</kbd> | Graph view |
+| <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>G</kbd> | Open or close graph view |
 
 </td>
 <td valign="top" width="50%">
@@ -374,7 +385,7 @@ Bold, italic, highlight, and strikethrough toggle markers around a selection, or
 
 ## Graph view
 
-Open **Graph view** from the header, the command palette, or <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>G</kbd>. Notes appear as nodes sized by their number of connections.
+Open **Graph view** from the header, the command palette, or <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>G</kbd>. The same button or shortcut closes it. Notes appear as nodes sized by their number of connections.
 
 | Interaction | Result |
 | --- | --- |
@@ -393,7 +404,7 @@ Open **Graph view** from the header, the command palette, or <kbd>Ctrl</kbd>+<kb
 
 **Open graph in tab** (command palette) or **Open as tab** (floating window) docks the graph in the workspace. With the graph tab selected, press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> or use the split-view button, then select a note in the main tabs: the graph stays in the split and clicking a node opens its note beside it. You can also split a note first and keep the graph in the main tab. Graph tabs, filters, local depth, and split placement are restored when the vault reopens. Close a graph tab with its close button or <kbd>Ctrl</kbd>+<kbd>W</kbd>.
 
-**Open local graph in tab** and **Local graph** show the active note's neighborhood at a depth of one to five links. The local root stays fixed to the note that was active when the graph opened. Search filters paths and aliases by words; turn off **Orphans** to hide unconnected notes.
+**Open local graph in tab** and **Local graph** show the active note's neighborhood at a depth of one to five links. The local root stays fixed to the note that was active when the graph opened. The graph filter accepts the same search syntax as vault search, including property filters, regular expressions, boolean groups, and task scopes; turn off **Orphans** to hide unconnected nodes.
 
 </details>
 
@@ -401,11 +412,12 @@ Open **Graph view** from the header, the command palette, or <kbd>Ctrl</kbd>+<kb
 <summary><b>What the graph includes, and how it stays fast</b></summary>
 <br>
 
-The graph uses saved, unambiguous note links, including note embeds. Duplicate links are merged; self-links, unresolved targets, attachments, and external URLs are omitted. Saving or refreshing the vault updates an open graph, and **Refresh** rebuilds and rearranges it manually.
+The graph uses saved note links, including note embeds. **Tags**, **Attachments**, and **Unresolved links** add tag nodes, local attachment files, and hollow ghost nodes for missing notes. Ambiguous links, self-links, and external URLs are omitted. **Arrows** shows source-to-target direction, including reciprocal links. Clicking a tag searches it; clicking an attachment opens its system viewer; clicking a ghost offers note creation. Saving or refreshing the vault updates an open graph, and **Refresh** rebuilds and rearranges it manually.
 
-A separate process reads only indexed paths, aliases, and links and computes the layout. Crowded spatial cells use aggregate repulsion to avoid all-pairs calculations. Layout has an eight-second work window and a 160-step limit before releasing the worker. The canvas draws at most 150 labels plus the focused note, skips offscreen drawing, and redraws only for layout or interaction changes. Hidden graph tabs stop their workers and defer updates until visible.
+**Color groups** assigns colors using ordered search queries; the first matching query wins. Node toggles, color groups, filters, and depth are saved with graph workspace state. Extra nodes remain visible when connected to a matching note or when their own paths match the filter.
 
-Tag nodes, custom color groups, and Obsidian's full graph filter syntax are not implemented.
+A separate process streams indexed note text and metadata for search and color matching, reads local attachment paths when enabled, and computes the layout. Crowded spatial cells use aggregate repulsion to avoid all-pairs calculations. Layout has an eight-second work window and a 160-step limit before releasing the worker. The canvas draws at most 150 labels plus the focused note, skips offscreen drawing, and redraws only for layout or interaction changes. Hidden graph tabs stop their workers and defer updates until visible.
+
 
 </details>
 

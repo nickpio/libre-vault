@@ -144,27 +144,35 @@ class ReadingTests(unittest.TestCase):
         self.assertFalse(self.pane.dirty)
         self.assertFalse(self.pane.history.can_undo)
 
-    def test_view_toolbar_is_above_tabs_and_follows_the_selected_note(self):
+    def test_view_toolbar_is_below_tabs_and_follows_the_selected_note(self):
         self.pane.set_mode('source')
         second = self.window.vault.create('Second')
         self.window.open_note(second.path)
         other = self.window.current()
-        self.assertIs(self.window.note_toolbars.get_visible_child(), other.toolbar)
         other.mode_selector.set_active_id('reading')
         self.assertEqual(other.mode, 'reading')
         self.window.open_note(self.pane.note.path)
-        self.assertIs(self.window.note_toolbars.get_visible_child(), self.pane.toolbar)
         self.assertEqual(self.pane.mode_selector.get_active_id(), 'source')
         loop = GLib.MainLoop()
         GLib.timeout_add(100, lambda: (loop.quit(), False)[1])
         loop.run()
-        bar = self.window.note_toolbars
-        self.assertIs(bar.get_parent(), self.window.tabs.get_parent())
-        self.assertLess(bar.get_allocation().y, self.window.tabs.get_allocation().y)
+        tabs = self.window.tabs
+        tab_label = tabs.get_tab_label(self.pane)
+        tab_y = tab_label.translate_coordinates(tabs, 0, 0)[1]
+        toolbar_y = self.pane.toolbar.translate_coordinates(tabs, 0, 0)[1]
+        content_y = self.pane.content_stack.translate_coordinates(tabs, 0, 0)[1]
+        self.assertLess(tab_y, toolbar_y)
+        self.assertLess(toolbar_y, content_y)
+        graph = self.window.show_graph_tab()
+        loop = GLib.MainLoop()
+        GLib.timeout_add(100, lambda: (loop.quit(), False)[1])
+        loop.run()
+        graph_tab_y = tabs.get_tab_label(graph).translate_coordinates(tabs, 0, 0)[1]
+        self.assertEqual(tab_y, graph_tab_y)
+        self.window.close_note(graph)
         self.window.close_note(self.pane)
-        self.assertIs(bar.get_visible_child(), other.toolbar)
-        self.window.close_note(other)
-        self.assertFalse(bar.get_visible())
+        self.assertIs(self.window.current(), other)
+        self.assertEqual(other.mode_selector.get_active_id(), 'reading')
 
     def test_tables_callouts_footnotes_math_and_note_embeds_render(self):
         (self.root / 'Child.md').write_text('## Embedded heading\n\nEmbedded body.\n![[Note]]')

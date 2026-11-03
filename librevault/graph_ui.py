@@ -7,6 +7,7 @@ from pathlib import PurePosixPath
 from gi.repository import Gdk, GLib, Gtk, Pango
 
 from .graph import graph_worker
+from .metadata import query_terms
 
 
 class GraphView(Gtk.Box):
@@ -21,6 +22,8 @@ class GraphView(Gtk.Box):
         self.poll_source = self.reload_source = None
         self.paths, self.edges, self.positions = [], [], []
         self.adjacent = []
+        self.colors = {}
+        self.groups = []
         self.hover = self.selected = None
         self.drag = None
         self.scale, self.pan_x, self.pan_y = 1., 0., 0.
@@ -36,7 +39,7 @@ class GraphView(Gtk.Box):
         bar.set_max_children_per_line(6)
         bar.set_min_children_per_line(1)
         bar.set_column_spacing(4)
-        self.search = Gtk.SearchEntry(placeholder_text='Filter note paths and aliases')
+        self.search = Gtk.SearchEntry(placeholder_text='Search notes: tag:, path:, /regex/, OR…')
         self.search.set_hexpand(True)
         box.pack_start(self.search, False, False, 0)
         box.pack_start(bar, False, False, 0)
@@ -52,6 +55,16 @@ class GraphView(Gtk.Box):
         self.orphans = Gtk.CheckButton(label='Orphans')
         self.orphans.set_active(True)
         bar.add(self.orphans)
+        for name, label, active in [('tags', 'Tags', False), ('attachments', 'Attachments', False),
+                                    ('unresolved', 'Unresolved links', False), ('arrows', 'Arrows', True)]:
+            control = Gtk.CheckButton(label=label)
+            control.set_active(active)
+            setattr(self, name, control)
+            bar.add(control)
+            control.connect('toggled', self.schedule_reload)
+        groups = Gtk.Button(label='Color groups…')
+        groups.connect('clicked', self.edit_groups)
+        bar.add(groups)
         for title, action in [('Fit', self.fit), ('Refresh', self.reload)]:
             button = Gtk.Button(label=title)
             button.connect('clicked', action)
@@ -87,6 +100,48 @@ class GraphView(Gtk.Box):
             self.restore_state(state)
         self.show_all()
 
+    def edit_groups(self, *_):
+        dialog = Gtk.Dialog(title='Graph color groups', transient_for=self.get_toplevel(), modal=True)
+        dialog.add_buttons('Cancel', Gtk.ResponseType.CANCEL, 'Apply', Gtk.ResponseType.OK)
+        content = dialog.get_content_area()
+        content.set_border_width(12)
+        content.set_spacing(6)
+        content.add(Gtk.Label(label='First matching query determines each note’s color.'))
+        rows = []
+        def add(query='', color='#8090ee'):
+            row = Gtk.Box(spacing=6)
+            entry = Gtk.Entry(text=query, placeholder_text='Search query', hexpand=True)
+            rgba = Gdk.RGBA()
+            rgba.parse(color)
+            picker = Gtk.ColorButton(rgba=rgba)
+            remove = Gtk.Button(label='−')
+            record = (entry, picker)
+            rows.append(record)
+            remove.connect('clicked', lambda *_: (rows.remove(record), row.destroy()))
+            row.pack_start(entry, True, True, 0)
+            row.pack_start(picker, False, False, 0)
+            row.pack_start(remove, False, False, 0)
+            content.pack_start(row, False, False, 0)
+            row.show_all()
+        for group in self.groups:
+            add(group['query'], group['color'])
+        button = Gtk.Button(label='Add color group')
+        button.connect('clicked', lambda *_: add())
+        content.pack_end(button, False, False, 0)
+        problem = Gtk.Label(xalign=0)
+        content.pack_end(problem, False, False, 0)
+        dialog.show_all()
+        while dialog.run() == Gtk.ResponseType.OK:
+            groups = [dict(query=entry.get_text(), color=picker.get_rgba().to_string()) for entry, picker in rows]
+            errors = [query_terms(group['query']).error for group in groups if query_terms(group['query']).error]
+            if errors:
+                problem.set_text(errors[0])
+                continue
+            self.groups = groups
+            self.schedule_reload()
+            break
+        dialog.destroy()
+
     def schedule_reload(self, *_):
         if self.reload_source:
             GLib.source_remove(self.reload_source)
@@ -115,7 +170,9 @@ class GraphView(Gtk.Box):
     def snapshot(self):
         return dict(kind='graph', id=self.workspace_id, root=self.root,
                     local=self.local.get_active(), query=self.search.get_text(),
-                    depth=self.depth.get_value_as_int(), orphans=self.orphans.get_active())
+                    depth=self.depth.get_value_as_int(), orphans=self.orphans.get_active(),
+                    tags=self.tags.get_active(), attachments=self.attachments.get_active(),
+                    unresolved=self.unresolved.get_active(), arrows=self.arrows.get_active(), groups=self.groups)
 
     def restore_state(self, state):
         if isinstance(state.get('id'), str):
@@ -127,6 +184,12 @@ class GraphView(Gtk.Box):
         self.orphans.set_active(state.get('orphans') is not False)
         if isinstance(state.get('query'), str):
             self.search.set_text(state['query'])
+        for name in ('tags', 'attachments', 'unresolved', 'arrows'):
+            if isinstance(state.get(name), bool):
+                getattr(self, name).set_active(state[name])
+        groups = state.get('groups', [])
+        self.groups = [group for group in (groups if isinstance(groups, list) else []) if isinstance(group, dict)
+                       and isinstance(group.get('query'), str) and isinstance(group.get('color'), str)]
         if type(state.get('depth')) is int:
             self.depth.set_value(max(1, min(5, state['depth'])))
 
@@ -141,7 +204,7 @@ class GraphView(Gtk.Box):
     def freeze(self):
         self.stop_worker()
         self.active = False
-        self.status.set_text(f'{len(self.paths):,} notes · {len(self.edges):,} links · Saved notes')
+        self.status.set_text(f'{len(self.paths):,} nodes · {len(self.edges):,} links · Saved notes')
 
     def cleanup(self, *_):
         self.closed = True
@@ -161,6 +224,10 @@ class GraphView(Gtk.Box):
         if not self.get_mapped():
             self.needs_reload = True
             return False
+        error = query_terms(self.search.get_text()).error
+        if error:
+            self.status.set_text('Invalid search: ' + error)
+            return False
         self.needs_reload = False
         self.paths, self.edges, self.positions = [], [], []
         self.hover = self.selected = self.drag = None
@@ -171,7 +238,10 @@ class GraphView(Gtk.Box):
         self.pipe, child = context.Pipe()
         self.process = context.Process(target=graph_worker, args=(child, str(self.owner.vault.index.path),
             dict(query=self.search.get_text(), root=self.root if self.local.get_active() else None,
-                 depth=self.depth.get_value_as_int(), orphans=self.orphans.get_active())), daemon=True)
+                 depth=self.depth.get_value_as_int(), orphans=self.orphans.get_active(),
+                 tags=self.tags.get_active(), attachments=self.attachments.get_active(),
+                 unresolved=self.unresolved.get_active(), directed=True,
+                 vault_root=str(self.owner.vault.root), groups=self.groups)), daemon=True)
         self.process.start()
         child.close()
         self.poll_source = GLib.timeout_add(33, self.poll)
@@ -198,7 +268,7 @@ class GraphView(Gtk.Box):
             self.stop_worker()
             return False
         if message[0] == 'graph':
-            _, self.paths, self.edges, self.positions = message
+            _, self.paths, self.edges, self.positions, self.colors = message
             self.adjacent = [set() for _ in self.paths]
             for a, b in self.edges:
                 self.adjacent[a].add(b)
@@ -209,9 +279,9 @@ class GraphView(Gtk.Box):
             _, positions, self.active = message
             if self.drag is None:
                 self.positions = positions
-        self.status.set_text(f'{len(self.paths):,} notes · {len(self.edges):,} links · Saved notes' +
+        self.status.set_text(f'{len(self.paths):,} nodes · {len(self.edges):,} links · Saved notes' +
                              (' · Arranging…' if self.active else '') +
-                             (' · No matching notes' if not self.paths else ''))
+                             (' · No matching nodes' if not self.paths else ''))
         self.canvas.queue_draw()
         if self.active and self.get_mapped():
             self.pipe.send('step')
@@ -259,6 +329,12 @@ class GraphView(Gtk.Box):
                     continue
                 cr.move_to(x, y)
                 cr.line_to(ox, oy)
+                if self.arrows.get_active():
+                    angle = math.atan2(oy-y, ox-x)
+                    tip_x, tip_y = ox - 10 * math.cos(angle), oy - 10 * math.sin(angle)
+                    for turn in (-.5, .5):
+                        cr.move_to(tip_x - 7 * math.cos(angle + turn), tip_y - 7 * math.sin(angle + turn))
+                        cr.line_to(tip_x, tip_y)
             cr.stroke()
         labels = 0
         cr.set_font_size(12)
@@ -270,12 +346,25 @@ class GraphView(Gtk.Box):
                 cr.set_source_rgb(.48, .55, .95)
             else:
                 cr.set_source_rgba(color.red, color.green, color.blue, .8 if focus is None else .3)
+            path = self.paths[i]
+            custom = Gdk.RGBA()
+            if path in self.colors and custom.parse(self.colors[path]):
+                cr.set_source_rgba(custom.red, custom.green, custom.blue, custom.alpha)
+            elif path.startswith('#'):
+                cr.set_source_rgb(.25, .7, .45)
+            elif path.startswith('ghost:'):
+                cr.set_source_rgba(color.red, color.green, color.blue, .45)
+            elif not path.lower().endswith('.md'):
+                cr.set_source_rgb(.85, .6, .25)
             radius = min(9, 3 + math.sqrt(len(self.adjacent[i]))) * min(1.5, max(.6, self.scale))
             cr.arc(x, y, radius, 0, math.tau)
-            cr.fill()
+            if path.startswith('ghost:'):
+                cr.stroke()
+            else:
+                cr.fill()
             if i == focus or (self.scale >= .65 and labels < 150):
                 cr.move_to(x + radius + 4, y + 4)
-                cr.show_text(PurePosixPath(self.paths[i]).stem[:60])
+                cr.show_text((self.paths[i] if self.paths[i].startswith('#') else PurePosixPath(self.paths[i].removeprefix('ghost:')).stem)[:60])
                 labels += 1
         return False
 
@@ -319,7 +408,16 @@ class GraphView(Gtk.Box):
         return True
 
     def open_node(self, node):
-        self.owner.open_graph_note(self, self.paths[node])
+        path = self.paths[node]
+        if path.startswith('#'):
+            self.owner.search_entry.set_text('tag:' + path)
+        elif path.startswith('ghost:'):
+            self.owner.follow_link(self.root or '', path.removeprefix('ghost:'))
+        elif not path.lower().endswith('.md'):
+            from .attachments import open_attachment
+            open_attachment(self.owner, '', path)
+        else:
+            self.owner.open_graph_note(self, path)
         self.owner.present()
 
     def leave(self, *_):
@@ -395,5 +493,12 @@ class GraphWindow(Gtk.Window):
     def key(self, _, event):
         if event.keyval == Gdk.KEY_Escape:
             self.destroy()
+            return True
+        # Focus moves here when the graph opens, so the main window no longer
+        # sees the shortcut that the header button uses to toggle it.
+        modifiers = event.state & Gtk.accelerator_get_default_mod_mask()
+        key, mask = Gtk.accelerator_parse('<Control><Alt>g')
+        if Gdk.keyval_to_lower(event.keyval) == key and modifiers == mask:
+            self.graph.owner.show_graph()
             return True
         return False

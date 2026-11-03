@@ -137,11 +137,24 @@ class WelcomeTests(unittest.TestCase):
             GLib.timeout_add(100, lambda: (loop.quit(), False)[1])
             loop.run()
 
+        def settle_sidebars():
+            previous = None
+            for _ in range(20):
+                settle()
+                width = self.window.get_allocated_width()
+                left = self.window.notes_panel.get_allocated_width()
+                right = self.window.details_panel.get_allocated_width()
+                if (width == previous and width > 1 and not self.window._fitting_sidebars
+                        and abs(left - right) <= 1 and left > 1):
+                    return
+                previous = width
+            self.fail('sidebars did not settle')
+
         settle()
         self.assertFalse(self.window.panel_widths_initialized)
         (self.root / 'Note.md').write_text('# Note\n\n## Section\n')
         self.window.load_vault(self.root)
-        settle()
+        settle_sidebars()
         left = self.window.notes_panel.get_allocated_width()
         right = self.window.details_panel.get_allocated_width()
         self.assertTrue(self.window.panel_widths_initialized)

@@ -461,6 +461,8 @@ class Vault:
 
     def search_results(self, query: str):
         terms = query_terms(query)
+        if terms.error:
+            return []
         if not terms:
             from .metadata import SearchResult
             return [SearchResult(path, '', ()) for path in self.notes]
@@ -478,6 +480,37 @@ class Vault:
     def metadata(self, relative: str):
         record = self.notes.get(relative)
         return self.index.metadata(record.path) if record is not None else note_metadata('')
+
+    def tag_counts(self):
+        import json
+        counts = {}
+        for (tags,) in self.index.connection.execute('SELECT tags FROM notes'):
+            seen = set()
+            for tag in json.loads(tags):
+                parts = tag.split('/')
+                seen.update('/'.join(parts[:i]) for i in range(1, len(parts) + 1))
+            for tag in seen:
+                counts[tag] = counts.get(tag, 0) + 1
+        return counts
+
+    def rename_tag(self, old, new):
+        from .metadata import rename_tag
+        rename_tag('', old, new)  # Validate even when the vault is empty.
+        # Prepare every edit before writing, so malformed YAML cannot cause a
+        # partially applied rename. save() checks disk revisions for each file.
+        edits = []
+        for path, record in self.notes.items():
+            if record is None:
+                continue
+            note = self.read(path)
+            changed = rename_tag(note.text, old, new)
+            if changed != note.text:
+                edits.append((note, changed))
+        changed_paths = []
+        for note, text in edits:
+            self.save(note, text)
+            changed_paths.append(note.path)
+        return changed_paths
 
     def move(self, relative: str, destination: str) -> dict[str, str]:
         """Rename or move a note/folder, updating unambiguous Markdown links."""

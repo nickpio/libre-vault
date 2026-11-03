@@ -159,7 +159,7 @@ class NoteIndex:
         literals = [value.casefold() for negative, field, value in terms
                     if not negative and field in ('', 'content') and len(value.casefold()) >= 3
                     and '\x00' not in value]
-        if self.fts and literals:
+        if self.fts and literals and not getattr(terms, 'complex', False):
             match = ' AND '.join('"' + value.replace('"', '""') + '"' for value in literals)
             yield from (row[0] for row in self.connection.execute(
                 'SELECT path FROM search WHERE search MATCH ? ORDER BY path', (match,)))
