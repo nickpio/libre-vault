@@ -4,7 +4,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from librevault.shortcuts import APP_SHORTCUTS
+from librevault.shortcuts import APP_SHORTCUTS, shortcut_id
 
 try:
     from librevault.app import Gdk, GLib, Gtk, Window
@@ -58,6 +58,24 @@ class CommandTests(unittest.TestCase):
         loop.run()
         self.drain_events()
         return self.window.palette
+
+    def test_cheatsheet_shortcut_and_hint_follow_custom_binding(self):
+        shortcut = next(item for item in APP_SHORTCUTS if item.handler == 'show_keybinds')
+        self.assertEqual(shortcut.accelerator, '<Alt>k')
+        self.assertEqual(self.window.keybind_hint_keys.get_text(),
+                         Gtk.accelerator_get_label(*Gtk.accelerator_parse(shortcut.accelerator)))
+        self.assertTrue(self.window.key_press(self.window, self.event(Gdk.KEY_k, Gdk.ModifierType.MOD1_MASK)))
+        self.assertTrue(self.window.cheatsheet.get_visible())
+        self.window.cheatsheet.destroy()
+        self.window.keybind_hint.clicked()
+        self.assertTrue(self.window.cheatsheet.get_visible())
+        self.window.cheatsheet.destroy()
+        with patch.object(self.window.hotkey_store, 'save'):
+            self.window.set_hotkey(shortcut_id('app', shortcut), '<Control><Alt>k')
+        self.assertEqual(self.window.keybind_hint_keys.get_text(),
+                         Gtk.accelerator_get_label(*Gtk.accelerator_parse('<Control><Alt>k')))
+        self.assertTrue(self.window.key_press(self.window, self.event(
+            Gdk.KEY_k, Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.MOD1_MASK)))
 
     def test_alt_p_search_enter_opens_cheatsheet_without_editing_note(self):
         pane = self.window.current()

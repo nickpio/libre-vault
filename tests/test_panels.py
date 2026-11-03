@@ -91,6 +91,19 @@ class PanelTests(unittest.TestCase):
         self.window.notes_toggle.set_active(opened)
         self.window.details_toggle.set_active(opened)
 
+    def test_destroy_cancels_pending_sidebar_callbacks(self):
+        self.window.fit_sidebars(self.window.notes_panel.paned.get_allocated_width())
+        fit_source = self.window._sidebar_fit_source
+        self.window._sidebar_dragging = True
+        self.window._sidebar_drag_end(None, type('Event', (), {'button': 1})())
+        ratios_source = self.window._sidebar_ratios_source
+        self.assertIsNotNone(GLib.MainContext.default().find_source_by_id(fit_source))
+        self.assertIsNotNone(GLib.MainContext.default().find_source_by_id(ratios_source))
+        self.window.destroy()
+        self.assertIsNone(GLib.MainContext.default().find_source_by_id(fit_source))
+        self.assertIsNone(GLib.MainContext.default().find_source_by_id(ratios_source))
+        self.wait(20)
+
     def test_close_and_open_have_intermediate_widths_and_reclaim_space(self):
         original = self.widths()
         editor_width = self.window.tabs.get_allocated_width()

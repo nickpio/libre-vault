@@ -94,11 +94,11 @@ list row:selected { background: @selected; color: @bright; }
 .welcome-hint { color: @muted; font-size: 9pt; }
 button.sidebar-command {
     background: transparent;
-    border: 1px solid @edge;
+    border: 1px solid transparent;
     border-radius: 8px;
     padding: 8px;
 }
-button.sidebar-command:hover { background: @hover; border-color: @border; }
+button.sidebar-command:hover { background: @hover; border-color: transparent; }
 .sidebar-command-label { color: @muted; font-size: 9pt; }
 frame.command-palette {
     background: @canvas;

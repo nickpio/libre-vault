@@ -44,7 +44,7 @@ from .slides import SlidesWindow
 from .filetree import tree_paths
 from .metadata import note_metadata, property_text, with_properties
 from .commands import CommandPalette, KeybindCheatsheet, NoteNameDialog, TemplatePicker, UniqueNoteDialog
-from .shortcuts import APP_SHORTCUTS, EDITOR_SHORTCUTS, HotkeyStore, effective_shortcuts, validate_hotkey, shortcut_key
+from .shortcuts import APP_SHORTCUTS, EDITOR_SHORTCUTS, HotkeyStore, effective_shortcuts, validate_hotkey, shortcut_key, shortcut_id
 from .settings import SettingsDialog
 from .preferences import PreferencesStore
 from .appearance import PALETTES, stylesheet
@@ -66,6 +66,45 @@ from .templates import (
 
 
 CSS = Path(__file__).with_name('style.css').read_bytes()
+
+
+def file_tree_icon(folder):
+    """Draw compact outline icons that follow the current theme's text color."""
+    icon = Gtk.DrawingArea()
+    icon.set_size_request(16, 16)
+    icon.get_style_context().add_class('muted')
+
+    def draw(widget, context):
+        color = widget.get_style_context().get_color(widget.get_state_flags())
+        Gdk.cairo_set_source_rgba(context, color)
+        context.set_line_width(1.2)
+        if folder:
+            context.move_to(1.8, 4.4)
+            context.line_to(1.8, 12.5)
+            context.line_to(14.2, 12.5)
+            context.line_to(14.2, 5.7)
+            context.line_to(7.3, 5.7)
+            context.line_to(6.0, 4.4)
+            context.close_path()
+        else:
+            context.move_to(3.6, 1.8)
+            context.line_to(9.2, 1.8)
+            context.line_to(12.4, 5.0)
+            context.line_to(12.4, 14.2)
+            context.line_to(3.6, 14.2)
+            context.close_path()
+            context.move_to(9.2, 1.8)
+            context.line_to(9.2, 5.0)
+            context.line_to(12.4, 5.0)
+            context.move_to(5.6, 8.0)
+            context.line_to(10.4, 8.0)
+            context.move_to(5.6, 10.5)
+            context.line_to(10.4, 10.5)
+        context.stroke()
+        return False
+
+    icon.connect('draw', draw)
+    return icon
 
 
 def scrolled(widget, width=None):
@@ -1949,6 +1988,8 @@ class Window(Gtk.ApplicationWindow):
         self.sidebar_refit = False
         self.sidebar_custom = False
         self._fitting_sidebars = False
+        self._sidebar_fit_source = None
+        self._sidebar_ratios_source = None
         self._sidebar_dragging = False
         self.notes_ratio = SIDEBAR_DEFAULT_RATIO
         self.details_ratio = SIDEBAR_DEFAULT_RATIO
@@ -2078,24 +2119,24 @@ class Window(Gtk.ApplicationWindow):
         files_scroll = scrolled(self.files)
         files_scroll.connect('button-press-event', self.explorer_button_press)
         sidebar.pack_start(files_scroll, True, True, 0)
-        hint = Gtk.Button()
+        hint = self.keybind_hint = Gtk.Button()
         hint.get_style_context().add_class('sidebar-command')
         hint.set_margin_top(12)
-        hint.set_tooltip_text('Open command palette · Alt+P')
-        hint.get_accessible().set_name('Open command palette')
-        hint.connect('clicked', lambda *_: self.show_command_palette())
+        hint.get_accessible().set_name('Open keybind cheatsheet')
+        hint.connect('clicked', lambda *_: self.show_keybinds())
         hint_content = Gtk.Box(spacing=8)
         icon = Gtk.Image.new_from_icon_name('input-keyboard-symbolic', Gtk.IconSize.MENU)
         icon.get_style_context().add_class('muted')
         hint_content.pack_start(icon, False, False, 0)
-        label = Gtk.Label(label='Commands', xalign=0)
+        label = Gtk.Label(label='Keyboard shortcuts', xalign=0)
         label.set_ellipsize(Pango.EllipsizeMode.END)
         label.get_style_context().add_class('sidebar-command-label')
         hint_content.pack_start(label, True, True, 0)
-        keys = Gtk.Label(label='Alt+P')
+        keys = self.keybind_hint_keys = Gtk.Label()
         keys.get_style_context().add_class('keybind-keys')
         hint_content.pack_end(keys, False, False, 0)
         hint.add(hint_content)
+        self.update_keybind_hint()
         sidebar.pack_start(hint, False, False, 0)
         self.left_dock = Gtk.Notebook(scrollable=True)
         self.right_dock = Gtk.Notebook(scrollable=True)
@@ -2223,6 +2264,11 @@ class Window(Gtk.ApplicationWindow):
 
     def cleanup(self, *_):
         self.closed = True
+        for name in ('_sidebar_fit_source', '_sidebar_ratios_source'):
+            source = getattr(self, name)
+            if source is not None:
+                GLib.source_remove(source)
+                setattr(self, name, None)
         for view in tuple(getattr(self, 'canvas_views', ())):
             view.cancel_autosave()
         for window in (self.version_dialog, self.graph_window, self.slides_window,
@@ -2411,7 +2457,7 @@ class Window(Gtk.ApplicationWindow):
         # The workspace can start hidden behind the welcome screen. Wait for
         # its real allocation before positioning the dividers.
         width = allocation.width
-        if self.vault is None or width <= 1 or self._fitting_sidebars:
+        if self.closed or self.vault is None or width <= 1 or self._fitting_sidebars:
             return
         if self.notes_panel.transitioning or self.details_panel.transitioning:
             # Remember a resize that arrives mid-slide, but let the animation
@@ -2434,13 +2480,16 @@ class Window(Gtk.ApplicationWindow):
         limit = SIDEBAR_MAX if self.sidebar_custom else SIDEBAR_OPEN_LIMIT
         # Measure both as open so a hidden sidebar reopens at the adapted width.
         left, right = sidebar_widths(width, self.notes_ratio, self.details_ratio, limit=limit)
+        if self._sidebar_fit_source is not None:
+            GLib.source_remove(self._sidebar_fit_source)
+            self._sidebar_fit_source = None
         self._fitting_sidebars = True
         self.sidebar_span = width
         self.panel_widths_initialized = True
         self._place_sidebar(self.notes_panel, left)
         # The details divider sits in the center pane, whose width changes
         # after the file tree moves. Apply it once that allocation settles.
-        GLib.idle_add(self._finish_sidebar_fit, right)
+        self._sidebar_fit_source = GLib.idle_add(self._finish_sidebar_fit, right)
 
     def _place_sidebar(self, panel, width):
         if width < 1:
@@ -2451,14 +2500,13 @@ class Window(Gtk.ApplicationWindow):
             panel.get_child().set_size_request(width, -1)
 
     def _finish_sidebar_fit(self, right):
-        if not self.in_destruction():
-            self._place_sidebar(self.details_panel, right)
-        GLib.idle_add(self._release_sidebar_fit)
+        self._sidebar_fit_source = None
+        self._place_sidebar(self.details_panel, right)
+        self._sidebar_fit_source = GLib.idle_add(self._release_sidebar_fit)
         return False
 
     def _release_sidebar_fit(self):
-        if self.in_destruction():
-            return False
+        self._sidebar_fit_source = None
         self._fitting_sidebars = False
         if self.sidebar_refit and not (self.notes_panel.transitioning or self.details_panel.transitioning):
             self.sidebar_refit = False
@@ -2473,11 +2521,14 @@ class Window(Gtk.ApplicationWindow):
     def _sidebar_drag_end(self, _paned, event):
         if event.button == 1 and self._sidebar_dragging:
             self._sidebar_dragging = False
-            GLib.idle_add(self._store_sidebar_ratios)
+            if self._sidebar_ratios_source is not None:
+                GLib.source_remove(self._sidebar_ratios_source)
+            self._sidebar_ratios_source = GLib.idle_add(self._store_sidebar_ratios)
         return False
 
     def _store_sidebar_ratios(self):
-        if self.in_destruction() or self._fitting_sidebars:
+        self._sidebar_ratios_source = None
+        if self._fitting_sidebars:
             return False
         workspace = self.notes_panel.paned.get_allocated_width()
         if workspace <= 1:
@@ -2546,9 +2597,11 @@ class Window(Gtk.ApplicationWindow):
                     indicator = Gtk.Box()
                 indicator.set_size_request(16, -1)
                 content.pack_start(indicator, False, False, 0)
-            icon_name = 'folder-symbolic' if is_folder else 'x-office-drawing-symbolic' if path.lower().endswith('.canvas') else 'text-x-generic-symbolic'
-            icon = Gtk.Image.new_from_icon_name(icon_name, Gtk.IconSize.MENU)
-            icon.get_style_context().add_class('muted')
+            if path.lower().endswith('.canvas') and not is_folder:
+                icon = Gtk.Image.new_from_icon_name('x-office-drawing-symbolic', Gtk.IconSize.MENU)
+                icon.get_style_context().add_class('muted')
+            else:
+                icon = file_tree_icon(is_folder)
             content.pack_start(icon, False, False, 0)
             names = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
             show_name = is_folder or path.lower().endswith('.canvas')
@@ -3639,6 +3692,13 @@ class Window(Gtk.ApplicationWindow):
         for pane in self.panes.values():
             pane.apply_preferences()
 
+    def update_keybind_hint(self):
+        shortcut = next(item for item in APP_SHORTCUTS if item.handler == 'show_keybinds')
+        accelerator = self.hotkeys.get(shortcut_id('app', shortcut), shortcut.accelerator)
+        label = Gtk.accelerator_get_label(*Gtk.accelerator_parse(accelerator)) if accelerator else 'Unbound'
+        self.keybind_hint_keys.set_text(label)
+        self.keybind_hint.set_tooltip_text(f'Open keybind cheatsheet · {label}')
+
     def set_hotkey(self, identifier, accelerator):
         accelerator = validate_hotkey(self.hotkeys, identifier, accelerator)
         bindings = dict(self.hotkeys, **{identifier: accelerator})
@@ -3646,6 +3706,7 @@ class Window(Gtk.ApplicationWindow):
         for window in self.get_application().get_windows():
             if isinstance(window, Window):
                 window.hotkeys = bindings
+                window.update_keybind_hint()
                 if window.cheatsheet is not None:
                     window.cheatsheet.destroy()
 

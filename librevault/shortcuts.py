@@ -12,6 +12,7 @@ class Shortcut:
 APP_SHORTCUTS = (
     Shortcut('<Control><Alt>g', 'Toggle graph view', 'show_graph'),
     Shortcut('<Alt>p', 'Open command palette', 'show_command_palette'),
+    Shortcut('<Alt>k', 'Open keybind cheatsheet', 'show_keybinds'),
     Shortcut('<Control>o', 'Open a vault', 'choose_vault'),
     Shortcut('<Control>n', 'Create a note', 'new_note'),
     Shortcut('<Control><Alt>d', 'Open daily note', 'open_daily_note'),
