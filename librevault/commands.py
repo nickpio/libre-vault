@@ -61,10 +61,14 @@ class CommandPalette(Gtk.EventBox):
                             ('New folder', owner.new_folder),
                             ('Open daily note', owner.open_daily_note),
                             ('Insert template', owner.insert_template),
+                            ('Insert table…', owner.insert_table),
+                            ('Edit table…', owner.edit_table),
                             ('New note from template', owner.create_from_template),
                             ('New unique note', owner.new_unique_note),
                             ('Open random note', owner.open_random_note),
                             ('Save note', owner.save_current),
+                            ('Toggle highlight', owner.toggle_highlight),
+                            ('Toggle strikethrough', owner.toggle_strikethrough),
                             ('Version history…', owner.show_version_history),
                             ('Close note', owner.close_tab),
                             ('Close vault', owner.close_vault),
@@ -83,6 +87,14 @@ class CommandPalette(Gtk.EventBox):
                             ('Save workspace layout…', owner.save_workspace_layout),
                             ('Load workspace layout…', owner.load_workspace_layout),
                             ('Manage workspaces…', owner.manage_workspaces)])
+            if note is not None:
+                actions.extend([
+                    ('Toggle fold at cursor', note.toggle_fold),
+                    ('Fold all headings', note.fold_all_headings),
+                    ('Unfold all', note.unfold_all),
+                    ('Add next occurrence', note.add_next_occurrence),
+                    ('Select all occurrences', note.select_all_occurrences),
+                ])
         for title, action in actions:
             row = Gtk.ListBoxRow()
             row.action, row.title = action, title

@@ -488,3 +488,8 @@ class Vault:
         """Move an item to this vault's hidden .trash folder without deleting it."""
         from .organization import trash
         return trash(self, relative)
+
+
+# Heading and block anchors live in a GTK-free module. Re-export them so the
+# vault engine remains the public place to resolve a link target.
+from .anchors import extract_subpath, find_anchor_offset, list_block_ids, list_headings  # noqa: E402

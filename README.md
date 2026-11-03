@@ -209,12 +209,16 @@ Notes are grouped beneath their folders with indentation per level. Click a fold
 </details>
 
 <details>
-<summary><b>Live preview and formatting</b></summary>
+<summary><b>Live preview, tables, and editor ergonomics</b></summary>
 <br>
 
-Headings, emphasis, code, quotes, and link labels format in the writing area as you type. The line containing the cursor reveals its Markdown syntax; move away and the markers hide again. Frontmatter is concealed until the cursor or selection enters it, and <kbd>Ctrl</kbd>+<kbd>Home</kbd> reveals it. Copy, cut, and save always retain the original Markdown.
+Headings, emphasis, highlights (`==highlight==`), strikethrough (`~~strikethrough~~`), inline and multi-line Obsidian comments (`%%comment%%`), fenced code syntax highlighting, quotes, and link labels format in the writing area as you type. The line containing the cursor reveals its Markdown syntax; move away and the markers hide again. Frontmatter is concealed until the cursor or selection enters it, and <kbd>Ctrl</kbd>+<kbd>Home</kbd> reveals it. Copy, cut, and save always retain the original Markdown.
 
-Live preview also previews standalone local Markdown images; move the cursor into the image Markdown to edit its source. Images embedded within text and wiki-style embeds still require Reading mode. Remote images are never fetched.
+When the cursor is outside a block, Live preview also renders standalone local Markdown and wiki images (`![alt|300](img.png)`, `![[img.png|300x200]]`), note and subpath embeds (`![[Note]]`, `![[Note#Heading]]`, `![[Note#^block-id]]`), display and inline math, Mermaid diagrams, tables, and callout headers (`> [!NOTE] Title`). Move the cursor or selection into the block to edit its raw Markdown. Remote images are never fetched.
+
+Inside a Markdown table, <kbd>Tab</kbd> and <kbd>Shift</kbd>+<kbd>Tab</kbd> jump between cells and reformat column widths, <kbd>Enter</kbd> moves down or adds a row on the last row, and the context menu and command palette add, delete, move, align, and sort rows and columns as single undoable edits.
+
+Headings, nested lists, fenced code blocks, and YAML frontmatter can be folded from the left gutter (`▾` / `▸`) or with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>[</kbd> and <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>]</kbd>. Typing `/` at the start of a line or after whitespace opens a filterable slash-command menu. <kbd>Ctrl</kbd>+<kbd>D</kbd> and <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd> add multiple cursors for simultaneous editing, and optional Vim modal editing (`NORMAL`, `INSERT`, `VISUAL`) can be enabled in Settings.
 
 The outline indents nested headings, wraps long titles, and highlights the section containing the cursor. Click a heading to jump to it.
 
@@ -263,12 +267,14 @@ For example, `tag:work property:status=done -path:Archive` finds completed work 
 </details>
 
 <details>
-<summary><b>Attachments and embeds</b></summary>
+<summary><b>Attachments, transclusion, and anchors</b></summary>
 <br>
 
 Use the attachment button to copy a file into the vault's `attachments` folder and insert its link. Pasting a screenshot or dropping local files into the editor uses the same storage. Identical files with the same extension are reused; different files get a new name when necessary. Undo removes the inserted Markdown but keeps the copied file. The root `attachments` folder is hidden from the file tree but remains accessible in your file manager.
 
-Reading mode displays local images and `![[note]]` embeds. PDFs embedded with `![[file.pdf]]` get page controls when Poppler is installed, with an **Open** button that falls back to the system viewer. Each render is limited to 32 embedded files and 4 MiB of embedded note source; open files separately when a preview reaches the limit.
+Wikilinks and embeds support exact heading paths (`[[Note#Heading]]`, `[[Note#Parent#Child]]`, `[[#Heading]]`) and block IDs (`[[Note#^block-id]]`, `[[#^block-id]]`) with live `#` and `#^` autocomplete. Holding <kbd>Ctrl</kbd> while hovering a link opens a preview popover with the target note, section, or block.
+
+Reading mode displays local images (including `|width` and `|widthxheight` sizing), audio/video attachment cards, and `![[Note]]`, `![[Note#Heading]]`, and `![[Note#^block-id]]` transclusions with a button to open the source at the exact anchor. PDFs embedded with `![[file.pdf]]` or `![[file.pdf#page=N]]` get page controls when Poppler is installed, with an **Open** button that falls back to the system viewer. Each render is limited to 32 embedded files and 4 MiB of embedded note source; open files separately when a preview reaches the limit.
 
 </details>
 
@@ -285,6 +291,8 @@ The details panel shows tags, aliases, and properties. **Edit properties** edits
 <br>
 
 Opening a vault restores its tabs, cursor and scroll positions, collapsed folders, and split editor. A split shares the original note's source buffer and undo history, so you can keep one note in the split while selecting another tab to compare them.
+
+Drag a tab left or right to rearrange notes, graphs, Bases, and canvases. The tab briefly fades into place when dropped, and the new order is saved for the vault. The animation follows the desktop's animation setting.
 
 </details>
 
@@ -307,7 +315,7 @@ The gear icon at the bottom-left opens **Settings**, with a category sidebar and
 | Category | Options |
 | --- | --- |
 | Appearance | Dark, Light, or Lights Out theme; interface font size; text font family; text size |
-| Editor | Readable line length, writing column width, line wrapping, list continuation on Enter |
+| Editor | Readable line length, writing column width, line wrapping, list continuation on Enter, slash commands (`/`), Vim keybindings |
 
 Changes apply immediately to open notes and future tabs. **Restore defaults** resets everything. Both sidebars open and close with a short slide transition that preserves splitter widths and respects GTK's system animation preference.
 
@@ -346,11 +354,12 @@ Changes apply immediately to open notes and future tabs. **Restore defaults** re
 | --- | --- |
 | <kbd>Ctrl</kbd>+<kbd>Z</kbd> | Undo |
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> | Redo |
-| <kbd>Ctrl</kbd>+<kbd>B</kbd> | Toggle bold |
-| <kbd>Ctrl</kbd>+<kbd>I</kbd> | Toggle italics |
+| <kbd>Ctrl</kbd>+<kbd>B</kbd> / <kbd>Ctrl</kbd>+<kbd>I</kbd> | Toggle bold / italics |
+| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>X</kbd> | Toggle highlight / strikethrough |
 | <kbd>Ctrl</kbd>+<kbd>K</kbd> | Insert a link to a URL or note |
-| <kbd>Ctrl</kbd>+<kbd>F</kbd> | Find in note |
-| <kbd>Ctrl</kbd>+<kbd>H</kbd> | Find and replace |
+| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>[</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>]</kbd> | Fold / unfold region at cursor |
+| <kbd>Ctrl</kbd>+<kbd>D</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd> | Add next / select all occurrences |
+| <kbd>Ctrl</kbd>+<kbd>F</kbd> / <kbd>Ctrl</kbd>+<kbd>H</kbd> | Find / find and replace |
 | <kbd>F3</kbd> or <kbd>Ctrl</kbd>+<kbd>G</kbd> | Next match |
 | <kbd>Shift</kbd>+<kbd>F3</kbd> or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> | Previous match |
 | <kbd>Ctrl</kbd>+<kbd>Home</kbd> | Reveal frontmatter |
@@ -359,7 +368,7 @@ Changes apply immediately to open notes and future tabs. **Restore defaults** re
 </tr>
 </table>
 
-Bold and italic toggle markers around a selection, or insert a paired set when nothing is selected.
+Bold, italic, highlight, and strikethrough toggle markers around a selection, or insert a paired set when nothing is selected.
 
 <p align="right"><a href="#top">back to top</a></p>
 
@@ -418,8 +427,8 @@ Tag nodes, custom color groups, and Obsidian's full graph filter syntax are not 
 
 - [x] **Runnable storage prototype.** Open a vault, edit, navigate links, search, verify changes on disk.
 - [ ] **Compatibility evidence.** Shared fixtures run against a pinned Obsidian version, with machine-readable diffs.
-- [ ] **Daily editing.** Final editor choice, structured properties, saved-version history, incremental indexing.
-- [ ] **Core feature parity.** Canvas, templates, daily notes, full search behavior, fixture-based acceptance checks.
+- [x] **Daily editing.** Rich live-preview widgets, table editor, folding, slash commands, multi-cursor, optional Vim mode, structured properties, saved-version history, incremental indexing.
+- [x] **Core feature parity.** Canvas, templates, daily notes, bases, slides, format converter, section/block transclusion, exact anchors, OFM syntax, Mermaid diagrams, and math environments.
 - [ ] **Linux release.** AppImage as the main download, a from-source executable build, license inventory, reproducible builds, large-vault budgets.
 
 ### Feature coverage
@@ -429,14 +438,16 @@ Tag nodes, custom color groups, and Obsidian's full graph filter syntax are not 
 | Open existing vaults in place | ![](https://img.shields.io/badge/-implemented-2ea44f?style=flat-square) |
 | Live preview, source, and reading modes | ![](https://img.shields.io/badge/-implemented-2ea44f?style=flat-square) |
 | Undo/redo, find/replace, formatting commands | ![](https://img.shields.io/badge/-implemented-2ea44f?style=flat-square) |
+| Folding, slash commands, multi-cursor, Vim mode | ![](https://img.shields.io/badge/-implemented-2ea44f?style=flat-square) |
+| Interactive table editor and OFM syntax (`==`, `%%`, `~~`) | ![](https://img.shields.io/badge/-implemented-2ea44f?style=flat-square) |
 | Wikilinks, backlinks, aliases, rename with link updates | ![](https://img.shields.io/badge/-implemented-2ea44f?style=flat-square) |
+| Heading and block links, `#`/`#^` completion, hover previews | ![](https://img.shields.io/badge/-implemented-2ea44f?style=flat-square) |
+| Attachments, whole-note, section, and block transclusion | ![](https://img.shields.io/badge/-implemented-2ea44f?style=flat-square) |
+| Callouts, tables, footnotes, math, diagrams, media cards | ![](https://img.shields.io/badge/-implemented-2ea44f?style=flat-square) |
 | Search, quick switcher, command palette | ![](https://img.shields.io/badge/-implemented-2ea44f?style=flat-square) |
 | Tabs, splits, and workspace restore | ![](https://img.shields.io/badge/-implemented-2ea44f?style=flat-square) |
 | Atomic writes, autosave, crash recovery drafts | ![](https://img.shields.io/badge/-implemented-2ea44f?style=flat-square) |
 | Graph and local graph | ![](https://img.shields.io/badge/-implemented-2ea44f?style=flat-square) |
-| Callouts, tables, footnotes, math | ![](https://img.shields.io/badge/-partial-d29922?style=flat-square) mathtext subset, no diagrams |
-| Attachments and transclusion | ![](https://img.shields.io/badge/-partial-d29922?style=flat-square) whole-note embeds only |
-| Heading and block links | ![](https://img.shields.io/badge/-partial-d29922?style=flat-square) approximate anchors |
 | Outline, templates, daily notes, bookmarks | ![](https://img.shields.io/badge/-implemented-2ea44f?style=flat-square) |
 | Saved-version history, unlinked mentions | ![](https://img.shields.io/badge/-implemented-2ea44f?style=flat-square) |
 | Canvas (JSON Canvas) | ![](https://img.shields.io/badge/-implemented-2ea44f?style=flat-square) |
@@ -452,13 +463,13 @@ The full matrix and acceptance gates live in [**docs/compatibility.md**](docs/co
 <summary><b>Read before trusting it with a real vault</b></summary>
 <br>
 
-- **Durability.** Recovery keeps the latest unsaved draft, not a history of saved versions. Save checks reduce accidental overwrites but cannot lock out unrelated programs, and a narrow race remains between the final comparison and atomic replacement. Hard links, extended attributes, file ownership, and arbitrary mixed line endings are not preserved as a compatibility contract.
-- **Rendering.** Live formatting handles a subset of CommonMark; richer media and block rendering use Reading mode. Math uses Matplotlib's mathtext rather than a full LaTeX engine, and unsupported expressions display their source with a message. Note embeds show whole notes; section and block transclusion are incomplete.
-- **Links and search.** Heading and block navigation uses a text match rather than Obsidian's full anchor rules. Link resolution is case-sensitive and reports ambiguous basenames and aliases. Search supports the documented filters, not every Obsidian query operator.
+- **Durability.** Crash recovery keeps the latest unsaved draft, and saved-version history records snapshots on content-changing saves under `XDG_STATE_HOME/libre-vault/history`. Save checks reduce accidental overwrites but cannot lock out unrelated programs, and a narrow race remains between the final comparison and atomic replacement. Hard links, extended attributes, file ownership, and arbitrary mixed line endings are not preserved as a compatibility contract.
+- **Rendering.** Math uses Matplotlib's mathtext rather than a full LaTeX engine; common macros and multi-line environments (`aligned`, `align`, `gather`, `cases`, `matrix`, `pmatrix`, `bmatrix`) are expanded before rendering, and unsupported expressions display their source with a message. Mermaid fences draw flowcharts, sequence, state, and class diagrams in Reading and live preview; other diagram syntax is shown as a source card. Local audio and video attachments render as media cards with external-player controls.
+- **Links and search.** Link resolution is case-sensitive and reports ambiguous basenames and aliases. Search supports the documented filters, not every Obsidian query operator.
 - **Files.** Symbolic links, dotfiles, and hidden folders are excluded from browsing. Non-UTF-8 files are left unchanged and report an error when opened.
 - **Scale.** Filesystem notifications update changed notes and subtrees without periodic full-vault reads, but initial indexing, explicit rescans, and multi-file organization still scan the vault. Large-vault latency has not been optimized.
 - **Moves.** Multi-file moves use revision checks and roll back after ordinary failures, but are not a crash-atomic transaction. Interrupted moves keep original rewritten-note bytes and a manifest under `.trash/.librevault-moves` for manual recovery.
-- **Not yet built.** Canvas, unlinked mentions, saved-version history, full search syntax, plugins, sync, mobile support, and published AppImage releases.
+- **Out of scope.** Third-party plugins, hosted sync, mobile support, and published AppImage releases.
 
 </details>
 

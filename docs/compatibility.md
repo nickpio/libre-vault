@@ -19,10 +19,10 @@ The compatibility specification starts with public documentation. These are docu
 | Open an existing vault in place | Implemented for visible UTF-8 Markdown files; hidden paths and symlinks excluded |
 | Preserve arbitrary frontmatter and `.obsidian` settings | Frontmatter preserved as source; `.obsidian` left untouched |
 | Source editor and reading view | Live preview, full source, and native GTK reading modes implemented |
-| Undo/redo, find/replace, formatting commands | Per-tab grouped history, literal source find/replace, bold/italic toggles, and Markdown link insertion implemented |
-| Obsidian-style live-preview editing | Basic headings, emphasis, code, quotes, and link labels; advanced rendering planned |
-| Wikilinks and local Markdown links | Implemented subset, including display text and relative Markdown paths |
-| Heading and block links | Approximate navigation; exact anchor rules planned |
+| Undo/redo, find/replace, formatting commands | Per-tab grouped history, literal source find/replace, bold/italic/highlight/strikethrough toggles, Markdown link insertion, interactive table editing, folding, slash commands, multi-cursor editing, and optional Vim mode implemented |
+| Obsidian-style live-preview editing | Headings, emphasis, OFM highlights (`==`), strikethrough (`~~`), comments (`%%`), fenced-code syntax coloring, quotes, link labels, plus live widget previews for images, note/subpath embeds, math, Mermaid diagrams, tables, and callouts implemented |
+| Wikilinks and local Markdown links | Implemented, including display text, relative Markdown paths, and Ctrl-hover preview popovers |
+| Heading and block links | Exact `#Heading`, `#Parent#Child`, and `#^block-id` anchor resolution plus `#` and `#^` editor autocomplete implemented |
 | Backlinks and outgoing links | Implemented; backlinks index saved files |
 | Search, quick switcher, command palette | Saved-file snippets, highlighted matches, field filters, fuzzy path/alias switcher, and command palette implemented |
 | Tabs and workspace layouts | Per-vault tab/cursor/scroll/folder restoration, named workspace profiles, and shared-buffer split editor implemented |
@@ -30,8 +30,8 @@ The compatibility specification starts with public documentation. These are docu
 | Atomic writes, external-change handling, recovery history | Atomic replacement, revision checks, autosave, unsaved crash drafts, and saved-version history snapshots implemented |
 | Properties, tags, aliases, unlinked mentions | YAML property editing, inline/frontmatter tags, alias resolution, filters, and unlinked mentions with one-click linking implemented |
 | Bulleted, ordered, and task lists | Rendered with nesting and clickable task checkboxes; Markdown preserved |
-| Callouts, tables, footnotes, math, diagrams | Reading renders tables, callouts, footnotes, and mathtext expressions; diagrams and full LaTeX support planned |
-| Attachment display and note transclusion | Attachment import/paste/drop, local images, PDF pages, and whole-note embeds implemented; section/block embeds incomplete |
+| Callouts, tables, footnotes, math, diagrams | Live preview and Reading render tables, collapsible callouts, clickable footnotes, mathtext with common environments, Mermaid flowcharts/sequence/state/class diagrams, safe inline HTML, fenced-code syntax highlighting with copy buttons, and audio/video cards; full LaTeX and the rest of Mermaid remain out of scope |
+| Attachment display and note transclusion | Attachment import/paste/drop, local images with `|width` and `|widthxheight` sizing, PDF pages (`#page=N`), audio/video media cards, and whole-note, `#Heading` section, and `#^block-id` block embeds implemented |
 | Graph and local graph | Global and local force-directed graph views implemented |
 | Canvas files | Implemented using JSON Canvas 1.0 (`.canvas`) |
 | Templates, daily notes, bookmarks, outline | Outline, templates, daily notes, unique notes, random note, bookmarks, Bases view, slides, and format converter implemented |

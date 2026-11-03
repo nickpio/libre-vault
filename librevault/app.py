@@ -5,6 +5,7 @@ import argparse
 from dataclasses import replace
 from datetime import datetime, timezone
 import difflib
+from io import BytesIO
 import math
 import posixpath
 from pathlib import Path
@@ -15,13 +16,25 @@ import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk, GdkPixbuf, Gio, GLib, Pango
 
+from .anchors import find_anchor_offset
 from .vault import Vault, VaultError, links
 from .mentions import link_mention
 from .monitor import VaultMonitor
 from .recovery import RecoveryStore, VersionHistoryStore
 from .formatting import markdown_layout
 from .editing import TextEdit, format_inline, list_enter, markdown_link
+from .tables import (
+    TableEditorDialog, cell_offset, format_table, table_add_column_left, table_add_column_right,
+    table_add_row_above, table_add_row_below, table_align_column, table_at, table_delete_column,
+    table_delete_row, table_from_model, table_move_column, table_move_row, table_next_cell,
+    table_previous_cell, table_sort_column,
+)
 from .history import BufferHistory
+from .folding import FoldState, compute_regions
+from .slash import SlashMenu, builtin_commands, filter_commands, trigger_at
+from .multicursor import (ExtraCursors, find_occurrences, next_occurrence, plan_backspace,
+                          plan_delete, plan_format, plan_insert, word_bounds)
+from .vim import Session, VimState, dispatch, display_selection, mode_label, retreat
 from .findbar import FindBar
 from .graph_ui import GraphView
 from .bases_ui import BasesView
@@ -35,9 +48,12 @@ from .shortcuts import APP_SHORTCUTS, EDITOR_SHORTCUTS
 from .settings import SettingsDialog
 from .preferences import PreferencesStore
 from .appearance import PALETTES, stylesheet
+from .syntax import TOKEN_STYLES
 from .panels import SlidingPanel
+from .tabs import WorkspaceTabs
 from .attachments import attachment_markdown, local_path, store_attachment
-from .reading import ReadingView
+from .mermaid import render_mermaid
+from .reading import ReadingView, pixbuf_bytes, scaled_pixbuf
 from .navigation_ui import EditorNavigation
 from .navigation import Location, NavigationHistory
 from .bookmarks import (BOOKMARK_ICONS, Bookmark, BookmarkManager, BookmarkStore, WorkspaceManager,
@@ -80,6 +96,53 @@ def count_summary(text, lines):
             f'{unit(lines, "line", "lines")}')
 
 
+def math_pixbuf(expression, color):
+    """Render one mathtext expression. Unsupported math returns None."""
+    if not expression or len(expression) > 400:
+        return None
+    try:
+        from matplotlib import rc_context
+        from matplotlib.mathtext import math_to_image
+        output = BytesIO()
+        with rc_context({'savefig.transparent': True}):
+            math_to_image('$' + expression + '$', output, dpi=140, format='png', color=color)
+        loader = GdkPixbuf.PixbufLoader()
+        loader.write(output.getvalue())
+        loader.close()
+        pixbuf = loader.get_pixbuf()
+    except Exception:
+        return None
+    if pixbuf is not None and pixbuf.get_width() > 640:
+        scale = 640 / pixbuf.get_width()
+        pixbuf = pixbuf.scale_simple(640, max(1, int(pixbuf.get_height() * scale)), GdkPixbuf.InterpType.BILINEAR)
+    return pixbuf
+
+
+def selection_overlaps(selected, start, end):
+    return bool(selected and start < selected[1] and end > selected[0])
+
+
+def line_hits(text, start, end, cursor):
+    """True when the cursor's line intersects the source span."""
+    if cursor < 0 or cursor > len(text) or end <= start:
+        return False
+    line_start = text.rfind('\n', 0, min(cursor, len(text))) + 1
+    line_end = text.find('\n', min(cursor, len(text)))
+    if line_end < 0:
+        line_end = len(text)
+    return line_start < end and line_end > start
+
+
+def shortcut_key(keyval):
+    """Compare accelerators even when Shift turns `[` into `{`."""
+    lowered = Gdk.keyval_to_lower(keyval)
+    if lowered == Gdk.KEY_braceleft:
+        return Gdk.KEY_bracketleft
+    if lowered == Gdk.KEY_braceright:
+        return Gdk.KEY_bracketright
+    return lowered
+
+
 def format_timestamp(value):
     try:
         parsed = datetime.fromisoformat(value)
@@ -104,6 +167,16 @@ class NotePane(Gtk.Box):
         self.list_tags = {}
         self.list_widgets = []
         self.image_widgets = []
+        self.diagram_widgets = []
+        self.diagrams = []
+        self._diagram_theme = None
+        self.math_widgets = []
+        self.embed_widgets = []
+        self.table_widgets = []
+        self.callout_widgets = []
+        self.math_spans = []
+        self.callouts = []
+        self.preview_theme = None
         self.position_source = None
         self.mode = 'live'
         self.buffer = text_buffer(note.text.replace('\r\n', '\n'))
@@ -115,7 +188,20 @@ class NotePane(Gtk.Box):
             'link': self.buffer.create_tag(None, foreground='#cccccc', underline=Pango.Underline.SINGLE),
             'completed': self.buffer.create_tag(None, foreground='#999999', strikethrough=True),
             'metadata': self.buffer.create_tag(None, foreground='#888888', family='monospace', size_points=10),
+            'highlight': self.buffer.create_tag(None, background='#5c4b16', foreground='#fff4cc'),
+            'strikethrough': self.buffer.create_tag(None, strikethrough=True),
+            'comment': self.buffer.create_tag(None, foreground='#999999'),
+            'underline': self.buffer.create_tag(None, underline=Pango.Underline.SINGLE),
+            'mark': self.buffer.create_tag(None, background='#6b5420', foreground='#fff8e0'),
+            'subscript': self.buffer.create_tag(None, rise=-3500, scale=0.8),
+            'superscript': self.buffer.create_tag(None, rise=5000, scale=0.8),
+            'kbd': self.buffer.create_tag(None, family='monospace', background='#1b1b1b'),
+            'table': self.buffer.create_tag(None, family='monospace'),
+            'math': self.buffer.create_tag(None, style=Pango.Style.ITALIC, family='serif'),
+            'callout': self.buffer.create_tag(None, weight=Pango.Weight.BOLD),
         }
+        for style in TOKEN_STYLES:
+            self.tags[style] = self.buffer.create_tag(None, foreground='#d5d5d5')
         for level, size in enumerate([25, 21, 18, 16, 14, 12], 1):
             self.tags[f'h{level}'] = self.buffer.create_tag(
                 None, size_points=size, weight=Pango.Weight.BOLD,
@@ -133,6 +219,19 @@ class NotePane(Gtk.Box):
         # Keep paragraph spacing above lines, where hit-testing starts at zero.
         self.editor.set_pixels_above_lines(5)
         self.editor.get_style_context().add_class('live-editor')
+        self.folds = FoldState()
+        self.fold_regions = None
+        self.fold_widgets = []
+        self._fold_signature = None
+        self.multicursor = ExtraCursors()
+        self.extra_carets = []
+        self._caret_signature = None
+        self.vim = VimState()
+        self._preserving_cursors = 0
+        self._applying_vim = False
+        self._applying_slash = False
+        self.occurrence_tag = self.buffer.create_tag(None, background='#3a5f8a')
+        self.slash = SlashMenu(self)
         self.editor.connect('size-allocate', self.size_editor)
         self.editor.connect('copy-clipboard', self.copy_selection)
         self.editor.connect('cut-clipboard', self.cut_selection)
@@ -175,7 +274,9 @@ class NotePane(Gtk.Box):
         self.pack_start(self.findbar, False, False, 0)
         self.reorder_child(self.findbar, 0)
         self.buffer_handlers = [self.buffer.connect('changed', self.changed),
-                                self.buffer.connect('mark-set', self.cursor_moved)]
+                                self.buffer.connect('mark-set', self.cursor_moved),
+                                self.buffer.connect('insert-text', self._remap_folds_insert),
+                                self.buffer.connect('delete-range', self._remap_folds_delete)]
         self.connect('destroy', self.cleanup)
         self.apply_preferences()
         self.render()
@@ -207,6 +308,7 @@ class NotePane(Gtk.Box):
         self.render()
         if mode == 'reading':
             self.findbar.close()
+            self.slash.dismiss()
             self.reading.refresh(force=True)
         else:
             self.reading.clear()
@@ -280,6 +382,22 @@ class NotePane(Gtk.Box):
         for name in ('quote', 'completed', 'metadata'):
             self.tags[name].set_property('foreground', colors['muted'])
         self.tags['link'].set_property('foreground', colors['soft'])
+        self.tags['highlight'].set_property('background', colors['highlight_bg'])
+        self.tags['highlight'].set_property('foreground', colors['highlight_fg'])
+        self.tags['comment'].set_property('foreground', colors['muted'])
+        for style in TOKEN_STYLES:
+            self.tags[style].set_property('foreground', colors[style])
+        if preferences.theme == 'light':
+            self.tags['mark'].set_property('background', '#ffe08a')
+            self.tags['mark'].set_property('foreground', '#1a1400')
+        else:
+            self.tags['mark'].set_property('background', '#6b5420')
+            self.tags['mark'].set_property('foreground', colors['bright'])
+        self.tags['kbd'].set_property('background', colors['code_bg'])
+        self.tags['kbd'].set_property('foreground', colors['ink'])
+        self.tags['callout'].set_property('foreground', colors['bright'])
+        self.tags['table'].set_property('size-points', max(8, preferences.editor_size - 1))
+        self.tags['math'].set_property('foreground', colors['bright'])
         for level, size in enumerate((25, 21, 18, 16, 14, 12), 1):
             self.tags[f'h{level}'].set_property('size-points', size * preferences.editor_size / 11)
             self.tags[f'h{level}'].set_property('foreground', colors['bright'])
@@ -288,8 +406,15 @@ class NotePane(Gtk.Box):
         self.update_list_margins()
         self.findbar.cached = None
         self.findbar.refresh()
+        self.occurrence_tag.set_property('background', colors['selection_bg'])
+        self._sync_vim_enabled()
+        if not self.window.preferences.slash_commands:
+            self.slash.dismiss()
         if self.mode == 'reading':
             self.reading.refresh()
+        # Math images use the theme color, so a theme change rebuilds them.
+        self.preview_theme = None
+        self.render()
 
     def size_editor(self, _, allocation):
         preferences = self.window.preferences
@@ -340,7 +465,10 @@ class NotePane(Gtk.Box):
             self.window.status.set_text(f'Could not write recovery draft: {error}')
         if self.dirty:
             self.autosave_source = GLib.timeout_add_seconds(2, self.autosave)
+        if not self._preserving_cursors and self.multicursor:
+            self.multicursor.clear()
         self.queue_format()
+        self.sync_slash_menu()
         if not self.window.in_destruction():
             self.window.update_counts()
 
@@ -355,17 +483,32 @@ class NotePane(Gtk.Box):
             self.window.status.set_text(f'Autosave failed: {error}')
         return False
 
-    def editor_key_press(self, _, event):
+    def editor_key_press(self, view, event):
         if hasattr(self, 'navigation') and self.navigation.key_press(event):
             return True
+        if self.slash.handle_key(event):
+            return True
         modifiers = event.state & Gtk.accelerator_get_default_mod_mask()
+        pressed = shortcut_key(event.keyval)
         for shortcut in EDITOR_SHORTCUTS:
             key, mask = Gtk.accelerator_parse(shortcut.accelerator)
-            if Gdk.keyval_to_lower(event.keyval) == Gdk.keyval_to_lower(key) and modifiers == mask:
+            if pressed == Gdk.keyval_to_lower(key) and modifiers == mask:
                 getattr(self, shortcut.handler)()
                 return True
-        if event.keyval == Gdk.KEY_Escape and self.findbar.get_visible():
-            self.findbar.close()
+        if event.keyval == Gdk.KEY_Escape:
+            if getattr(self, 'findbar', None) is not None and self.findbar.get_visible():
+                self.findbar.close()
+                return True
+            if self.multicursor:
+                self.clear_extra_cursors()
+                return True
+        if self._vim_key(event, modifiers):
+            return True
+        if self._multicursor_key(event, modifiers):
+            return True
+        if (event.keyval in (Gdk.KEY_Tab, Gdk.KEY_KP_Tab, Gdk.KEY_ISO_Left_Tab)
+                and not (modifiers & ~Gdk.ModifierType.SHIFT_MASK)
+                and not self.buffer.get_has_selection() and self.navigate_table(view, event)):
             return True
         if not self.window.preferences.continue_lists:
             return False
@@ -389,9 +532,24 @@ class NotePane(Gtk.Box):
         self.editor.scroll_mark_onscreen(self.buffer.get_insert())
         return True
 
-    def cursor_moved(self, _, __, mark):
-        if mark.get_name() in ('insert', 'selection_bound'):
-            self.queue_format()
+    def cursor_moved(self, _, iterator, mark):
+        if mark.get_name() not in ('insert', 'selection_bound'):
+            return
+        if not self._preserving_cursors and not self._applying_vim and self.multicursor:
+            self.multicursor.clear()
+        if (self.vim.active and not self._applying_vim and not self._preserving_cursors
+                and self.window.preferences.vim_mode and mark.get_name() == 'insert'):
+            offset = iterator.get_offset()
+            session = self.vim.session
+            if session.mode == 'normal' and offset != session.cursor:
+                self.vim.session = replace(session, cursor=offset, anchor=offset, pending='', column=None)
+                self.window.update_vim_status()
+            elif session.mode in ('visual', 'visual_line'):
+                self.vim.session = replace(session, mode='normal', cursor=offset, anchor=offset,
+                                           pending='', column=None)
+                self.window.update_vim_status()
+        self.queue_format()
+        self.sync_slash_menu()
 
     def queue_format(self):
         if self.format_source is None:
@@ -409,6 +567,18 @@ class NotePane(Gtk.Box):
         return False
 
     def cleanup(self, *_):
+        # The popover and gutter widgets hold callbacks back to this pane.
+        # Drop them before the widget tree finishes destroying, or the note
+        # stays reachable after its tab is closed.
+        self.slash.dismiss()
+        self.slash.popover.destroy()
+        self.slash.pane = None
+        for button in self.fold_widgets:
+            button.destroy()
+        self.fold_widgets = []
+        for marker in self.extra_carets:
+            marker.destroy()
+        self.extra_carets = []
         self.history.close()
         for handler in self.buffer_handlers:
             self.buffer.disconnect(handler)
@@ -424,23 +594,432 @@ class NotePane(Gtk.Box):
             GLib.source_remove(self.format_source)
             self.format_source = None
 
+    def _cursor(self):
+        return self.buffer.get_iter_at_mark(self.buffer.get_insert()).get_offset()
+
+    def _primary_range(self):
+        selection = self.buffer.get_selection_bounds()
+        if selection:
+            start, end = (item.get_offset() for item in selection)
+            return (min(start, end), max(start, end))
+        offset = self._cursor()
+        return offset, offset
+
+    def _current_regions(self):
+        text = self.text()
+        if self.fold_regions is not None and text == self.formatted_text:
+            return self.fold_regions
+        return compute_regions(text)
+
+    def _remap_folds_insert(self, _, location, text, length):
+        self.folds.apply_edit(location.get_offset(), 0, len(text))
+
+    def _remap_folds_delete(self, _, start, end):
+        self.folds.apply_edit(start.get_offset(), end.get_offset() - start.get_offset(), 0)
+
+    def _park_outside(self, region):
+        cursor = self._cursor()
+        if region is None or not (region.body_start <= cursor < region.body_end):
+            return
+        text = self.text()
+        target = region.body_start
+        if target > region.anchor and text[target - 1] == '\n':
+            target -= 1
+        self.buffer.place_cursor(self.buffer.get_iter_at_offset(max(region.anchor, target)))
+
+    def _park_outside_folded(self):
+        cursor = self._cursor()
+        covering = [region for region in self.fold_regions or []
+                    if region.anchor in self.folds.anchors and region.body_start <= cursor < region.body_end]
+        if covering:
+            outer = max(covering, key=lambda region: region.body_end - region.body_start)
+            self._park_outside(outer)
+
+    def fold_at_cursor(self):
+        regions = self._current_regions()
+        region = self.folds.fold_at(regions, self.text(), self._cursor())
+        if region is not None:
+            self._park_outside(region)
+            self.render()
+
+    def unfold_at_cursor(self):
+        regions = self._current_regions()
+        if self.folds.unfold_at(regions, self.text(), self._cursor()) is not None:
+            self.render()
+
+    def toggle_fold(self):
+        regions = self._current_regions()
+        before = set(self.folds.anchors)
+        region = self.folds.toggle_at(regions, self.text(), self._cursor())
+        if region is None:
+            return
+        if region.anchor in self.folds.anchors and region.anchor not in before:
+            self._park_outside(region)
+        self.render()
+
+    def toggle_fold_anchor(self, anchor):
+        region = next((item for item in self._current_regions() if item.anchor == anchor), None)
+        if region is None:
+            return
+        if anchor in self.folds.anchors:
+            self.folds.anchors.discard(anchor)
+        else:
+            self.folds.anchors.add(anchor)
+            self._park_outside(region)
+        self.render()
+        self.editor.grab_focus()
+
+    def fold_all_headings(self):
+        regions = self._current_regions()
+        self.fold_regions = regions
+        self.folds.fold_all_headings(regions)
+        self._park_outside_folded()
+        self.render()
+
+    def unfold_all(self):
+        if self.folds.anchors:
+            self.folds.unfold_all()
+            self.render()
+
+    def _concealed_ranges(self):
+        reveal = []
+        findbar = getattr(self, 'findbar', None)
+        if findbar is not None and findbar.get_visible():
+            reveal = [item.get_offset() for item in self.buffer.get_selection_bounds()]
+        return self.folds.concealed(self.fold_regions or [], reveal)
+
+    def _conceal(self, spans):
+        for start, end in spans:
+            self.buffer.apply_tag(self.hidden, self.buffer.get_iter_at_offset(start),
+                                  self.buffer.get_iter_at_offset(end))
+
+    def _highlight_occurrences(self):
+        for start, end in self.multicursor.ranges:
+            if end > start:
+                self.buffer.apply_tag(self.occurrence_tag, self.buffer.get_iter_at_offset(start),
+                                      self.buffer.get_iter_at_offset(end))
+
+    def _sync_fold_marks(self, concealed):
+        if self.mode == 'reading':
+            for button in self.fold_widgets:
+                button.hide()
+            return
+
+        def covered(offset):
+            return any(start <= offset < end for start, end in concealed)
+
+        visible = [region for region in self.fold_regions or [] if not covered(region.anchor)]
+        signature = tuple((region.anchor, region.anchor in self.folds.anchors, region.kind) for region in visible)
+        if signature != self._fold_signature:
+            self._fold_signature = signature
+            for button in self.fold_widgets:
+                button.destroy()
+            self.fold_widgets = []
+            for region in visible:
+                folded = region.anchor in self.folds.anchors
+                button = Gtk.Button(label='▸' if folded else '▾')
+                button.set_relief(Gtk.ReliefStyle.NONE)
+                button.set_can_focus(False)
+                button.get_style_context().add_class('fold-chevron')
+                button.fold_anchor = region.anchor
+                button.set_tooltip_text('Unfold section' if folded else 'Fold section')
+                button.get_accessible().set_name(button.get_tooltip_text())
+                button.connect('clicked', lambda _, anchor=region.anchor: self.toggle_fold_anchor(anchor))
+                self.editor.add_child_in_window(button, Gtk.TextWindowType.WIDGET, 0, 0)
+                button.show()
+                self.fold_widgets.append(button)
+
+    def _sync_extra_carets(self):
+        carets = [start for start, end in self.multicursor.ranges if start == end]
+        if carets != self._caret_signature:
+            self._caret_signature = list(carets)
+            for marker in self.extra_carets:
+                marker.destroy()
+            self.extra_carets = []
+            for offset in carets:
+                marker = Gtk.Label(label='▏')
+                marker.get_style_context().add_class('extra-cursor')
+                marker.caret_offset = offset
+                self.editor.add_child_in_window(marker, Gtk.TextWindowType.WIDGET, 0, 0)
+                marker.show()
+                self.extra_carets.append(marker)
+
+    def sync_slash_menu(self):
+        if self._applying_slash or not hasattr(self, 'slash'):
+            return
+        if not self.window.preferences.slash_commands or self.mode == 'reading':
+            self.slash.dismiss()
+            return
+        found = trigger_at(self.text(), self._cursor())
+        if not found:
+            self.slash.dismiss()
+            return
+        start, query = found
+        matches = filter_commands(builtin_commands(), query)
+        if not matches:
+            self.slash.dismiss()
+            return
+        self.slash.update(start, matches)
+
+    def apply_slash_command(self, command, start):
+        end = self._cursor()
+        text = self.text()
+        if start < 0 or end < start or end > len(text) or not text[start:end].startswith('/'):
+            return
+        self._applying_slash = True
+        try:
+            self.slash.dismiss()
+            if command.kind == 'template':
+                self.buffer.select_range(self.buffer.get_iter_at_offset(end),
+                                         self.buffer.get_iter_at_offset(start))
+                self.window.insert_template(pane=self)
+                return
+            cursor = min(start + len(command.snippet), max(start, start + command.cursor))
+            self.apply_edit(TextEdit(start, end, command.snippet), (cursor, cursor))
+        finally:
+            self._applying_slash = False
+        self.editor.grab_focus()
+
+    def clear_extra_cursors(self):
+        if not self.multicursor:
+            return
+        self.multicursor.clear()
+        self.render()
+
+    def _sorted_ranges(self):
+        primary = self._primary_range()
+        ordered = self.multicursor.combined(primary)
+        try:
+            index = ordered.index(primary)
+        except ValueError:
+            index = 0
+        return ordered, index
+
+    def add_next_occurrence(self):
+        text = self.text()
+        start, end = self._primary_range()
+        if start == end and not self.multicursor:
+            bounds = word_bounds(text, start)
+            if bounds is None:
+                return
+            self._preserving_cursors += 1
+            try:
+                self.buffer.select_range(self.buffer.get_iter_at_offset(bounds[1]),
+                                         self.buffer.get_iter_at_offset(bounds[0]))
+            finally:
+                self._preserving_cursors -= 1
+            self.render()
+            return
+        if start == end:
+            return
+        nxt = next_occurrence(find_occurrences(text, text[start:end]), self.multicursor.combined((start, end)))
+        if nxt is None:
+            return
+        self.multicursor.ranges.append(nxt)
+        self.render()
+
+    def select_all_occurrences(self):
+        text = self.text()
+        start, end = self._primary_range()
+        self._preserving_cursors += 1
+        try:
+            if start == end:
+                bounds = word_bounds(text, start)
+                if bounds is None:
+                    return
+                start, end = bounds
+                self.buffer.select_range(self.buffer.get_iter_at_offset(end),
+                                         self.buffer.get_iter_at_offset(start))
+        finally:
+            self._preserving_cursors -= 1
+        if start == end:
+            return
+        self.multicursor.ranges = [span for span in find_occurrences(text, text[start:end]) if span != (start, end)]
+        self.render()
+
+    def _apply_cursor_edits(self, edits, carets, primary_index, collapsed=True):
+        self._preserving_cursors += 1
+        self.history.break_group()
+        self.buffer.begin_user_action()
+        try:
+            for edit in edits:
+                if self.text()[edit.start:edit.end] != edit.replacement:
+                    point = self.buffer.get_iter_at_offset(edit.start)
+                    self.buffer.delete(point, self.buffer.get_iter_at_offset(edit.end))
+                    self.buffer.insert(point, edit.replacement)
+            points = [(caret, caret) for caret in carets] if collapsed else list(carets)
+            if not points:
+                return
+            primary_index = max(0, min(primary_index, len(points) - 1))
+            primary = points[primary_index]
+            self.multicursor.ranges = [item for index, item in enumerate(points) if index != primary_index]
+            self.buffer.select_range(self.buffer.get_iter_at_offset(primary[1]),
+                                     self.buffer.get_iter_at_offset(primary[0]))
+        finally:
+            self.buffer.end_user_action()
+            self._preserving_cursors -= 1
+        self.render()
+
+    def _multicursor_key(self, event, modifiers):
+        if not self.multicursor:
+            return False
+        if modifiers & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.MOD1_MASK | Gdk.ModifierType.SUPER_MASK):
+            return False
+        ranges, index = self._sorted_ranges()
+        if event.keyval == Gdk.KEY_BackSpace:
+            edits, carets = plan_backspace(self.text(), ranges)
+            self._apply_cursor_edits(edits, carets, index)
+            return True
+        if event.keyval in (Gdk.KEY_Delete, Gdk.KEY_KP_Delete):
+            edits, carets = plan_delete(self.text(), ranges)
+            self._apply_cursor_edits(edits, carets, index)
+            return True
+        if event.keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            edits, carets = plan_insert(ranges, '\n')
+            self._apply_cursor_edits(edits, carets, index)
+            return True
+        typed = event.string or ''
+        if not typed:
+            value = Gdk.keyval_to_unicode(event.keyval)
+            typed = chr(value) if value else ''
+        if typed and typed.isprintable():
+            edits, carets = plan_insert(ranges, typed)
+            self._apply_cursor_edits(edits, carets, index)
+            return True
+        return False
+
+    def _vim_key_name(self, event, modifiers):
+        control = Gdk.ModifierType.CONTROL_MASK
+        if modifiers & control:
+            extra = modifiers & ~control & ~Gdk.ModifierType.SHIFT_MASK
+            if extra == 0 and Gdk.keyval_to_lower(event.keyval) == Gdk.KEY_r:
+                return 'ctrl-r'
+            return None
+        if modifiers & (Gdk.ModifierType.MOD1_MASK | Gdk.ModifierType.SUPER_MASK | Gdk.ModifierType.META_MASK):
+            return None
+        if event.keyval == Gdk.KEY_Escape:
+            return 'Escape'
+        if event.keyval in (Gdk.KEY_BackSpace, Gdk.KEY_Delete, Gdk.KEY_KP_Delete, Gdk.KEY_Return,
+                            Gdk.KEY_KP_Enter, Gdk.KEY_Tab, Gdk.KEY_ISO_Left_Tab):
+            return 'swallow'
+        value = Gdk.keyval_to_unicode(event.keyval)
+        if not value or value < 32:
+            return None
+        return chr(value)
+
+    def _vim_point(self):
+        if self.vim.session.mode == 'insert':
+            return self._cursor()
+        return max(0, min(self.vim.session.cursor, len(self.text())))
+
+    def _show_vim_cursor(self):
+        text = self.text()
+        start, end = display_selection(text, self.vim.session)
+        start = max(0, min(start, len(text)))
+        end = max(0, min(end, len(text)))
+        if self.vim.session.cursor >= self.vim.session.anchor:
+            insert, bound = end, start
+        else:
+            insert, bound = start, end
+        self.buffer.select_range(self.buffer.get_iter_at_offset(insert),
+                                 self.buffer.get_iter_at_offset(bound))
+
+    def _apply_vim(self, outcome):
+        self._applying_vim = True
+        try:
+            if outcome.undo:
+                self.undo()
+                cursor = self._cursor()
+                self.vim.session = replace(outcome.session, mode='normal', pending='', cursor=cursor, anchor=cursor)
+            elif outcome.redo:
+                self.redo()
+                cursor = self._cursor()
+                self.vim.session = replace(outcome.session, mode='normal', pending='', cursor=cursor, anchor=cursor)
+            elif outcome.edit is not None:
+                self.vim.session = outcome.session
+                self.apply_edit(outcome.edit, (outcome.anchor, outcome.cursor))
+            else:
+                self.vim.session = outcome.session
+                self._show_vim_cursor()
+        finally:
+            self._applying_vim = False
+        self.window.update_vim_status()
+        if not self.in_destruction():
+            self.editor.scroll_mark_onscreen(self.buffer.get_insert())
+
+    def _vim_key(self, event, modifiers):
+        if not self.window.preferences.vim_mode or not self.vim.active:
+            return False
+        key = self._vim_key_name(event, modifiers)
+        if self.vim.session.mode == 'insert':
+            if key == 'Escape':
+                self._apply_vim(dispatch(self.text(), self._cursor(), self.vim.session, 'Escape'))
+                return True
+            return False
+        if key is None:
+            return False
+        if (key == '/' and not self.vim.session.pending and self.vim.session.mode == 'normal'
+                and self.window.preferences.slash_commands):
+            point = self._vim_point()
+            self.vim.session = replace(self.vim.session, mode='insert', pending='', cursor=point, anchor=point)
+            self.window.update_vim_status()
+            return False
+        self._apply_vim(dispatch(self.text(), self._vim_point(), self.vim.session, key))
+        return True
+
+    def _sync_vim_enabled(self):
+        enabled = bool(self.window.preferences.vim_mode)
+        if enabled and not self.vim.active:
+            landed = retreat(self.text(), self._cursor())
+            self.vim.active = True
+            self.vim.session = Session(mode='normal', cursor=landed, anchor=landed)
+            self._applying_vim = True
+            try:
+                self.buffer.place_cursor(self.buffer.get_iter_at_offset(landed))
+            finally:
+                self._applying_vim = False
+        elif not enabled and self.vim.active:
+            self.vim.active = False
+            self.vim.session = Session(mode='insert')
+        if not self.window.in_destruction():
+            self.window.update_vim_status()
+
     def render(self):
         text = self.text()
-        if text != self.formatted_text:
+        theme = self.window.preferences.theme
+        if text != self.formatted_text or theme != self.preview_theme:
             layout = markdown_layout(text)
             self.spans, self.items, self.headings = layout.spans, layout.items, layout.headings
+            self.diagrams = layout.diagrams
+            self.math_spans, self.callouts = layout.math, layout.callouts
             self.formatted_text = text
+            self.preview_theme = theme
+            self.fold_regions = compute_regions(text, layout)
+            self.folds.prune(self.fold_regions)
             self.rebuild_list_widgets()
             self.rebuild_image_widgets(layout.images)
+            self.rebuild_diagram_widgets(layout.diagrams)
+            self.rebuild_preview_widgets(layout)
+        else:
+            if self._diagram_theme != self.window.preferences.theme:
+                self.rebuild_diagram_widgets(self.diagrams)
+            if self.fold_regions is None:
+                self.fold_regions = compute_regions(text)
+                self.folds.prune(self.fold_regions)
         start, end = self.buffer.get_bounds()
-        for tag in [*self.tags.values(), *self.list_tags.values(), self.hidden,
-                    *(entry[3] for entry in self.image_widgets)]:
+        spacing = [*(entry[3] for entry in self.image_widgets),
+                   *(entry[3] for entry in self.diagram_widgets),
+                   *(entry[3] for entry in self.preview_entries())]
+        for tag in [*self.tags.values(), *self.list_tags.values(), self.hidden, self.occurrence_tag, *spacing]:
             self.buffer.remove_tag(tag, start, end)
+        concealed = self._concealed_ranges()
         if self.mode == 'source':
-            for _, widget in self.list_widgets:
-                widget.hide()
-            for _, _, widget, tag in self.image_widgets:
-                widget.hide()
+            self._conceal(concealed)
+            self._highlight_occurrences()
+            self._sync_fold_marks(concealed)
+            self._sync_extra_carets()
+            self.hide_source_widgets()
+            self.queue_positions()
             return
         if self.mode == 'reading':
             self.reading.refresh()
@@ -456,11 +1035,16 @@ class NotePane(Gtk.Box):
             right = self.buffer.get_iter_at_offset(span.end)
             if span.style == 'syntax':
                 on_line = span.start <= line_end and span.end > line_start
-                in_selection = selected and span.start < selected[1] and span.end > selected[0]
-                if not on_line and not in_selection:
+                in_selection = selection_overlaps(selected, span.start, span.end)
+                if not on_line and not in_selection and not self.syntax_kept_visible(span, cursor, selected):
                     self.buffer.apply_tag(self.hidden, left, right)
-            else:
+            elif span.style in self.tags:
                 self.buffer.apply_tag(self.tags[span.style], left, right)
+
+        concealed_offsets = self._concealed_ranges()
+
+        def covered(offset):
+            return any(span_start <= offset < span_end for span_start, span_end in concealed_offsets)
 
         for item, widget in self.list_widgets:
             left = self.buffer.get_iter_at_offset(item.start)
@@ -469,24 +1053,47 @@ class NotePane(Gtk.Box):
             self.buffer.apply_tag(self.list_tags[item.depth], left, end)
             # Lists stay rendered on the active line; a selection can expose
             # their source markers for deliberate Markdown editing.
-            reveal = selected and item.start < selected[1] and item.content_start > selected[0]
-            widget.set_visible(not reveal)
-            if not reveal:
-                self.buffer.apply_tag(self.hidden, left, content)
+            if covered(item.start):
+                widget.hide()
+            else:
+                reveal = selected and item.start < selected[1] and item.content_start > selected[0]
+                widget.set_visible(not reveal)
+                if not reveal:
+                    self.buffer.apply_tag(self.hidden, left, content)
             if item.checked:
                 line_end = text.find('\n', item.content_start)
                 stop = len(text) if line_end < 0 else line_end
                 self.buffer.apply_tag(self.tags['completed'], content, self.buffer.get_iter_at_offset(stop))
         for image_start, image_end, widget, tag in self.image_widgets:
+            if covered(image_start):
+                widget.hide()
+                continue
             editing_image = image_start <= cursor < image_end
-            in_selection = selected and image_start < selected[1] and image_end > selected[0]
+            in_selection = selection_overlaps(selected, image_start, image_end)
             visible = self.mode == 'live' and not editing_image and not in_selection
             widget.set_visible(bool(visible))
             if visible:
-                left = self.buffer.get_iter_at_offset(image_start)
-                right = self.buffer.get_iter_at_offset(image_end)
+                self.conceal_block(image_start, image_end, tag)
+        for diagram_start, diagram_end, widget, tag in self.diagram_widgets:
+            if covered(diagram_start):
+                widget.hide()
+                continue
+            editing_diagram = diagram_start <= cursor < diagram_end
+            in_selection = selected and diagram_start < selected[1] and diagram_end > selected[0]
+            visible = self.mode == 'live' and not editing_diagram and not in_selection
+            widget.set_visible(bool(visible))
+            if visible:
+                newline = text.find('\n', diagram_start)
+                first_end = diagram_end if newline < 0 or newline >= diagram_end else newline + 1
+                left = self.buffer.get_iter_at_offset(diagram_start)
+                right = self.buffer.get_iter_at_offset(diagram_end)
                 self.buffer.apply_tag(self.hidden, left, right)
-                self.buffer.apply_tag(tag, left, right)
+                self.buffer.apply_tag(tag, left, self.buffer.get_iter_at_offset(first_end))
+        self.preview_blocks(text, cursor, selected, covered)
+        self._conceal(concealed_offsets)
+        self._highlight_occurrences()
+        self._sync_fold_marks(concealed_offsets)
+        self._sync_extra_carets()
         self.queue_positions()
 
     def rebuild_image_widgets(self, images):
@@ -494,22 +1101,310 @@ class NotePane(Gtk.Box):
             widget.destroy()
             self.buffer.get_tag_table().remove(tag)
         self.image_widgets.clear()
-        for start, end, target in images:
+        for start, end, target, width, height in images:
             try:
                 path = local_path(self.window.vault, self.note.path, target)
                 info = GdkPixbuf.Pixbuf.get_file_info(str(path))
                 if not info or not info[1] or not info[2]:
                     continue
-                scale = min(1, 600 / info[1], 360 / info[2])
-                pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(
-                    str(path), max(1, int(info[1] * scale)), max(1, int(info[2] * scale)), True)
-            except (OSError, GLib.Error, VaultError):
+
+                def fallback(path=path, info=info):
+                    scale = min(1, 600 / info[1], 360 / info[2])
+                    return GdkPixbuf.Pixbuf.new_from_file_at_scale(
+                        str(path), max(1, int(info[1] * scale)), max(1, int(info[2] * scale)), True)
+
+                pixbuf = scaled_pixbuf(path, width, height, fallback)
+            except (OSError, GLib.Error, VaultError, ValueError):
                 continue
             widget = Gtk.Image.new_from_pixbuf(pixbuf)
             widget.set_tooltip_text('Place the cursor inside the image Markdown to edit it')
             self.editor.add_child_in_window(widget, Gtk.TextWindowType.WIDGET, 0, 0)
             tag = self.buffer.create_tag(None, pixels_above_lines=pixbuf.get_height() + 8)
             self.image_widgets.append((start, end, widget, tag))
+
+    def rebuild_diagram_widgets(self, diagrams):
+        for _, _, widget, tag in self.diagram_widgets:
+            widget.destroy()
+            self.buffer.get_tag_table().remove(tag)
+        self.diagram_widgets.clear()
+        self._diagram_theme = self.window.preferences.theme
+        colors = PALETTES[self._diagram_theme]
+        for start, end, source in diagrams:
+            try:
+                rendered = render_mermaid(source, colors)
+                pixbuf = pixbuf_bytes(rendered.png)
+            except (OSError, ValueError, RuntimeError):
+                continue
+            widget = Gtk.Image.new_from_pixbuf(pixbuf)
+            widget.set_tooltip_text('Place the cursor inside the Mermaid block to edit it')
+            self.editor.add_child_in_window(widget, Gtk.TextWindowType.WIDGET, 0, 0)
+            tag = self.buffer.create_tag(None, pixels_above_lines=pixbuf.get_height() + 12)
+            self.diagram_widgets.append((start, end, widget, tag))
+
+    def preview_entries(self):
+        return [*self.math_widgets, *self.embed_widgets, *self.table_widgets, *self.callout_widgets]
+
+    def hide_source_widgets(self):
+        for _, widget in self.list_widgets:
+            widget.hide()
+        for _, _, widget, _tag in (*self.image_widgets, *self.diagram_widgets, *self.preview_entries()):
+            widget.hide()
+
+    def clear_preview_list(self, entries):
+        for _, _, widget, tag in entries:
+            widget.destroy()
+            self.buffer.get_tag_table().remove(tag)
+        entries.clear()
+
+    def attach_preview(self, widget, anchor):
+        widget.set_halign(Gtk.Align.START)
+        self.editor.add_child_in_window(widget, Gtk.TextWindowType.WIDGET, 0, 0)
+        widget.show_all()
+        height = max(widget.get_preferred_height().natural_height, 18)
+        widget.hide()
+        widget.set_no_show_all(True)
+        tag = self.buffer.create_tag(None, pixels_above_lines=height + 8)
+        return anchor, widget, tag
+
+    def rebuild_preview_widgets(self, layout):
+        for entries in (self.math_widgets, self.embed_widgets, self.table_widgets, self.callout_widgets):
+            self.clear_preview_list(entries)
+        text = self.formatted_text
+        color = PALETTES[self.window.preferences.theme]['bright']
+        for item in layout.math:
+            if not self.math_uses_widget(text, item):
+                continue
+            widget = self.math_preview(item.expression, color)
+            anchor, widget, tag = self.attach_preview(widget, item.start)
+            self.math_widgets.append((item.start, item.end, widget, tag))
+        for embed in layout.embeds:
+            widget = self.embed_preview(embed)
+            if widget is None:
+                continue
+            _anchor, widget, tag = self.attach_preview(widget, embed.start)
+            self.embed_widgets.append((embed.start, embed.end, widget, tag))
+        for table in layout.tables:
+            _anchor, widget, tag = self.attach_preview(self.table_preview(table), table.start)
+            self.table_widgets.append((table.start, table.end, widget, tag))
+        for callout in layout.callouts:
+            _anchor, widget, tag = self.attach_preview(self.callout_preview(callout), callout.start)
+            self.callout_widgets.append((callout.start, callout.end, widget, tag))
+
+    def math_uses_widget(self, text, item):
+        if '\n' in text[item.start:item.end]:
+            return True
+        line_start = text.rfind('\n', 0, item.start) + 1
+        line_end = text.find('\n', item.end)
+        if line_end < 0:
+            line_end = len(text)
+        return not text[line_start:item.start].strip() and not text[item.end:line_end].strip()
+
+    def math_preview(self, expression, color):
+        pixbuf = math_pixbuf(expression, color)
+        if pixbuf is None:
+            label = Gtk.Label(label=expression or 'Math', xalign=0)
+            label.set_tooltip_text('This expression stays in the note. Move the cursor here to edit it.')
+            label.get_style_context().add_class('math-preview')
+            return label
+        image = Gtk.Image.new_from_pixbuf(pixbuf)
+        image.set_tooltip_text(expression)
+        image.get_style_context().add_class('math-preview')
+        return image
+
+    def embed_preview(self, embed):
+        if embed.kind == 'image':
+            image = self.preview_image(embed.target)
+            if image is not None:
+                image.set_tooltip_text('Place the cursor on this line to edit the embed')
+                return image
+        frame = Gtk.Frame()
+        frame.get_style_context().add_class('live-embed')
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        box.set_border_width(8)
+        title = Gtk.Label(label=embed.target, xalign=0)
+        title.get_style_context().add_class('live-embed-title')
+        excerpt = Gtk.Label(label=self.embed_excerpt(embed.target), xalign=0)
+        excerpt.set_line_wrap(True)
+        excerpt.set_max_width_chars(72)
+        excerpt.get_style_context().add_class('muted')
+        box.pack_start(title, False, False, 0)
+        box.pack_start(excerpt, False, False, 0)
+        frame.add(box)
+        frame.set_tooltip_text('Place the cursor on this line to edit the embed')
+        if embed.kind == 'note':
+            target = embed.target
+            frame.connect('button-press-event', lambda *_args, target=target: self.open_embed(target))
+        return frame
+
+    def preview_image(self, target):
+        try:
+            path = local_path(self.window.vault, self.note.path, target.split('#', 1)[0])
+            info = GdkPixbuf.Pixbuf.get_file_info(str(path))
+            if not info or not info[1] or not info[2]:
+                return None
+            scale = min(1, 600 / info[1], 360 / info[2])
+            pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(
+                str(path), max(1, int(info[1] * scale)), max(1, int(info[2] * scale)), True)
+        except (OSError, GLib.Error, VaultError):
+            return None
+        return Gtk.Image.new_from_pixbuf(pixbuf)
+
+    def embed_excerpt(self, target):
+        note_target = target.split('#', 1)[0].split('|', 1)[0].strip()
+        try:
+            candidates = self.window.vault.resolve(self.note.path, note_target)
+        except (OSError, VaultError):
+            return 'Embedded note'
+        if len(candidates) != 1:
+            return 'Unresolved embed' if not candidates else 'Several notes match this embed'
+        relative = candidates[0]
+        try:
+            opened = self.window.panes.get(relative)
+            source = opened.text() if opened is not None else self.window.vault.read(relative).text
+        except (OSError, VaultError, AttributeError):
+            return relative
+        body = source
+        if body.startswith('---\n'):
+            end = re.search(r'\n(?:---|\.\.\.)\s*\n', body)
+            if end:
+                body = body[end.end():]
+        for line in body.splitlines():
+            stripped = line.strip().lstrip('#').strip()
+            if stripped and not stripped.startswith('![['):
+                return stripped[:80]
+        return 'Empty note'
+
+    def open_embed(self, target):
+        self.window.follow_link(self.note.path, target)
+        return True
+
+    def table_preview(self, table):
+        grid = Gtk.Grid(column_spacing=14, row_spacing=4)
+        grid.get_style_context().add_class('live-table')
+        grid.set_tooltip_text('Place the cursor inside the table to edit the Markdown')
+        shown = table.rows[:12]
+        for column, header in enumerate(table.headers):
+            label = Gtk.Label(label=self.cell_label(header), xalign=self.cell_xalign(table.alignments[column]))
+            label.get_style_context().add_class('live-table-heading')
+            grid.attach(label, column, 0, 1, 1)
+        for row_index, row in enumerate(shown, 1):
+            for column, cell in enumerate(row):
+                alignment = table.alignments[column] if column < len(table.alignments) else 'left'
+                label = Gtk.Label(label=self.cell_label(cell), xalign=self.cell_xalign(alignment))
+                grid.attach(label, column, row_index, 1, 1)
+        if len(table.rows) > len(shown):
+            more = Gtk.Label(label=f'{len(table.rows) - len(shown)} more rows', xalign=0)
+            more.get_style_context().add_class('muted')
+            grid.attach(more, 0, len(shown) + 1, max(len(table.headers), 1), 1)
+        return grid
+
+    def callout_preview(self, callout):
+        box = Gtk.Box(spacing=8)
+        box.get_style_context().add_class('callout')
+        box.get_style_context().add_class('callout-' + callout.kind.lower())
+        kind = Gtk.Label(label=callout.kind.upper())
+        kind.get_style_context().add_class('callout-kind')
+        box.pack_start(kind, False, False, 0)
+        if callout.title:
+            title = Gtk.Label(label=callout.title, xalign=0)
+            title.get_style_context().add_class('callout-title')
+            box.pack_start(title, False, False, 0)
+        box.set_tooltip_text('Place the cursor in the callout to edit it')
+        return box
+
+    def cell_label(self, text):
+        return re.sub(r'\\([\\|])', r'\1', text)
+
+    def cell_xalign(self, alignment):
+        return {'center': 0.5, 'right': 1}.get(alignment, 0)
+
+    def syntax_kept_visible(self, span, cursor, selected):
+        """Keep math delimiters visible on every line of a math block being edited."""
+        for item in self.math_spans:
+            if not (item.start <= span.start and span.end <= item.end):
+                continue
+            if item.start <= cursor < item.end or selection_overlaps(selected, item.start, item.end):
+                return True
+            if any(start == item.start for start, _end, _widget, _tag in self.math_widgets):
+                if line_hits(self.formatted_text, item.start, item.end, cursor):
+                    return True
+        return False
+
+    def conceal_block(self, start, end, tag, first_line_only=False):
+        text = self.formatted_text
+        hide_end = end
+        newline = text.find('\n', start)
+        if first_line_only:
+            hide_end = newline if 0 <= newline < end else end
+        elif hide_end > start and text[hide_end - 1:hide_end] == '\n':
+            hide_end -= 1
+        spacing_end = hide_end
+        if 0 <= newline < hide_end:
+            spacing_end = newline
+        if hide_end > start:
+            self.buffer.apply_tag(self.hidden, self.buffer.get_iter_at_offset(start),
+                                  self.buffer.get_iter_at_offset(hide_end))
+        if spacing_end > start:
+            self.buffer.apply_tag(tag, self.buffer.get_iter_at_offset(start),
+                                  self.buffer.get_iter_at_offset(spacing_end))
+
+    def preview_blocks(self, text, cursor, selected, covered=lambda _offset: False):
+        if self.mode != 'live':
+            self.hide_source_widgets()
+            return
+        for start, end, widget, tag in self.table_widgets:
+            if covered(start):
+                widget.hide()
+                continue
+            revealed = line_hits(text, start, end, cursor) or selection_overlaps(selected, start, end)
+            widget.set_visible(not revealed)
+            if not revealed:
+                self.conceal_block(start, end, tag)
+        for start, end, widget, tag in self.embed_widgets:
+            if covered(start):
+                widget.hide()
+                continue
+            revealed = line_hits(text, start, end, cursor) or selection_overlaps(selected, start, end)
+            widget.set_visible(not revealed)
+            if not revealed:
+                self.conceal_block(start, end, tag)
+        for start, end, widget, tag in self.callout_widgets:
+            if covered(start):
+                widget.hide()
+                continue
+            revealed = line_hits(text, start, end, cursor) or selection_overlaps(selected, start, end)
+            widget.set_visible(not revealed)
+            if not revealed:
+                self.conceal_block(start, end, tag, first_line_only=True)
+        widget_starts = {start for start, _end, _widget, _tag in self.math_widgets}
+        for item in self.math_spans:
+            opener = 2 if text.startswith('$$', item.start) else 1
+            closer = 2 if item.end - item.start >= 4 and text.startswith('$$', max(item.end - 2, item.start)) else 1
+            if item.start in widget_starts:
+                start, end, widget, tag = next(entry for entry in self.math_widgets if entry[0] == item.start)
+                if covered(start):
+                    widget.hide()
+                    continue
+                revealed = line_hits(text, start, end, cursor) or selection_overlaps(selected, item.start, item.end)
+                widget.set_visible(not revealed)
+                if revealed:
+                    self.buffer.remove_tag(self.hidden, self.buffer.get_iter_at_offset(start),
+                                           self.buffer.get_iter_at_offset(end))
+                else:
+                    self.conceal_block(start, end, tag)
+                continue
+            widget = None
+            revealed = item.start <= cursor < item.end or selection_overlaps(selected, item.start, item.end)
+            if revealed:
+                self.buffer.remove_tag(self.hidden, self.buffer.get_iter_at_offset(item.start),
+                                       self.buffer.get_iter_at_offset(item.start + opener))
+                self.buffer.remove_tag(self.hidden, self.buffer.get_iter_at_offset(item.end - closer),
+                                       self.buffer.get_iter_at_offset(item.end))
+            else:
+                self.buffer.apply_tag(self.hidden, self.buffer.get_iter_at_offset(item.start),
+                                     self.buffer.get_iter_at_offset(item.start + opener))
+                self.buffer.apply_tag(self.hidden, self.buffer.get_iter_at_offset(item.end - closer),
+                                     self.buffer.get_iter_at_offset(item.end))
 
     def rebuild_list_widgets(self):
         focused = next((item.task_offset for item, widget in self.list_widgets if widget.has_focus()), None)
@@ -581,7 +1476,7 @@ class NotePane(Gtk.Box):
             y += (rect.height - height) // 2
             widget.set_child_visible(y >= 0 and y + height <= self.editor.get_allocated_height())
             self.editor.move_child(widget, x - width - 8, y)
-        for start, _, widget, _ in self.image_widgets:
+        for start, _, widget, _ in (*self.image_widgets, *self.diagram_widgets, *self.preview_entries()):
             if not widget.get_visible():
                 continue
             position = self.buffer.get_iter_at_offset(start)
@@ -589,6 +1484,24 @@ class NotePane(Gtk.Box):
             x, y = self.editor.buffer_to_window_coords(Gtk.TextWindowType.WIDGET, rect.x, rect.y)
             height = widget.get_preferred_height().natural_height
             self.editor.move_child(widget, x, y - height - 4)
+        for button in self.fold_widgets:
+            if not button.get_visible():
+                continue
+            position = self.buffer.get_iter_at_offset(button.fold_anchor)
+            rect = self.editor.get_iter_location(position)
+            x, y = self.editor.buffer_to_window_coords(Gtk.TextWindowType.WIDGET, rect.x, rect.y)
+            width = button.get_preferred_width().natural_width
+            height = button.get_preferred_height().natural_height
+            y += max(0, (rect.height - height) // 2)
+            button.set_child_visible(y >= 0 and y + height <= self.editor.get_allocated_height())
+            self.editor.move_child(button, max(0, x - width - 2), y)
+        for marker in self.extra_carets:
+            position = self.buffer.get_iter_at_offset(marker.caret_offset)
+            rect = self.editor.get_iter_location(position)
+            x, y = self.editor.buffer_to_window_coords(Gtk.TextWindowType.WIDGET, rect.x, rect.y)
+            height = marker.get_preferred_height().natural_height
+            marker.set_child_visible(y >= 0 and y + height <= self.editor.get_allocated_height())
+            self.editor.move_child(marker, x, y)
         return False
 
     def save(self):
@@ -634,6 +1547,12 @@ class NotePane(Gtk.Box):
                 self.buffer.end_user_action()
 
     def emphasize(self, marker):
+        ranges, index = self._sorted_ranges()
+        if len(ranges) > 1:
+            edits, selections = plan_format(self.text(), ranges, marker)
+            self._apply_cursor_edits(edits, selections, index, collapsed=False)
+            self.editor.grab_focus()
+            return
         selection = self.buffer.get_selection_bounds()
         if selection:
             start, end = (it.get_offset() for it in selection)
@@ -648,6 +1567,12 @@ class NotePane(Gtk.Box):
 
     def italic(self):
         self.emphasize('*')
+
+    def highlight(self):
+        self.emphasize('==')
+
+    def strikethrough(self):
+        self.emphasize('~~')
 
     def insert_template(self):
         self.window.insert_template(pane=self)
@@ -690,6 +1615,94 @@ class NotePane(Gtk.Box):
         finally:
             dialog.destroy()
 
+    def cursor_offset(self):
+        return self.buffer.get_iter_at_mark(self.buffer.get_insert()).get_offset()
+
+    def cursor_in_table(self):
+        return table_at(self.text(), self.cursor_offset()) is not None
+
+    def navigate_table(self, view, event):
+        modifiers = event.state & Gtk.accelerator_get_default_mod_mask()
+        backward = event.keyval == Gdk.KEY_ISO_Left_Tab or bool(modifiers & Gdk.ModifierType.SHIFT_MASK)
+        edit = (table_previous_cell if backward else table_next_cell)(self.text(), self.cursor_offset())
+        if edit is None:
+            return False
+        self.apply_table_change(edit)
+        view.scroll_mark_onscreen(self.buffer.get_insert())
+        return True
+
+    def apply_table_change(self, edit):
+        caret = getattr(edit, 'caret', None)
+        if caret is None:
+            self.apply_edit(edit)
+            return
+        new_length = len(self.text()) - (edit.end - edit.start) + len(edit.replacement)
+        caret = max(0, min(caret, new_length))
+        self.apply_edit(edit, (caret, caret))
+
+    def run_table(self, operation, *args):
+        cursor = self.cursor_offset()
+        if table_at(self.text(), cursor) is None:
+            self.window.status.set_text('Place the cursor inside a Markdown table.')
+            return False
+        edit = operation(self.text(), cursor, *args)
+        if edit is None:
+            self.window.status.set_text('That table change does not apply here.')
+            return False
+        self.apply_table_change(edit)
+        self.editor.grab_focus()
+        return True
+
+    def place_block(self, block, caret_in_block):
+        text = self.text()
+        cursor = self.cursor_offset()
+        if block and not block.endswith('\n'):
+            block += '\n'
+        prefix = '\n' if cursor and text[cursor - 1] != '\n' else ''
+        suffix = '\n' if cursor < len(text) and text[cursor] != '\n' and not block.endswith('\n') else ''
+        replacement = prefix + block + suffix
+        caret = cursor + len(prefix) + min(caret_in_block, len(block))
+        self.apply_edit(TextEdit(cursor, cursor, replacement), (caret, caret))
+
+    def prompt_insert_table(self):
+        if TableEditorDialog is None:
+            return
+        self.commit_table_dialog(TableEditorDialog(self.window, title='Insert table'), replace=False)
+
+    def prompt_edit_table(self):
+        if TableEditorDialog is None:
+            return
+        text = self.text()
+        cursor = self.cursor_offset()
+        table = table_at(text, cursor)
+        if table is None:
+            self.window.status.set_text('Place the cursor inside a Markdown table.')
+            return
+        dialog = TableEditorDialog(self.window, table.headers, table.alignments, table.rows, title='Edit table')
+        self.commit_table_dialog(dialog, replace=True, original=text, cursor=cursor)
+
+    def commit_table_dialog(self, dialog, replace, original=None, cursor=None):
+        dialog.show_all()
+        try:
+            if dialog.run() != Gtk.ResponseType.OK:
+                return
+            if original is not None and self.text() != original:
+                self.window.status.set_text('The note changed while the table editor was open.')
+                return
+            headers, alignments, rows = dialog.model()
+            if replace:
+                edit = table_from_model(self.text(), cursor, headers, alignments, rows)
+                if edit is None:
+                    self.window.status.set_text('Place the cursor inside a Markdown table.')
+                    return
+                self.apply_table_change(edit)
+            else:
+                block = format_table(headers, alignments, rows)
+                self.place_block(block, cell_offset(block, 0, 0))
+        finally:
+            dialog.destroy()
+        self.editor.grab_focus()
+
     def show_find(self):
         self.findbar.open()
 
@@ -709,9 +1722,32 @@ class NotePane(Gtk.Box):
         for title, action, enabled in (
                 ('Undo', self.undo, self.history.can_undo), ('Redo', self.redo, self.history.can_redo),
                 ('Bold', self.bold, True), ('Italic', self.italic, True),
+                ('Highlight', self.highlight, True), ('Strikethrough', self.strikethrough, True),
+                ('Toggle fold', self.toggle_fold, True),
+                ('Fold all headings', self.fold_all_headings, True),
+                ('Unfold all', self.unfold_all, True),
+                ('Add next occurrence', self.add_next_occurrence, True),
+                ('Select all occurrences', self.select_all_occurrences, True),
                 ('Insert link…', self.insert_link, True),
                 ('Insert template…', self.insert_template, True),
                 ('Insert attachment…', self.choose_attachment, True),
+                ('Insert table…', self.prompt_insert_table, True),
+                ('Edit table…', self.prompt_edit_table, self.cursor_in_table()),
+                ('Add row below', lambda: self.run_table(table_add_row_below), self.cursor_in_table()),
+                ('Add row above', lambda: self.run_table(table_add_row_above), self.cursor_in_table()),
+                ('Delete row', lambda: self.run_table(table_delete_row), self.cursor_in_table()),
+                ('Add column right', lambda: self.run_table(table_add_column_right), self.cursor_in_table()),
+                ('Add column left', lambda: self.run_table(table_add_column_left), self.cursor_in_table()),
+                ('Delete column', lambda: self.run_table(table_delete_column), self.cursor_in_table()),
+                ('Align column left', lambda: self.run_table(table_align_column, 'left'), self.cursor_in_table()),
+                ('Align column center', lambda: self.run_table(table_align_column, 'center'), self.cursor_in_table()),
+                ('Align column right', lambda: self.run_table(table_align_column, 'right'), self.cursor_in_table()),
+                ('Sort column ascending', lambda: self.run_table(table_sort_column, True), self.cursor_in_table()),
+                ('Sort column descending', lambda: self.run_table(table_sort_column, False), self.cursor_in_table()),
+                ('Move row up', lambda: self.run_table(table_move_row, -1), self.cursor_in_table()),
+                ('Move row down', lambda: self.run_table(table_move_row, 1), self.cursor_in_table()),
+                ('Move column left', lambda: self.run_table(table_move_column, -1), self.cursor_in_table()),
+                ('Move column right', lambda: self.run_table(table_move_column, 1), self.cursor_in_table()),
                 ('Live preview', lambda: self.set_mode('live'), True),
                 ('Source mode', lambda: self.set_mode('source'), True),
                 ('Reading mode', lambda: self.set_mode('reading'), True),
@@ -1060,9 +2096,10 @@ class Window(Gtk.ApplicationWindow):
         self.notes_toggle.connect('toggled', self.set_panel_open, self.notes_panel)
         center = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
         center.get_style_context().add_class('workspace-split')
-        self.tabs = Gtk.Notebook(scrollable=True)
+        self.tabs = WorkspaceTabs()
         self.tabs.connect('switch-page', self.tab_switched)
         self.tabs.connect('page-removed', self.tab_removed)
+        self.tabs.connect('page-reordered', lambda *_: self.persist_workspace())
         self.note_toolbars = Gtk.Stack()
         self.note_toolbars.set_homogeneous(False)
         self.note_toolbars.set_no_show_all(True)
@@ -1102,8 +2139,12 @@ class Window(Gtk.ApplicationWindow):
         self.counts.get_style_context().add_class('status')
         self.counts.get_accessible().set_name('Word and character count')
         self.counts.set_tooltip_text('Words, characters, and lines in the active note')
+        self.vim_status = Gtk.Label(label='')
+        self.vim_status.get_style_context().add_class('vim-status')
+        self.vim_status.get_accessible().set_name('Vim mode')
         statusbar.pack_end(format_label, False, False, 0)
         statusbar.pack_end(self.counts, False, False, 0)
+        statusbar.pack_end(self.vim_status, False, False, 0)
         root.pack_end(statusbar, False, False, 0)
         self.workspace_source = GLib.timeout_add_seconds(5, self.persist_workspace)
         self.connect('destroy', self.cleanup)
@@ -1731,10 +2772,16 @@ class Window(Gtk.ApplicationWindow):
         pane.editor.grab_focus()
         if fragment:
             text = pane.text()
-            needle = fragment.removeprefix('^')
-            match = re.search(r'(?m)^.*' + re.escape(needle) + r'.*$', text, re.IGNORECASE)
-            if match:
-                position = pane.buffer.get_iter_at_offset(match.start())
+            offset = find_anchor_offset(text, fragment)
+            if offset is None:
+                # Keep the older line search when the fragment is not an exact
+                # heading or block id, so partial and hand-written links still land.
+                needle = fragment[1:] if fragment.startswith('^') else fragment
+                if needle:
+                    match = re.search(r'(?m)^.*' + re.escape(needle) + r'.*$', text, re.IGNORECASE)
+                    offset = match.start() if match else None
+            if offset is not None:
+                position = pane.buffer.get_iter_at_offset(offset)
                 pane.buffer.place_cursor(position)
                 pane.editor.scroll_to_iter(position, 0.15, False, 0, 0)
         self.update_context()
@@ -1762,6 +2809,16 @@ class Window(Gtk.ApplicationWindow):
         pane = self.current()
         if pane:
             self.try_action(pane.save)
+
+    def toggle_highlight(self, *_):
+        pane = self.current()
+        if pane is not None and pane.mode != 'reading':
+            pane.highlight()
+
+    def toggle_strikethrough(self, *_):
+        pane = self.current()
+        if pane is not None and pane.mode != 'reading':
+            pane.strikethrough()
 
     def close_tab(self, *_):
         self.close_note(self.active_page())
@@ -1854,6 +2911,20 @@ class Window(Gtk.ApplicationWindow):
                 verb = 'Created daily note' if created else 'Opened daily note'
                 self.status.set_text(f'{verb} · {note.path}')
         self.try_action(action)
+
+    def insert_table(self, *_):
+        pane = self.current()
+        if pane is None:
+            self.status.set_text('Open a note to insert a table.')
+            return
+        pane.prompt_insert_table()
+
+    def edit_table(self, *_):
+        pane = self.current()
+        if pane is None:
+            self.status.set_text('Open a note to edit a table.')
+            return
+        pane.prompt_edit_table()
 
     def insert_template(self, *_, path=None, pane=None):
         if not self.vault:
@@ -2151,7 +3222,18 @@ class Window(Gtk.ApplicationWindow):
             return
         self.counts.set_text(count_summary(pane.text(), pane.buffer.get_line_count()))
 
+    def update_vim_status(self):
+        label = getattr(self, 'vim_status', None)
+        if label is None or self.in_destruction():
+            return
+        pane = self.current()
+        if self.preferences.vim_mode and isinstance(pane, NotePane) and pane.vim.active:
+            label.set_text(mode_label(pane.vim.session))
+        else:
+            label.set_text('')
+
     def update_context(self):
+        self.update_vim_status()
         if self.vault:
             for graph in tuple(self.graph_views):
                 graph.refresh_if_changed()
@@ -2372,6 +3454,7 @@ class Window(Gtk.ApplicationWindow):
             return
         if self.graph_window:
             self.graph_window.destroy()
+            return
         from .graph_ui import GraphWindow
         self.graph_window = GraphWindow(self, local=local)
 

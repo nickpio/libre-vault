@@ -76,6 +76,8 @@ frame > border { border-color: @edge; }
 separator { background: @edge; min-height: 1px; border: none; }
 label link { color: @accent; }
 label link:visited { color: @soft; }
+.link-preview-title { font-weight: bold; color: @bright; }
+.link-preview-body { color: @ink; }
 .vault-heading { padding: 0 0 6px; }
 .vault-title { color: @bright; font-size: 9pt; font-weight: bold; padding-left: 5px; }
 .caption { color: @muted; font-size: 9pt; font-weight: normal; padding: 20px 8px 8px; }
@@ -147,8 +149,49 @@ textview, textview text { background: @canvas; color: @ink; caret-color: @accent
 .reading-view, .reading-view viewport { background: @canvas; color: @ink; }
 .reading-table { padding: 8px 0; }
 .reading-table-heading { font-weight: bold; border-bottom: 1px solid @edge; padding-bottom: 6px; }
+.reading-code {
+    background: @code_bg;
+    border: 1px solid @edge;
+    border-radius: 8px;
+    padding: 8px 10px;
+}
+.reading-code-header { padding-bottom: 4px; }
+.reading-code-badge { color: @soft; font-family: monospace; font-size: 9pt; }
+.reading-code-body { font-family: monospace; }
+.callout { background: @raised; border: 1px solid @edge; border-left-width: 4px; border-radius: 8px; }
+.callout-note { border-left-color: #6f8fbf; }
+.callout-info { border-left-color: #5aa7c2; }
+.callout-tip { border-left-color: #7d9a62; }
+.callout-warning { border-left-color: #c4973a; }
+.callout-danger { border-left-color: #c26464; }
+.callout-example { border-left-color: #8a78b8; }
+.callout-quote { border-left-color: #9a9a9a; }
+.callout-todo { border-left-color: #4f9d8a; }
+.callout-bug { border-left-color: #d27a3a; }
+.callout-generic { border-left-color: @accent; }
+.callout-title { font-weight: bold; }
+.media-card { background: @raised; border: 1px solid @edge; border-radius: 8px; }
+.media-title { font-weight: bold; }
+.media-meta, .media-time { color: @muted; }
+.footnote-back { padding-right: 4px; }
 textview.live-editor { font-size: 11pt; }
 .list-marker { color: @soft; font-size: 11pt; }
+button.fold-chevron {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+    margin: 0;
+    min-height: 0;
+    min-width: 0;
+    color: @muted;
+    font-size: 9pt;
+}
+button.fold-chevron:hover,
+button.fold-chevron:active { background: transparent; border: none; box-shadow: none; color: @bright; }
+label.extra-cursor { color: @accent; font-size: 12pt; }
+label.vim-status { color: @accent; font-weight: bold; padding: 0 12px; }
+.slash-popover { background: @panel; }
 checkbutton.task-checkbox { padding: 0; margin: 0; min-width: 18px; min-height: 18px; }
 checkbutton.task-checkbox check { min-width: 14px; min-height: 14px; border: 1px solid @muted; border-radius: 4px; background: @raised; box-shadow: none; color: @canvas; }
 checkbutton.task-checkbox check:checked { background: @accent; border-color: @accent; }
@@ -229,3 +272,10 @@ button.icon-button.bookmarked { color: @bright; }
 scrollbar { background: transparent; border: none; }
 scrollbar slider { background: @border; min-width: 5px; min-height: 5px; border: 2px solid transparent; border-radius: 8px; }
 scrollbar slider:hover { background: @focus_edge; }
+.live-table { background: @raised; border: 1px solid @edge; border-radius: 8px; padding: 8px 10px; }
+.live-table-heading { font-weight: bold; color: @bright; }
+.live-embed { background: @raised; border-radius: 8px; }
+.live-embed-title { font-weight: bold; color: @bright; }
+.math-preview { color: @bright; }
+.callout { background: @raised; border-radius: 8px; padding: 6px 10px; }
+.callout-kind, .callout-title { font-weight: bold; color: @bright; }

@@ -58,6 +58,8 @@ class SettingsDialog(Gtk.Dialog):
         self.spin(editor, 'line_width', 'Writing column width', 'Maximum width when readable line length is enabled.', 'px')
         self.switch(editor, 'wrap_lines', 'Wrap long lines', 'Wrap text to the editor width instead of scrolling horizontally.')
         self.switch(editor, 'continue_lists', 'Continue lists on Enter', 'Continue bullets, numbers, and tasks. Enter on an empty item exits the list.')
+        self.switch(editor, 'slash_commands', 'Slash commands', 'Type / at the start of a line, or after a space, to insert a heading, list, callout, or other block.')
+        self.switch(editor, 'vim_mode', 'Vim keybindings', 'Edit with Normal, Insert, and Visual modes. Escape returns to Normal mode.')
         notes = self.page('Notes', 'Choose where templates, daily notes, and unique notes are created.')
         self.entry(notes, 'templates_folder', 'Templates folder', 'Folder whose notes can be inserted as templates. Leave empty to use the vault root.')
         self.entry(notes, 'daily_notes_folder', 'Daily notes folder', 'Where the daily note for today is created. Leave empty to use the vault root.')

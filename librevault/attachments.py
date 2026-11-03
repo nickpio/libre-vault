@@ -69,10 +69,17 @@ def store_attachment(vault, name, data):
     raise VaultError('Too many attachments have this name.')
 
 
+IMAGE_SUFFIXES = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'}
+AUDIO_SUFFIXES = {'.mp3', '.wav', '.ogg', '.flac', '.m4a'}
+VIDEO_SUFFIXES = {'.mp4', '.webm', '.mkv'}
+MEDIA_SUFFIXES = AUDIO_SUFFIXES | VIDEO_SUFFIXES
+
+
 def attachment_markdown(relative):
-    image = Path(relative).suffix.lower() in ('.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg')
+    suffix = Path(relative).suffix.lower()
+    embed = suffix in IMAGE_SUFFIXES or suffix in MEDIA_SUFFIXES
     label = Path(relative).name.replace(']', '\\]')
-    return ('!' if image else '') + f'[{label}]({quote(relative, safe="/")})'
+    return ('!' if embed else '') + f'[{label}]({quote(relative, safe="/")})'
 
 
 def open_attachment(window, source, target):

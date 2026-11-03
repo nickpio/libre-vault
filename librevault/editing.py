@@ -13,16 +13,30 @@ class TextEdit:
     replacement: str
 
 
-def format_inline(text, start, end, marker):
-    """Toggle emphasis while retaining a selection of the original content."""
+def _escaped(text, position):
+    count = 0
+    while position > count and text[position - count - 1] == '\\':
+        count += 1
+    return count % 2 == 1
+
+
+def _toggle_pair(text, start, end, marker):
+    """Toggle a fixed marker such as ``==`` or ``~~`` around the selection."""
+    size = len(marker)
     selected = text[start:end]
-    if selected:
-        leading_space = len(selected) - len(selected.lstrip())
-        trailing_space = len(selected) - len(selected.rstrip())
-        if leading_space + trailing_space >= len(selected):
-            return TextEdit(start, end, selected), (start, end)
-        start += leading_space
-        end -= trailing_space
+    if (len(selected) >= size * 2 and selected.startswith(marker) and selected.endswith(marker)
+            and not _escaped(text, start) and not _escaped(text, end - size)):
+        content = selected[size:-size]
+        return TextEdit(start, end, content), (start, start + len(content))
+    before = text[start - size:start] if start >= size else ''
+    after = text[end:end + size]
+    if before == marker and after == marker and not _escaped(text, start - size):
+        return TextEdit(start - size, end + size, selected), (start - size, end - size)
+    return TextEdit(start, end, marker + selected + marker), (start + size, end + size)
+
+
+def _toggle_emphasis(text, start, end, marker):
+    """Toggle ``*`` or ``**`` without removing the other emphasis level."""
     def stars_before(position):
         first = position
         while first > 0 and text[first - 1] == '*':
@@ -52,6 +66,21 @@ def format_inline(text, start, end, marker):
     if contains_style(min(stars_before(start), stars_after(end))):
         return TextEdit(start - size, end + size, selected), (start - size, end - size)
     return TextEdit(start, end, marker + selected + marker), (start + size, end + size)
+
+
+def format_inline(text, start, end, marker):
+    """Toggle ``*``, ``**``, ``==``, or ``~~`` and keep the content selected."""
+    selected = text[start:end]
+    if selected:
+        leading_space = len(selected) - len(selected.lstrip())
+        trailing_space = len(selected) - len(selected.rstrip())
+        if leading_space + trailing_space >= len(selected):
+            return TextEdit(start, end, selected), (start, end)
+        start += leading_space
+        end -= trailing_space
+    if marker in ('*', '**'):
+        return _toggle_emphasis(text, start, end, marker)
+    return _toggle_pair(text, start, end, marker)
 
 
 def markdown_link(label, target):

@@ -33,6 +33,8 @@ EDITOR_SHORTCUTS = (
     Shortcut('<Control><Shift>z', 'Redo last edit', 'redo'),
     Shortcut('<Control>b', 'Toggle bold', 'bold'),
     Shortcut('<Control>i', 'Toggle italic', 'italic'),
+    Shortcut('<Control><Shift>h', 'Toggle highlight', 'highlight'),
+    Shortcut('<Control><Shift>x', 'Toggle strikethrough', 'strikethrough'),
     Shortcut('<Control>k', 'Insert a Markdown link', 'insert_link'),
     Shortcut('<Control>f', 'Find in the active note', 'show_find'),
     Shortcut('<Control>h', 'Find and replace in the active note', 'show_replace'),
@@ -40,13 +42,17 @@ EDITOR_SHORTCUTS = (
     Shortcut('<Control>g', 'Find next match', 'find_next'),
     Shortcut('<Shift>F3', 'Find previous match', 'find_previous'),
     Shortcut('<Control><Shift>g', 'Find previous match', 'find_previous'),
+    Shortcut('<Control><Shift>bracketleft', 'Fold the section at the cursor', 'fold_at_cursor'),
+    Shortcut('<Control><Shift>bracketright', 'Unfold the section at the cursor', 'unfold_at_cursor'),
+    Shortcut('<Control>d', 'Add the next occurrence', 'add_next_occurrence'),
+    Shortcut('<Control><Shift>l', 'Select all occurrences', 'select_all_occurrences'),
 )
 
 KEYBIND_GROUPS = (
     ('Writing and editing', (
         ('Enter', 'Continue a list or task; exit an empty item; otherwise insert a line break'),
         ('Shift+Enter', 'Insert a line break without continuing the list'),
-        ('Tab / Shift+Tab', 'Insert a tab in the editor'),
+        ('Tab / Shift+Tab', 'Move between cells in a Markdown table; otherwise insert a tab'),
         ('Space', 'Toggle a focused task checkbox'),
         ('Ctrl+C / Ctrl+Insert', 'Copy selected Markdown, including hidden syntax'),
         ('Ctrl+X / Shift+Delete', 'Cut selected Markdown, including hidden syntax'),
@@ -101,6 +107,23 @@ KEYBIND_GROUPS = (
         ('Left / Right', 'Jump between sections when the shortcut list has focus'),
         ('Home / End', 'Select the first or last result when the shortcut list has focus'),
         ('Escape', 'Close the cheatsheet'),
+    )),
+    ('Folding, slash commands, and multiple cursors', (
+        ('Ctrl+Shift+[', 'Fold the section at the cursor'),
+        ('Ctrl+Shift+]', 'Unfold the section at the cursor'),
+        ('/', 'Open slash commands at the start of a line or after a space'),
+        ('Up / Down, Enter / Tab, Escape', 'Choose a slash command, insert it, or dismiss the menu'),
+        ('Ctrl+D', 'Select the current word, then add the next occurrence'),
+        ('Ctrl+Shift+L', 'Select every occurrence of the current word or selection'),
+        ('Escape', 'Clear extra cursors'),
+    )),
+    ('Vim mode', (
+        ('Escape', 'Return to Normal mode when Vim keybindings are enabled'),
+        ('h j k l, w b e, 0 $ ^, gg G', 'Move in Normal and Visual mode'),
+        ('i a I A o O', 'Enter Insert mode'),
+        ('v / V', 'Enter character or line Visual mode'),
+        ('x, dd, yy, p, dw, cw', 'Delete, yank, paste, or change text'),
+        ('u / Ctrl+R', 'Undo or redo'),
     )),
     ('Palette, dialogs, and focus', (
         ('Up / Down, Enter / Tab', 'Choose and insert a [[link]] completion'),

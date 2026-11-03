@@ -74,6 +74,8 @@ class Preferences:
     daily_notes_template: str = ''
     unique_notes_folder: str = ''
     unique_notes_format: str = 'YYYYMMDDHHmm'
+    slash_commands: bool = True
+    vim_mode: bool = False
 
     @classmethod
     def from_dict(cls, data):
