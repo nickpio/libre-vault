@@ -6,6 +6,7 @@ a = Analysis(
     pathex=[str(root)],
     binaries=[],
     datas=[(str(root / 'librevault' / 'style.css'), 'librevault'),
+           (str(root / 'librevault' / 'assets'), 'librevault/assets'),
            (str(root / 'LICENSE'), 'licenses/libre-vault')],
     hiddenimports=['gi.repository.Poppler'],
     hookspath=[str(root / 'packaging' / 'hooks')],

@@ -44,7 +44,7 @@ from .slides import SlidesWindow
 from .filetree import tree_paths
 from .metadata import note_metadata, property_text, with_properties
 from .commands import CommandPalette, KeybindCheatsheet, NoteNameDialog, TemplatePicker, UniqueNoteDialog
-from .shortcuts import APP_SHORTCUTS, EDITOR_SHORTCUTS
+from .shortcuts import APP_SHORTCUTS, EDITOR_SHORTCUTS, HotkeyStore, effective_shortcuts, validate_hotkey, shortcut_key
 from .settings import SettingsDialog
 from .preferences import PreferencesStore
 from .appearance import PALETTES, stylesheet
@@ -131,26 +131,6 @@ def line_hits(text, start, end, cursor):
     if line_end < 0:
         line_end = len(text)
     return line_start < end and line_end > start
-
-
-def shortcut_key(keyval):
-    """Compare accelerators even when Shift turns `[` into `{`."""
-    lowered = Gdk.keyval_to_lower(keyval)
-    if lowered == Gdk.KEY_braceleft:
-        return Gdk.KEY_bracketleft
-    if lowered == Gdk.KEY_braceright:
-        return Gdk.KEY_bracketright
-    return lowered
-
-
-def format_timestamp(value):
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
-        return value
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone().strftime('%Y-%m-%d %H:%M:%S')
 
 
 class NotePane(Gtk.Box):
@@ -492,7 +472,7 @@ class NotePane(Gtk.Box):
             return True
         modifiers = event.state & Gtk.accelerator_get_default_mod_mask()
         pressed = shortcut_key(event.keyval)
-        for shortcut in EDITOR_SHORTCUTS:
+        for shortcut in effective_shortcuts(EDITOR_SHORTCUTS, 'editor', self.window.hotkeys):
             key, mask = Gtk.accelerator_parse(shortcut.accelerator)
             if pressed == Gdk.keyval_to_lower(key) and modifiers == mask:
                 getattr(self, shortcut.handler)()
@@ -1940,6 +1920,10 @@ class Window(Gtk.ApplicationWindow):
         self.converter_dialog = None
         self.preferences_store = PreferencesStore(preferences_path)
         self.preferences = self.preferences_store.load()
+        self.hotkey_store = HotkeyStore(self.preferences_store.path)
+        self.hotkeys = self.hotkey_store.load()
+        from .vault_options import VaultOptionsStore
+        self.vault_options_store = VaultOptionsStore(self.preferences_store.path)
         self.workspace_store = WorkspaceStore(self.preferences_store.path)
         self.saved_workspaces = SavedWorkspacesStore(self.preferences_store.path)
         self.bookmark_store = BookmarkStore(self.preferences_store.path)
@@ -1951,6 +1935,10 @@ class Window(Gtk.ApplicationWindow):
         self.restoring_workspace = False
         self.split_pane = None
         self.split_view = None
+        self.note_windows = set()
+        self.closed = False
+        self.sliding_views = []
+        self.tab_mode = 'tabs'
         self.workspace_source = None
         self.scroll_restore_sources = {}
         self.quick_switcher = None
@@ -1967,14 +1955,16 @@ class Window(Gtk.ApplicationWindow):
         self.connect('delete-event', self.on_delete)
         self.connect('key-press-event', self.key_press)
         self.css_provider = Gtk.CssProvider()
+        self.brand = Gtk.Image()
+        self.brand.get_style_context().add_class('brand')
+        self.brand.get_accessible().set_name('Libre Vault')
+        self.brand.set_tooltip_text('Libre Vault')
         self.apply_preferences()
         Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), self.css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         header = Gtk.HeaderBar()
         header.set_show_close_button(True)
         self.set_titlebar(header)
-        brand = Gtk.Label(label='Libre Vault')
-        brand.get_style_context().add_class('brand')
-        header.pack_start(brand)
+        header.pack_start(self.brand)
         self.location_label = Gtk.Label(label='Local workspace')
         self.location_label.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
         self.location_label.get_style_context().add_class('breadcrumb')
@@ -2107,7 +2097,19 @@ class Window(Gtk.ApplicationWindow):
         hint_content.pack_end(keys, False, False, 0)
         hint.add(hint_content)
         sidebar.pack_start(hint, False, False, 0)
-        self.notes_panel = SlidingPanel(sidebar, layout, at_start=True)
+        self.left_dock = Gtk.Notebook(scrollable=True)
+        self.right_dock = Gtk.Notebook(scrollable=True)
+        for dock in (self.left_dock, self.right_dock):
+            dock.get_style_context().add_class('sidebar-dock')
+            dock.set_group_name('librevault-panels-' + str(id(self)))
+        sidebar.remove(self.tag_pane)
+        self.tag_pane.set_expanded(True)
+        for dock, child, title in [(self.left_dock, sidebar, 'Files'), (self.left_dock, self.tag_pane, 'Tags')]:
+            child.dock_id = title.lower()
+            dock.append_page(child, Gtk.Label(label=title))
+            dock.set_tab_reorderable(child, True)
+            dock.set_tab_detachable(child, True)
+        self.notes_panel = SlidingPanel(self.left_dock, layout, at_start=True)
         layout.pack1(self.notes_panel, False, False)
         self.notes_toggle.connect('toggled', self.set_panel_open, self.notes_panel)
         center = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
@@ -2117,19 +2119,54 @@ class Window(Gtk.ApplicationWindow):
         self.tabs.connect('page-removed', self.tab_removed)
         self.tabs.connect('page-reordered', lambda *_: self.persist_workspace())
         editor_column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        editor_column.pack_start(self.tabs, True, True, 0)
-        self.editor_split = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
-        self.editor_split.pack1(editor_column, True, False)
-        self.split_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        self.split_box.set_no_show_all(True)
-        self.editor_split.pack2(self.split_box, True, False)
-        center.pack1(self.editor_split, True, False)
+        self.main_stack = Gtk.Stack()
+        self.main_stack.add_named(self.tabs, 'tabs')
+        self.sliding_strip = Gtk.Box(spacing=8)
+        sliding_scroll = Gtk.ScrolledWindow()
+        sliding_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+        sliding_scroll.add(self.sliding_strip)
+        self.main_stack.add_named(sliding_scroll, 'sliding')
+        editor_column.pack_start(self.main_stack, True, True, 0)
+        self.tabs.connect('page-added', self.rebuild_sliding_tabs)
+        self.tabs.connect('page-reordered', self.rebuild_sliding_tabs)
+        from .layout_ui import WorkspaceLayout
+        self.workspace_layout = WorkspaceLayout(self, editor_column)
+        self.editor_split = self.workspace_layout
+        center.pack1(self.workspace_layout, True, False)
         self.context = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
         self.context.set_border_width(12)
         self.context.get_style_context().add_class('sidebar')
         self.details_scroll = scrolled(self.context)
         self.details_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        self.details_panel = SlidingPanel(self.details_scroll, center, at_start=False)
+        self.details_view = 'outline'
+        self.details_buttons = {}
+        details = self.details_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        selector = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE)
+        selector.set_min_children_per_line(1)
+        selector.set_max_children_per_line(3)
+        selector.set_column_spacing(6)
+        selector.set_row_spacing(6)
+        selector.set_margin_start(8)
+        selector.set_margin_end(8)
+        selector.set_margin_top(6)
+        selector.set_margin_bottom(4)
+        group = None
+        for name in ('outline', 'links', 'properties'):
+            button = Gtk.RadioButton.new_with_label_from_widget(group, name.capitalize())
+            button.set_mode(False)
+            button.get_style_context().add_class('details-view-button')
+            if group is None:
+                group = button
+            self.details_buttons[name] = button
+            selector.add(button)
+            button.connect('toggled', self.select_details_view, name)
+        details.pack_start(selector, False, False, 0)
+        details.pack_start(self.details_scroll, True, True, 0)
+        details.dock_id = 'details'
+        self.right_dock.append_page(details, Gtk.Label(label='Details'))
+        self.right_dock.set_tab_reorderable(details, True)
+        self.right_dock.set_tab_detachable(details, True)
+        self.details_panel = SlidingPanel(self.right_dock, center, at_start=False)
         center.pack2(self.details_panel, False, False)
         self.details_toggle.connect('toggled', self.set_panel_open, self.details_panel)
         layout.pack2(center, True, False)
@@ -2185,6 +2222,7 @@ class Window(Gtk.ApplicationWindow):
         return button
 
     def cleanup(self, *_):
+        self.closed = True
         for view in tuple(getattr(self, 'canvas_views', ())):
             view.cancel_autosave()
         for window in (self.version_dialog, self.graph_window, self.slides_window,
@@ -2274,7 +2312,7 @@ class Window(Gtk.ApplicationWindow):
         return True
 
     def load_vault(self, folder):
-        vault = Vault(folder)
+        vault = Vault(folder, options=self.vault_options_store.load(folder))
         if not self.confirm_panes(self.editors()):
             vault.close()
             return
@@ -2307,6 +2345,9 @@ class Window(Gtk.ApplicationWindow):
             self.status.set_text(f'Could not remember the opened vault: {error}')
 
     def clear_editors(self):
+        for window in tuple(self.note_windows):
+            window.destroy()
+        self.set_tab_mode('tabs')
         self.close_split()
         for source in self.scroll_restore_sources.values():
             GLib.source_remove(source)
@@ -2894,7 +2935,8 @@ class Window(Gtk.ApplicationWindow):
             self.collapsed_folders.difference_update(ancestors)
             self.populate_files()
         self.tabs.set_current_page(self.tabs.page_num(pane))
-        pane.editor.grab_focus()
+        mirror = next((view for view in self.sliding_views if view.canonical is pane), None) if self.tab_mode == 'sliding' else None
+        (mirror.editor if mirror is not None else pane.editor).grab_focus()
         if fragment:
             text = pane.text()
             offset = find_anchor_offset(text, fragment)
@@ -2917,8 +2959,12 @@ class Window(Gtk.ApplicationWindow):
 
     def active_page(self):
         focus = self.get_focus()
-        if self.split_view is not None and focus and (focus is self.split_view or focus.is_ancestor(self.split_box)):
-            return self.split_pane
+        group = self.workspace_layout.focused(focus)
+        if group and group.current():
+            return group.current().canonical
+        for view in self.sliding_views:
+            if focus is view or focus and focus.is_ancestor(view):
+                return view.canonical
         return self.tabs.get_nth_page(self.tabs.get_current_page()) if self.tabs.get_n_pages() else None
 
     def current(self):
@@ -2957,8 +3003,6 @@ class Window(Gtk.ApplicationWindow):
                     self.update_context()
             return
         if pane and self.confirm_panes([pane]):
-            if pane is self.split_pane:
-                self.close_split()
             self.tabs.remove_page(self.tabs.page_num(pane))
             self.panes.pop(pane.note.path, None)
             self.queue_reading_refresh()
@@ -3358,7 +3402,17 @@ class Window(Gtk.ApplicationWindow):
         else:
             label.set_text('')
 
+    def select_details_view(self, button, name):
+        if not button.get_active() or self.details_view == name:
+            return
+        self.details_view = name
+        self.details_scroll.get_vadjustment().set_value(0)
+        self.update_context()
+        self.persist_workspace()
+
     def update_context(self):
+        if self.closed:
+            return False
         self.update_vim_status()
         if self.vault:
             self.tag_pane.refresh()
@@ -3389,7 +3443,7 @@ class Window(Gtk.ApplicationWindow):
         self.save_button.set_sensitive(pane is not None)
         if not pane or not self.vault:
             self.location_label.set_text(self.vault.root.name if self.vault else 'Local workspace')
-            self.section('Outline · Links · Backlinks')
+            self.section('Open a note to see its details.')
             self.context.show_all()
             self.update_counts()
             return False
@@ -3400,94 +3454,100 @@ class Window(Gtk.ApplicationWindow):
             if row.path == pane.note.path:
                 self.files.select_row(row)
                 break
-        self.section('Outline')
-        if pane.text() != pane.formatted_text:
-            pane.render()
-        ancestors = []
-        for heading in pane.headings:
-            while ancestors and ancestors[-1] >= heading.level:
-                ancestors.pop()
-            depth = len(ancestors)
-            ancestors.append(heading.level)
-            offset = heading.start
-            def jump(offset=offset):
-                position = pane.buffer.get_iter_at_offset(offset)
-                pane.buffer.place_cursor(position)
-                pane.editor.scroll_to_iter(position, 0.15, False, 0, 0)
-                self.update_outline_selection()
-            button = self.context_button(heading.label, jump)
-            button.set_margin_start(depth * 12)
-            button.get_style_context().add_class('outline-heading')
-            if depth == 0:
-                button.get_style_context().add_class('outline-root')
-                button.set_margin_top(4)
-            label = button.get_child()
-            label.set_ellipsize(Pango.EllipsizeMode.NONE)
-            label.set_line_wrap(True)
-            label.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
-            label.set_max_width_chars(24)
-            button.get_accessible().set_name(f'Heading {heading.level}: {heading.label}')
-            self.outline_rows.append((offset, button))
-        if not pane.headings:
-            empty = Gtk.Label(label='No headings in this note.', xalign=0)
-            empty.set_ellipsize(Pango.EllipsizeMode.END)
-            empty.get_style_context().add_class('outline-empty')
-            self.context.pack_start(empty, False, False, 0)
-        self.update_outline_selection()
-        self.section('Outgoing links')
-        for link in links(pane.text()):
-            self.context_button(('↳ ' if link.embedded else '') + link.label,
-                                lambda target=link.target: self.follow_link(pane.note.path, target))
-        self.section('Backlinks · Saved files')
-        for path in self.vault.backlinks(pane.note.path):
-            self.context_button(path.removesuffix('.md'), lambda path=path: self.open_note(path))
-        self.section('Unlinked mentions')
-        texts = {path: item.text() for path, item in self.panes.items()}
-        mentions = self.vault.unlinked_mentions(pane.note.path, texts)
-        if not mentions:
-            empty = Gtk.Label(label='No unlinked mentions.', xalign=0)
-            empty.set_ellipsize(Pango.EllipsizeMode.END)
-            empty.get_style_context().add_class('outline-empty')
-            self.context.pack_start(empty, False, False, 0)
+        if self.details_view == 'outline':
+            self.section('Outline')
+            if pane.text() != pane.formatted_text:
+                pane.render()
+            ancestors = []
+            for heading in pane.headings:
+                while ancestors and ancestors[-1] >= heading.level:
+                    ancestors.pop()
+                depth = len(ancestors)
+                ancestors.append(heading.level)
+                offset = heading.start
+                def jump(offset=offset):
+                    position = pane.buffer.get_iter_at_offset(offset)
+                    pane.buffer.place_cursor(position)
+                    pane.editor.scroll_to_iter(position, 0.15, False, 0, 0)
+                    self.update_outline_selection()
+                button = self.context_button(heading.label, jump)
+                button.set_margin_start(depth * 12)
+                button.get_style_context().add_class('outline-heading')
+                if depth == 0:
+                    button.get_style_context().add_class('outline-root')
+                    button.set_margin_top(4)
+                label = button.get_child()
+                label.set_ellipsize(Pango.EllipsizeMode.NONE)
+                label.set_line_wrap(True)
+                label.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
+                label.set_max_width_chars(24)
+                button.get_accessible().set_name(f'Heading {heading.level}: {heading.label}')
+                self.outline_rows.append((offset, button))
+            if not pane.headings:
+                empty = Gtk.Label(label='No headings in this note.', xalign=0)
+                empty.set_ellipsize(Pango.EllipsizeMode.END)
+                empty.get_style_context().add_class('outline-empty')
+                self.context.pack_start(empty, False, False, 0)
+            self.update_outline_selection()
+            self.context_button('Version history…', self.show_version_history)
+        elif self.details_view == 'links':
+            self.section('Outgoing links')
+            for link in links(pane.text()):
+                self.context_button(('↳ ' if link.embedded else '') + link.label,
+                                    lambda target=link.target: self.follow_link(pane.note.path, target))
+            self.section('Backlinks · Saved files')
+            for path in self.vault.backlinks(pane.note.path):
+                self.context_button(path.removesuffix('.md'), lambda path=path: self.open_note(path))
+            self.section('Unlinked mentions')
+            texts = {path: item.text() for path, item in self.panes.items()}
+            mentions = self.vault.unlinked_mentions(pane.note.path, texts)
+            if not mentions:
+                empty = Gtk.Label(label='No unlinked mentions.', xalign=0)
+                empty.set_ellipsize(Pango.EllipsizeMode.END)
+                empty.get_style_context().add_class('outline-empty')
+                self.context.pack_start(empty, False, False, 0)
+            else:
+                shown = mentions[:100]
+                for mention in shown:
+                    self.add_unlinked_mention(mention)
+                if len(mentions) > len(shown):
+                    more = Gtk.Label(
+                        label=f'{len(shown)} of {len(mentions)} unlinked mentions are shown.', xalign=0)
+                    more.set_line_wrap(True)
+                    more.set_max_width_chars(28)
+                    more.get_style_context().add_class('outline-empty')
+                    self.context.pack_start(more, False, False, 0)
         else:
-            shown = mentions[:100]
-            for mention in shown:
-                self.add_unlinked_mention(mention)
-            if len(mentions) > len(shown):
-                more = Gtk.Label(
-                    label=f'{len(shown)} of {len(mentions)} unlinked mentions are shown.', xalign=0)
-                more.set_line_wrap(True)
-                more.set_max_width_chars(28)
-                more.get_style_context().add_class('outline-empty')
-                self.context.pack_start(more, False, False, 0)
-        self.context_button('Version history…', self.show_version_history)
-        self.section('Properties')
-        metadata = note_metadata(pane.text())
-        self.context_button('Edit properties…', self.edit_properties)
-        if not metadata.error:
-            from .properties_ui import PropertyForm
-            form = PropertyForm(metadata.properties, self.vault.root)
-            self.context.pack_start(form, False, False, 0)
-            problem = Gtk.Label(xalign=0)
-            problem.set_line_wrap(True)
-            self.context.pack_start(problem, False, False, 0)
-            def apply_properties():
-                try:
-                    source = form.source()
-                    form.save_registry()
-                    self.set_note_properties(source)
-                except (ValueError, OSError) as error:
-                    problem.set_text(str(error))
-            self.context_button('Apply properties', apply_properties)
-        if metadata.error:
-            problem = Gtk.Label(label=metadata.error, xalign=0)
-            problem.set_line_wrap(True)
-            problem.set_max_width_chars(24)
-            self.context.pack_start(problem, False, False, 0)
-        if metadata.tags:
-            self.section('Tags')
-            for tag in metadata.tags:
-                self.context_button('#' + tag, lambda tag=tag: self.search_entry.set_text('tag:#' + tag))
+            self.section('Properties')
+            metadata = note_metadata(pane.text())
+            self.context_button('Edit properties…', self.edit_properties)
+            if metadata.error:
+                problem = Gtk.Label(label=metadata.error, xalign=0)
+                problem.set_line_wrap(True)
+                problem.set_max_width_chars(24)
+                self.context.pack_start(problem, False, False, 0)
+            elif not metadata.properties:
+                empty = Gtk.Label(label='No properties in this note.', xalign=0)
+                empty.get_style_context().add_class('outline-empty')
+                self.context.pack_start(empty, False, False, 0)
+            else:
+                from .bases import display_value
+                for key, value in metadata.properties.items():
+                    name = Gtk.Label(label=str(key), xalign=0)
+                    name.get_style_context().add_class('caption')
+                    name.set_line_wrap(True)
+                    self.context.pack_start(name, False, False, 0)
+                    text = display_value(value) or ('null' if value is None else 'Empty')
+                    label = Gtk.Label(label=text, xalign=0)
+                    label.set_line_wrap(True)
+                    label.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
+                    label.set_selectable(True)
+                    label.set_max_width_chars(28)
+                    self.context.pack_start(label, False, False, 0)
+            if metadata.tags:
+                self.section('Tags')
+                for tag in metadata.tags:
+                    self.context_button('#' + tag, lambda tag=tag: self.search_entry.set_text('tag:#' + tag))
         self.context.show_all()
         self.update_counts()
         return False
@@ -3550,9 +3610,9 @@ class Window(Gtk.ApplicationWindow):
             if pane.findbar.key_press(pane.findbar, event):
                 return True
         modifiers = event.state & Gtk.accelerator_get_default_mod_mask()
-        for shortcut in APP_SHORTCUTS:
+        for shortcut in effective_shortcuts(APP_SHORTCUTS, 'app', self.hotkeys):
             key, mask = Gtk.accelerator_parse(shortcut.accelerator)
-            if Gdk.keyval_to_lower(event.keyval) == key and modifiers == mask:
+            if shortcut_key(event.keyval) == shortcut_key(key) and modifiers == mask:
                 getattr(self, shortcut.handler)()
                 return True
         return False
@@ -3573,8 +3633,40 @@ class Window(Gtk.ApplicationWindow):
     def apply_preferences(self):
         Gtk.Settings.get_default().set_property('gtk-application-prefer-dark-theme', self.preferences.theme != 'light')
         self.css_provider.load_from_data(stylesheet(CSS.decode('utf-8'), self.preferences).encode('utf-8'))
+        logo_theme = 'light' if self.preferences.theme == 'light' else 'dark'
+        logo_path = Path(__file__).with_name('assets') / f'logo-{logo_theme}.png'
+        self.brand.set_from_pixbuf(GdkPixbuf.Pixbuf.new_from_file_at_scale(str(logo_path), 40, 40, True))
         for pane in self.panes.values():
             pane.apply_preferences()
+
+    def set_hotkey(self, identifier, accelerator):
+        accelerator = validate_hotkey(self.hotkeys, identifier, accelerator)
+        bindings = dict(self.hotkeys, **{identifier: accelerator})
+        self.hotkey_store.save(bindings)
+        for window in self.get_application().get_windows():
+            if isinstance(window, Window):
+                window.hotkeys = bindings
+                if window.cheatsheet is not None:
+                    window.cheatsheet.destroy()
+
+    def set_vault_options(self, options):
+        if self.vault is None:
+            return
+        folder = options.attachment_folder
+        if folder:
+            # Validate against reserved paths and the proposed visibility policy.
+            previous = self.vault.options
+            self.vault.options = options
+            try:
+                self.vault._visible_path(folder)
+            finally:
+                self.vault.options = previous
+        self.vault_options_store.save(self.vault.root, options)
+        if self.vault_monitor:
+            self.vault_monitor.close()
+        self.vault.options = options
+        self.refresh()
+        self.vault_monitor = VaultMonitor(self.vault, self.refresh, self.status.set_text)
 
     def set_preferences(self, preferences):
         self.preferences_store.save(preferences)
@@ -3616,13 +3708,16 @@ class Window(Gtk.ApplicationWindow):
         return self.show_graph_tab(local=True)
 
     def open_graph_note(self, graph, path):
-        # Keep a graph in the main tab visible when its companion is a note.
-        beside_graph = self.tabs.page_num(graph) >= 0 and isinstance(self.split_pane, NotePane)
+        companion = next((group for group in self.workspace_layout.groups
+                          if group.current() and isinstance(group.current().canonical, NotePane)), None)
+        beside_graph = self.tabs.page_num(graph) >= 0 and companion is not None
         pane = self.open_note(path)
         if pane and beside_graph:
-            self.open_split(pane)
+            previous = companion.current()
+            added = companion.add(pane)
+            companion.close_page(previous)
             self.tabs.set_current_page(self.tabs.page_num(graph))
-            self.split_view.grab_focus()
+            added.editor.grab_focus()
             self.update_context()
 
     def show_local_graph(self, *_):
@@ -3785,6 +3880,10 @@ class Window(Gtk.ApplicationWindow):
             self.navigation_history.update(Location(pane.note.path, cursor))
 
     def tab_switched(self, _, pane, index):
+        if self.closed:
+            return
+        if self.tab_mode == 'sliding':
+            self.main_stack.set_visible_child_name('sliding' if isinstance(pane, (NotePane, GraphView)) else 'tabs')
         if not isinstance(pane, NotePane):
             GLib.idle_add(self.update_context)
             return
@@ -3795,8 +3894,11 @@ class Window(Gtk.ApplicationWindow):
         GLib.idle_add(self.update_context)
 
     def tab_removed(self, notebook, pane, index):
-        if pane is self.split_pane:
-            self.close_split()
+        self.workspace_layout.remove_pane(pane)
+        for window in tuple(self.note_windows):
+            if window.pane is pane:
+                window.destroy()
+        self.rebuild_sliding_tabs()
         source = self.scroll_restore_sources.pop(pane, None)
         if source is not None:
             GLib.source_remove(source)
@@ -3823,73 +3925,72 @@ class Window(Gtk.ApplicationWindow):
         finally:
             self.restoring_workspace = False
 
+    def make_mirror(self, pane, state=None):
+        from .layout_ui import NoteMirror
+        if isinstance(pane, NotePane):
+            return NoteMirror(self, pane)
+        if isinstance(pane, GraphView):
+            return GraphView(self, state=state or pane.snapshot())
+        self.status.set_text('This view stays in its own tab.')
+        return None
+
     def close_split(self, *_):
-        for child in self.split_box.get_children():
-            child.destroy()
-        self.split_box.hide()
-        self.split_pane = self.split_view = None
+        self.workspace_layout.clear()
 
     def toggle_split(self, *_):
-        if self.split_view is not None:
+        if self.workspace_layout.groups:
             self.close_split()
-            return
-        pane = self.active_page()
-        if isinstance(pane, CanvasView):
-            self.status.set_text('Canvas files stay in their own tab.')
-            return
-        if pane:
-            self.open_split(pane)
+        else:
+            self.open_split(self.active_page())
 
     def open_split(self, pane):
-        if isinstance(pane, CanvasView):
-            self.status.set_text('Canvas files stay in their own tab.')
-            return
         if not isinstance(pane, (NotePane, GraphView)):
             return
-        from .splitview import SplitTextView
         self.close_split()
-        self.split_pane = pane
-        bar = Gtk.Box(spacing=6)
-        title = Gtk.Label(label='Graph' if isinstance(pane, GraphView) else pane.path if isinstance(pane, CanvasView) else pane.note.path, xalign=0)
-        title.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
-        bar.pack_start(title, True, True, 8)
-        bar.pack_end(self.icon_button('window-close-symbolic', 'Close split editor', self.close_split), False, False, 0)
-        self.split_box.pack_start(bar, False, False, 0)
-        if isinstance(pane, GraphView):
-            self.split_view = GraphView(self, state=pane.snapshot())
-            self.split_box.pack_start(self.split_view, True, True, 0)
-            self.show_split()
+        self.workspace_layout.add_split(pane=pane)
+
+    def split_right(self, *_):
+        self.workspace_layout.add_split(Gtk.Orientation.HORIZONTAL)
+
+    def split_down(self, *_):
+        self.workspace_layout.add_split(Gtk.Orientation.VERTICAL)
+
+    def pop_out_note(self, *_):
+        pane = self.current()
+        if pane is not None:
+            from .layout_ui import NoteWindow
+            return NoteWindow(self, pane)
+
+    def set_tab_mode(self, mode):
+        self.tab_mode = mode
+        self.tabs.set_tab_pos(Gtk.PositionType.LEFT if mode == 'stacked' else Gtk.PositionType.TOP)
+        if mode == 'sliding':
+            self.rebuild_sliding_tabs()
+        else:
+            self.main_stack.set_visible_child_name('tabs')
+            for view in self.sliding_views:
+                view.destroy()
+            self.sliding_views.clear()
+
+    def rebuild_sliding_tabs(self, *_):
+        if self.closed or self.tab_mode != 'sliding':
             return
-        self.split_view = SplitTextView(pane)
-        self.split_view.connect('key-press-event', self.split_key_press)
-        self.split_view.connect('copy-clipboard', pane.copy_selection)
-        self.split_view.connect('cut-clipboard', pane.cut_selection)
-        self.split_view.connect('populate-popup', pane.populate_edit_menu)
-        self.split_view.connect('paste-clipboard', pane.paste_attachment)
-        self.split_view.drag_dest_set(Gtk.DestDefaults.ALL,
-            [Gtk.TargetEntry.new('text/uri-list', 0, 1)], Gdk.DragAction.COPY)
-        self.split_view.connect('drag-data-received', pane.drop_attachments)
-        self.split_view.connect('button-release-event', pane.navigation.clicked)
-        split_scroll = scrolled(self.split_view)
-        split_scroll.get_vadjustment().connect('value-changed', self.split_view.queue_sync)
-        split_scroll.get_hadjustment().connect('value-changed', self.split_view.queue_sync)
-        self.split_box.pack_start(split_scroll, True, True, 0)
-        self.show_split()
-
-    def show_split(self):
-        self.split_box.set_no_show_all(False)
-        self.split_box.show_all()
-        self.split_box.set_no_show_all(True)
-        self.editor_split.set_position(max(1, self.editor_split.get_allocated_width() // 2))
-
-    def split_key_press(self, view, event):
-        modifiers = event.state & Gtk.accelerator_get_default_mod_mask()
-        if (modifiers == Gdk.ModifierType.CONTROL_MASK
-                and Gdk.keyval_to_lower(event.keyval) in (Gdk.KEY_f, Gdk.KEY_h)):
-            # Find controls belong to the canonical pane. Bring that pane into
-            # view before its handler opens and focuses the search bar.
-            self.tabs.set_current_page(self.tabs.page_num(self.split_pane))
-        return self.split_pane.editor_key_press(view, event)
+        for view in self.sliding_views:
+            view.destroy()
+        self.sliding_views.clear()
+        for index in range(self.tabs.get_n_pages()):
+            pane = self.tabs.get_nth_page(index)
+            view = self.make_mirror(pane)
+            if view is not None:
+                view.canonical = pane
+                if hasattr(view, 'title_bar'):
+                    view.title_bar.set_no_show_all(False)
+                view.set_size_request(480, -1)
+                self.sliding_strip.pack_start(view, False, False, 0)
+                self.sliding_views.append(view)
+        self.sliding_strip.show_all()
+        selected = self.tabs.get_nth_page(self.tabs.get_current_page()) if self.tabs.get_n_pages() else None
+        self.main_stack.set_visible_child_name('sliding' if isinstance(selected, (NotePane, GraphView)) else 'tabs')
 
     def note_is_bookmarked(self, path, fragment=''):
         return any(item.type == 'note' and item.path == path and item.fragment == fragment
@@ -4199,11 +4300,38 @@ class Window(Gtk.ApplicationWindow):
                 self.status.set_text(f'Could not update bookmarks: {error}')
             else:
                 self.refresh_bookmark_list()
-        if isinstance(self.split_pane, NotePane) and self.split_pane.note.path in deleted:
-            self.close_split()
-        elif isinstance(self.split_pane, NotePane):
-            self.open_split(self.split_pane)
+        for group in list(self.workspace_layout.groups):
+            for index in reversed(range(group.tabs.get_n_pages())):
+                page = group.tabs.get_nth_page(index)
+                if isinstance(page.canonical, NotePane):
+                    path = page.canonical.note.path
+                    if path in deleted:
+                        group.close_page(page)
+                    else:
+                        group.tabs.get_tab_label(page).get_children()[0].set_text(path)
+        for window in tuple(self.note_windows):
+            if window.pane.note.path in deleted:
+                window.destroy()
+            else:
+                window.set_title(window.pane.note.path + ' · Libre Vault')
+        self.rebuild_sliding_tabs()
         self.persist_workspace()
+
+    def restore_docks(self, state):
+        if not isinstance(state, list) or len(state) != 2 or not all(isinstance(items, list) for items in state):
+            return
+        known = {'files': self.sidebar, 'tags': self.tag_pane, 'details': self.details_container}
+        if any(not isinstance(item, str) for items in state for item in items) or sorted(item for items in state for item in items) != sorted(known):
+            return
+        for dock, identifiers in zip((self.left_dock, self.right_dock), state):
+            for identifier in identifiers:
+                widget = known[identifier]
+                widget.get_parent().remove(widget)
+                dock.append_page(widget, Gtk.Label(label=identifier.capitalize()))
+                dock.set_tab_reorderable(widget, True)
+                dock.set_tab_detachable(widget, True)
+        self.left_dock.show_all()
+        self.right_dock.show_all()
 
     def capture_workspace_state(self):
         pages = []
@@ -4236,6 +4364,11 @@ class Window(Gtk.ApplicationWindow):
         return {'tabs': pages, 'active': active_key,
                 'collapsed_folders': sorted(self.collapsed_folders),
                 'split': split_key,
+                'layout': self.workspace_layout.snapshot(),
+                'tab_mode': self.tab_mode,
+                'details_view': self.details_view,
+                'note_windows': [dict(path=window.pane.note.path, width=window.get_size().width, height=window.get_size().height) for window in self.note_windows],
+                'docks': [[dock.get_nth_page(i).dock_id for i in range(dock.get_n_pages())] for dock in (self.left_dock, self.right_dock)],
                 'search': self.search_entry.get_text()}
 
     def persist_workspace(self):
@@ -4303,12 +4436,30 @@ class Window(Gtk.ApplicationWindow):
             if isinstance(folders, list):
                 self.collapsed_folders = {path for path in folders if isinstance(path, str) and path in self.vault.folders}
             split = state.get('split')
-            if isinstance(split, str) and split in self.panes:
+            if isinstance(state.get('layout'), dict):
+                self.workspace_layout.restore(state['layout'])
+            elif isinstance(split, str) and split in self.panes:
                 self.open_split(self.panes[split])
             elif isinstance(split, dict) and isinstance(split.get('graph'), str) and split['graph'] in graphs:
                 self.open_split(graphs[split['graph']])
                 if isinstance(split.get('state'), dict):
                     self.split_view.restore_state(split['state'])
+            mode = state.get('tab_mode', 'tabs')
+            self.set_tab_mode(mode if mode in ('tabs', 'stacked', 'sliding') else 'tabs')
+            windows = state.get('note_windows', [])
+            if isinstance(windows, list):
+                for saved in windows[:30]:
+                    if isinstance(saved, dict) and isinstance(saved.get('path'), str) and saved['path'] in self.panes:
+                        from .layout_ui import NoteWindow
+                        window = NoteWindow(self, self.panes[saved['path']])
+                        width, height = saved.get('width', 720), saved.get('height', 600)
+                        if type(width) is int and type(height) is int:
+                            window.resize(max(300, min(4000, width)), max(200, min(3000, height)))
+            details_view = state.get('details_view', 'outline')
+            if not isinstance(details_view, str) or details_view not in self.details_buttons:
+                details_view = 'outline'
+            self.details_buttons[details_view].set_active(True)
+            self.restore_docks(state.get('docks'))
             search = state.get('search')
             if isinstance(search, str):
                 self.search_entry.set_text(search)

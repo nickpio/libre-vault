@@ -26,6 +26,9 @@ APP_SHORTCUTS = (
     Shortcut('<Alt>Left', 'Navigate back', 'navigate_back'),
     Shortcut('<Alt>Right', 'Navigate forward', 'navigate_forward'),
     Shortcut('<Control><Shift>s', 'Toggle split editor', 'toggle_split'),
+    Shortcut('<Control><Alt>Right', 'Split pane right', 'split_right'),
+    Shortcut('<Control><Alt>Down', 'Split pane down', 'split_down'),
+    Shortcut('<Control><Alt>n', 'Open note in new window', 'pop_out_note'),
 )
 
 EDITOR_SHORTCUTS = (
@@ -108,13 +111,9 @@ KEYBIND_GROUPS = (
         ('Home / End', 'Select the first or last result when the shortcut list has focus'),
         ('Escape', 'Close the cheatsheet'),
     )),
-    ('Folding, slash commands, and multiple cursors', (
-        ('Ctrl+Shift+[', 'Fold the section at the cursor'),
-        ('Ctrl+Shift+]', 'Unfold the section at the cursor'),
+    ('Slash commands and multiple cursors', (
         ('/', 'Open slash commands at the start of a line or after a space'),
         ('Up / Down, Enter / Tab, Escape', 'Choose a slash command, insert it, or dismiss the menu'),
-        ('Ctrl+D', 'Select the current word, then add the next occurrence'),
-        ('Ctrl+Shift+L', 'Select every occurrence of the current word or selection'),
         ('Escape', 'Clear extra cursors'),
     )),
     ('Vim mode', (
@@ -136,3 +135,60 @@ KEYBIND_GROUPS = (
         ('Shift+F10 / Menu', "Open the focused control's context menu"),
     )),
 )
+
+
+def shortcut_key(keyval):
+    """Normalize shifted bracket keys consistently for recording and dispatch."""
+    from gi.repository import Gdk
+    lowered = Gdk.keyval_to_lower(keyval)
+    return {Gdk.KEY_braceleft: Gdk.KEY_bracketleft, Gdk.KEY_braceright: Gdk.KEY_bracketright}.get(lowered, lowered)
+
+
+def shortcut_id(scope, shortcut):
+    return scope + ':' + shortcut.handler + ':' + shortcut.accelerator
+
+
+def effective_shortcuts(shortcuts, scope, overrides):
+    from dataclasses import replace
+    return tuple(replace(shortcut, accelerator=overrides.get(shortcut_id(scope, shortcut), shortcut.accelerator))
+                 for shortcut in shortcuts if overrides.get(shortcut_id(scope, shortcut), shortcut.accelerator))
+
+
+class HotkeyStore:
+    def __init__(self, preferences_path):
+        from pathlib import Path
+        self.path = Path(preferences_path).with_name('hotkeys.json')
+
+    def load(self):
+        import json
+        try:
+            data = json.loads(self.path.read_text())
+            return {key: value for key, value in data.items() if isinstance(key, str) and isinstance(value, str)} if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def save(self, bindings):
+        from .workspace import _write
+        _write(self.path, bindings)
+
+
+def validate_hotkey(bindings, identifier, accelerator):
+    from gi.repository import Gdk, Gtk
+    groups = (('app', APP_SHORTCUTS), ('editor', EDITOR_SHORTCUTS))
+    known = {shortcut_id(scope, shortcut) for scope, shortcuts in groups for shortcut in shortcuts}
+    if identifier not in known:
+        raise ValueError('Unknown command.')
+    if accelerator:
+        key, mask = Gtk.accelerator_parse(accelerator)
+        if not key or not Gtk.accelerator_valid(key, mask) or (not mask and Gdk.keyval_to_unicode(key)):
+            raise ValueError('Use a modifier key or a function key for this shortcut.')
+        canonical = Gtk.accelerator_name(shortcut_key(key), mask)
+        for scope, shortcuts in groups:
+            for shortcut in shortcuts:
+                if shortcut_id(scope, shortcut) == identifier:
+                    continue
+                other = bindings.get(shortcut_id(scope, shortcut), shortcut.accelerator)
+                if other and (shortcut_key(Gtk.accelerator_parse(other)[0]), Gtk.accelerator_parse(other)[1]) == (shortcut_key(key), mask):
+                    raise ValueError('Already assigned to: ' + shortcut.description)
+        return canonical
+    return ''

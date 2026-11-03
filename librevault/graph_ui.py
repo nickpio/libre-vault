@@ -1,5 +1,6 @@
 """Native Cairo graph window, with an isolated, demand-driven layout worker."""
 import math
+from dataclasses import asdict
 import multiprocessing
 import uuid
 from pathlib import PurePosixPath
@@ -241,7 +242,8 @@ class GraphView(Gtk.Box):
                  depth=self.depth.get_value_as_int(), orphans=self.orphans.get_active(),
                  tags=self.tags.get_active(), attachments=self.attachments.get_active(),
                  unresolved=self.unresolved.get_active(), directed=True,
-                 vault_root=str(self.owner.vault.root), groups=self.groups)), daemon=True)
+                 vault_root=str(self.owner.vault.root), groups=self.groups,
+                 vault_options=asdict(self.owner.vault.options))), daemon=True)
         self.process.start()
         child.close()
         self.poll_source = GLib.timeout_add(33, self.poll)

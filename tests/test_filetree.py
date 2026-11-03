@@ -18,11 +18,12 @@ class FileTreeTests(unittest.TestCase):
             ['Projects', 'Projects/Nested', 'Projects-old'], {'Projects'}),
             ['Projects/', 'Projects-old/', 'Projects-old/Keep.md', 'Root.md'])
 
-    def test_root_attachment_storage_is_hidden_without_hiding_other_folders(self):
+    def test_attachment_folders_remain_visible(self):
         self.assertEqual(tree_paths(
             ['attachments/Sub/Note.md', 'Projects/attachments/Note.md', 'Root.md'],
             ['attachments', 'attachments/Sub', 'Projects', 'Projects/attachments'], set()),
-            ['Projects/', 'Projects/attachments/', 'Projects/attachments/Note.md', 'Root.md'])
+            ['attachments/', 'attachments/Sub/', 'attachments/Sub/Note.md',
+             'Projects/', 'Projects/attachments/', 'Projects/attachments/Note.md', 'Root.md'])
 
     def test_empty_tree_and_case_insensitive_sibling_order(self):
         self.assertEqual(tree_paths([], [], set()), [])

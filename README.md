@@ -279,9 +279,9 @@ For example, `tag:work property:status=done -path:Archive` finds completed work 
 <summary><b>Attachments, transclusion, and anchors</b></summary>
 <br>
 
-Use the attachment button to copy a file into the vault's `attachments` folder and insert its link. Pasting a screenshot or dropping local files into the editor uses the same storage. Identical files with the same extension are reused; different files get a new name when necessary. Undo removes the inserted Markdown but keeps the copied file. The root `attachments` folder is hidden from the file tree but remains accessible in your file manager.
+Use the attachment button to copy a file into the vault's `attachments` folder and insert its link. Pasting a screenshot or dropping local files into the editor uses the same storage. Identical files with the same extension are reused; different files get a new name when necessary. Undo removes the inserted Markdown but keeps the copied file. Choose a different destination in **Settings → Vault**. The path is relative to the vault; an empty path stores files at the vault root. Attachment folders remain visible in the file tree.
 
-Wikilinks and embeds support exact heading paths (`[[Note#Heading]]`, `[[Note#Parent#Child]]`, `[[#Heading]]`) and block IDs (`[[Note#^block-id]]`, `[[#^block-id]]`) with live `#` and `#^` autocomplete. Holding <kbd>Ctrl</kbd> while hovering a link opens a preview popover with the target note, section, or block.
+Wikilinks and embeds support exact heading paths (`[[Note#Heading]]`, `[[Note#Parent#Child]]`, `[[#Heading]]`) and block IDs (`[[Note#^block-id]]`, `[[#^block-id]]`) with live `#` and `#^` autocomplete. Hovering an internal link opens a preview card after 450 ms; holding <kbd>Ctrl</kbd> shows it immediately. The card shows the target note, section, or block.
 
 Reading mode displays local images (including `|width` and `|widthxheight` sizing), audio/video attachment cards, and `![[Note]]`, `![[Note#Heading]]`, and `![[Note#^block-id]]` transclusions with a button to open the source at the exact anchor. PDFs embedded with `![[file.pdf]]` or `![[file.pdf#page=N]]` get page controls when Poppler is installed, with an **Open** button that falls back to the system viewer. Each render is limited to 32 embedded files and 4 MiB of embedded note source; open files separately when a preview reaches the limit.
 
@@ -301,7 +301,15 @@ Expand **Tags** in the left sidebar to browse a nested tree with per-note counts
 <summary><b>Tabs, splits, and workspace restore</b></summary>
 <br>
 
-Opening a vault restores its tabs, cursor and scroll positions, collapsed folders, and split editor. A split shares the original note's source buffer and undo history, so you can keep one note in the split while selecting another tab to compare them.
+Opening a vault restores its tabs, cursor and scroll positions, collapsed folders, nested splits, and note windows. All views of a note share its source buffer, undo history, save state, and conflict checks.
+
+Use **Split right** or **Split down** from the command palette to divide the focused pane. Repeat either command to build a horizontal or vertical grid. Each additional pane has its own tab group, split buttons, and close control. Select a main tab, then click **Add active note** in a pane to add a view there. Closing a pane leaves its notes open in the main tabs. The original split shortcut, **Ctrl+Shift+S**, opens one split or closes all extra pane groups.
+
+**Open note in new window** opens a separate OS window for the active note. It shares the original buffer and autosave; closing the window leaves the note open in the workspace. Closing the original note closes its additional views.
+
+The palette also offers **Use standard tabs**, **Use stacked tabs**, and **Use sliding note panes**. Stacked mode places tab headers vertically. Sliding mode shows note and graph views side by side in a horizontally scrolling strip. Canvas and Bases views use their normal tabs.
+
+Drag the **Files**, **Tags**, and **Details** sidebar tabs to reorder them or move them between the left and right docks. Their positions are saved with the workspace.
 
 Drag a tab left or right to rearrange notes, graphs, Bases, and canvases. The tab briefly fades into place when dropped, and the new order is saved for the vault. The animation follows the desktop's animation setting.
 
@@ -327,8 +335,10 @@ The gear icon at the bottom-left opens **Settings**, with a category sidebar and
 | --- | --- |
 | Appearance | Dark, Light, or Lights Out theme; interface font size; text font family; text size |
 | Editor | Readable line length, writing column width, line wrapping, list continuation on Enter, slash commands (`/`), Vim keybindings |
+| Hotkeys | Record, clear, or restore application and editor command shortcuts; conflicts are reported before saving |
+| Vault | Per-vault hidden-file visibility, internal symbolic links, and attachment destination |
 
-Changes apply immediately to open notes and future tabs. **Restore defaults** resets everything. Both sidebars open and close with a short slide transition that preserves splitter widths and respects GTK's system animation preference.
+Appearance and editor changes apply immediately. In **Hotkeys**, select a shortcut field, press the new keys, and click **Apply**. Backspace clears a binding; **Default** fills in its original value for you to apply. The cheatsheet reflects saved bindings. **Restore defaults** resets appearance and editor preferences; hotkeys have their own per-command defaults. Vault settings use **Apply vault settings**. Both sidebars open and close with a short slide transition that preserves splitter widths and respects GTK's system animation preference.
 
 </details>
 
@@ -353,7 +363,9 @@ Changes apply immediately to open notes and future tabs. **Restore defaults** re
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd> | Toggle file tree |
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> | Fuzzy note switcher |
 | <kbd>Alt</kbd>+<kbd>Left</kbd> / <kbd>Right</kbd> | Navigate back / forward |
-| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> | Open or close a split editor |
+| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> | Open or close extra split panes |
+| <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Right</kbd> / <kbd>Down</kbd> | Split the focused pane right or down |
+| <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>N</kbd> | Open the active note in a new window |
 | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>G</kbd> | Open or close graph view |
 
 </td>
@@ -477,8 +489,8 @@ The full matrix and acceptance gates live in [**docs/compatibility.md**](docs/co
 
 - **Durability.** Crash recovery keeps the latest unsaved draft, and saved-version history records snapshots on content-changing saves under `XDG_STATE_HOME/libre-vault/history`. Save checks reduce accidental overwrites but cannot lock out unrelated programs, and a narrow race remains between the final comparison and atomic replacement. Hard links, extended attributes, file ownership, and arbitrary mixed line endings are not preserved as a compatibility contract.
 - **Rendering.** Math uses Matplotlib's mathtext rather than a full LaTeX engine; common macros and multi-line environments (`aligned`, `align`, `gather`, `cases`, `matrix`, `pmatrix`, `bmatrix`) are expanded before rendering, and unsupported expressions display their source with a message. Mermaid fences draw flowcharts, sequence, state, and class diagrams in Reading and live preview; other diagram syntax is shown as a source card. Local audio and video attachments render as media cards with external-player controls.
-- **Links and search.** Link resolution is case-sensitive and reports ambiguous basenames and aliases. Search supports the documented filters, not every Obsidian query operator.
-- **Files.** Symbolic links, dotfiles, and hidden folders are excluded from browsing. Non-UTF-8 files are left unchanged and report an error when opened.
+- **Links and search.** Link resolution ignores case and reports ambiguous basenames and aliases. An exact path retains priority when differently cased filenames coexist. Search supports the documented filters, not every Obsidian query operator.
+- **Files.** Hidden notes and internal symbolic links are opt-in per vault. Symbolic-link cycles and targets outside the vault are excluded. `.git`, `.obsidian`, `.trash`, and `.librevault` remain excluded, including through symbolic links. Non-UTF-8 notes are left unchanged and report an error when opened.
 - **Scale.** Filesystem notifications update changed notes and subtrees without periodic full-vault reads, but initial indexing, explicit rescans, and multi-file organization still scan the vault. Large-vault latency has not been optimized.
 - **Moves.** Multi-file moves use revision checks and roll back after ordinary failures, but are not a crash-atomic transaction. Interrupted moves keep original rewritten-note bytes and a manifest under `.trash/.librevault-moves` for manual recovery.
 - **Out of scope.** Third-party plugins, hosted sync, mobile support, and published AppImage releases.

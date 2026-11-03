@@ -86,7 +86,7 @@ class LinkPreview:
         if not target:
             self.hide()
             return
-        key = (source, target)
+        key = (widget, source, target)
         if self.popover is not None and self.key == key:
             return
         if self.timer is not None and self.key == key:
@@ -142,7 +142,7 @@ class LinkPreview:
         box.pack_start(self.body_label, False, False, 0)
         self.popover.add(box)
         self.popover.set_pointing_to(rectangle)
-        self.key = (source, target)
+        self.key = (widget, source, target)
         self.popover.show_all()
 
 
@@ -448,8 +448,8 @@ class EditorNavigation:
             self.link_preview.hide()
             return True
         if event.keyval in (Gdk.KEY_Control_L, Gdk.KEY_Control_R) and self.hover:
-            source, target, rectangle = self.hover
-            self.link_preview.consider(self.pane.editor, source, target, True, rectangle, self.pane.window)
+            widget, source, target, rectangle = self.hover
+            self.link_preview.consider(widget, source, target, True, rectangle, self.pane.window)
         return False
 
     def leave(self, *_):
@@ -469,7 +469,7 @@ class EditorNavigation:
             return False
         rectangle = view.get_iter_location(iterator)
         rectangle.x, rectangle.y = view.buffer_to_window_coords(Gtk.TextWindowType.WIDGET, rectangle.x, rectangle.y)
-        self.hover = (self.pane.note.path, target, rectangle)
+        self.hover = (view, self.pane.note.path, target, rectangle)
         ctrl = bool(event.state & Gdk.ModifierType.CONTROL_MASK)
         self.link_preview.consider(view, self.pane.note.path, target, ctrl, rectangle, self.pane.window)
         return False

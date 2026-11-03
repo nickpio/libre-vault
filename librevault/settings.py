@@ -67,6 +67,37 @@ class SettingsDialog(Gtk.Dialog):
         self.entry(notes, 'daily_notes_template', 'Daily note template', 'Optional template note, for example Templates/Daily.md. Leave empty for a blank note.')
         self.entry(notes, 'unique_notes_folder', 'Unique notes folder', 'Where Zettelkasten notes are created. Leave empty to use the vault root.')
         self.entry(notes, 'unique_notes_format', 'Unique note format', 'Timestamp prefix, for example YYYYMMDDHHmm.')
+        from .hotkeys_ui import add_hotkey_settings
+        add_hotkey_settings(self)
+        if owner.vault is not None:
+            vault_page = self.page('Vault', 'Filesystem and attachment settings for this vault.')
+            self.vault_hidden = Gtk.CheckButton(label='Show hidden notes and folders')
+            self.vault_hidden.set_active(owner.vault.options.show_hidden)
+            self.vault_links = Gtk.CheckButton(label='Follow symbolic links inside the vault')
+            self.vault_links.set_active(owner.vault.options.follow_symlinks)
+            self.vault_attachment = Gtk.Entry(text=owner.vault.options.attachment_folder,
+                                             placeholder_text='Attachment folder; empty uses vault root')
+            for widget in (self.vault_hidden, self.vault_links, self.vault_attachment):
+                vault_page.pack_start(widget, False, False, 6)
+            feedback = Gtk.Label(xalign=0)
+            feedback.set_line_wrap(True)
+            apply = Gtk.Button(label='Apply vault settings')
+            def apply_vault(*_):
+                from .vault_options import VaultOptions
+                from .vault import VaultError
+                raw = self.vault_attachment.get_text().strip()
+                options = VaultOptions.from_dict(dict(show_hidden=self.vault_hidden.get_active(),
+                    follow_symlinks=self.vault_links.get_active(), attachment_folder=raw))
+                try:
+                    if options.attachment_folder != raw:
+                        raise ValueError('Use a relative folder inside the vault.')
+                    owner.set_vault_options(options)
+                    feedback.set_text('Vault settings saved.')
+                except (ValueError, VaultError, OSError) as error:
+                    feedback.set_text(str(error))
+            apply.connect('clicked', apply_vault)
+            vault_page.pack_start(apply, False, False, 6)
+            vault_page.pack_start(feedback, False, False, 6)
         self.error = Gtk.Label(xalign=0)
         self.error.set_line_wrap(True)
         self.error.set_no_show_all(True)

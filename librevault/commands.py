@@ -4,7 +4,7 @@ import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gdk, Gtk
 
-from .shortcuts import APP_SHORTCUTS, EDITOR_SHORTCUTS, KEYBIND_GROUPS
+from .shortcuts import APP_SHORTCUTS, EDITOR_SHORTCUTS, KEYBIND_GROUPS, effective_shortcuts
 
 
 class CommandPalette(Gtk.EventBox):
@@ -74,6 +74,11 @@ class CommandPalette(Gtk.EventBox):
                             ('Close vault', owner.close_vault),
                             ('Navigate back', owner.navigate_back), ('Navigate forward', owner.navigate_forward),
                             ('Toggle split editor', owner.toggle_split),
+                            ('Split right', owner.split_right), ('Split down', owner.split_down),
+                            ('Open note in new window', owner.pop_out_note),
+                            ('Use standard tabs', lambda: owner.set_tab_mode('tabs')),
+                            ('Use stacked tabs', lambda: owner.set_tab_mode('stacked')),
+                            ('Use sliding note panes', lambda: owner.set_tab_mode('sliding')),
                             ('Toggle file tree', owner.toggle_file_tree),
                             ('Toggle note details', owner.toggle_details)])
             note = owner.current()
@@ -221,9 +226,9 @@ class KeybindCheatsheet(Gtk.Dialog):
         self.bindings.set_placeholder(self.empty)
         key_widths = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
         application = tuple((Gtk.accelerator_get_label(*Gtk.accelerator_parse(shortcut.accelerator)),
-                             shortcut.description) for shortcut in APP_SHORTCUTS)
+                             shortcut.description) for shortcut in effective_shortcuts(APP_SHORTCUTS, 'app', owner.hotkeys))
         editing = tuple((Gtk.accelerator_get_label(*Gtk.accelerator_parse(shortcut.accelerator)),
-                         shortcut.description) for shortcut in EDITOR_SHORTCUTS)
+                         shortcut.description) for shortcut in effective_shortcuts(EDITOR_SHORTCUTS, 'editor', owner.hotkeys))
         self.groups = (('Application', application), ('Editor commands', editing), *KEYBIND_GROUPS)
         self.bindings.set_header_func(self.section_header)
         for section, (title, bindings) in enumerate(self.groups):

@@ -36,11 +36,9 @@ class VaultMonitor:
             path = self.vault._visible_path(relative) if relative else self.vault.root
         except VaultError:
             return
-        if path.is_symlink() or not path.is_dir():
+        if not path.is_dir():
             return
-        for directory, children, _ in os.walk(path, followlinks=False):
-            children[:] = [name for name in children if not name.startswith('.')
-                           and not (Path(directory) / name).is_symlink()]
+        for directory, children, _ in self.vault.walk(relative):
             key = Path(directory).relative_to(self.vault.root).as_posix()
             key = '' if key == '.' else key
             if key not in self.monitors:
@@ -61,7 +59,7 @@ class VaultMonitor:
                 relative = Path(path).relative_to(self.vault.root)
             except ValueError:
                 continue
-            if any(part.startswith('.') for part in relative.parts):
+            if not self.vault.path_allowed(relative.as_posix()):
                 continue
             self.queue('' if relative == Path('.') else relative.as_posix())
 
@@ -93,7 +91,7 @@ class VaultMonitor:
                     if not relative or key == relative or key.startswith(relative + '/'):
                         self.cancel(self.monitors.pop(key))
                 self.watch_tree(relative)
-        self.changed(paths)
+        self.changed({''} if self.vault.options.follow_symlinks else paths)
         return False
 
     def close(self):

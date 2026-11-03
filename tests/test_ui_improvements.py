@@ -113,6 +113,29 @@ class WindowImprovementTests(unittest.TestCase):
             self.assertEqual(self.window.files.get_selected_row().path, 'A.md')
             self.assertEqual(self.window.current().text(), '# Different source\n')
 
+    def test_details_views_show_readable_properties_and_restore_selection(self):
+        pane = self.window.current()
+        pane.buffer.set_text('---\nstatus: open\ncount: 3\n---\n# Heading\n\n[[B]]\n')
+        self.drain_events()
+        self.window.details_buttons['properties'].set_active(True)
+        labels = [child.get_text() for child in self.window.context.get_children()
+                  if isinstance(child, Gtk.Label)]
+        self.assertIn('status', labels)
+        self.assertIn('open', labels)
+        self.assertIn('3', labels)
+        self.assertFalse(any(isinstance(child, Gtk.Entry) for child in self.window.context.get_children()))
+        state = self.window.capture_workspace_state()
+        self.assertEqual(state['details_view'], 'properties')
+        self.window.details_buttons['links'].set_active(True)
+        buttons = [child.get_label() for child in self.window.context.get_children()
+                   if isinstance(child, Gtk.Button)]
+        self.assertIn('B', buttons)
+        self.assertNotIn('Edit properties…', buttons)
+        self.window.restore_workspace(state)
+        self.assertEqual(self.window.details_view, 'properties')
+        self.assertTrue(self.window.details_buttons['properties'].get_active())
+        pane.dirty = False
+
     def test_outline_buttons_jump_to_real_headings(self):
         pane = self.window.current()
         text = '```\n# Fake\n```\n\nReal title\n==========\n'

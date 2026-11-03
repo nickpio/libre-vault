@@ -21,7 +21,9 @@ def local_path(vault, source, target):
         normalized = posixpath.normpath(str(candidate))
         try:
             path = vault._visible_path(normalized)
-        except VaultError:
+            if not path.is_file():
+                path = vault.casefold_path(normalized)
+        except (VaultError, OSError):
             continue
         if path.is_file():
             return path
@@ -32,8 +34,9 @@ def store_attachment(vault, name, data):
     """Reuse matching attachment bytes or copy them without overwriting."""
     name = Path(name).name
     name = re.sub(r'[\x00-\x1f/\\]', '_', name).lstrip('.') or 'attachment'
-    directory = vault._visible_path('attachments')
-    directory.mkdir(exist_ok=True)
+    folder = vault.options.attachment_folder
+    directory = vault._visible_path(folder) if folder else vault.root
+    directory.mkdir(parents=True, exist_ok=True)
     if not directory.is_dir():
         raise VaultError('The attachments path is not a folder.')
     original = Path(name)
@@ -43,7 +46,7 @@ def store_attachment(vault, name, data):
         if candidate.name.startswith('.') or candidate.suffix.lower() != original.suffix.lower():
             continue
         try:
-            path = vault._visible_path('attachments/' + candidate.name)
+            path = vault._visible_path((folder + '/' if folder else '') + candidate.name)
             if not path.is_file() or path.stat().st_size != len(data):
                 continue
             with path.open('rb') as handle:
@@ -59,7 +62,7 @@ def store_attachment(vault, name, data):
             continue
     for number in range(10000):
         filename = name if number == 0 else f'{original.stem} {number}{original.suffix}'
-        path = vault._visible_path('attachments/' + filename)
+        path = vault._visible_path((folder + '/' if folder else '') + filename)
         try:
             with path.open('xb') as handle:
                 handle.write(data)

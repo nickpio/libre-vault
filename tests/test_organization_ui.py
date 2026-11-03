@@ -96,6 +96,7 @@ class OrganizationUiTests(unittest.TestCase):
         self.assertEqual(pane.text(), original)
         self.assertFalse(pane.dirty)
         self.window.open_note('B.md')
+        self.window.details_buttons['properties'].set_active(True)
         tags = [child for child in self.window.context.get_children() if isinstance(child, Gtk.Button)
                 and child.get_child().get_text() == '#work']
         self.assertEqual(len(tags), 1)

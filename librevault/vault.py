@@ -16,6 +16,7 @@ from urllib.parse import unquote, urlsplit
 
 from markdown_it import MarkdownIt
 
+from .vault_options import VaultPaths
 from .index import NoteIndex, TextCache
 from .mentions import Mention, find_mentions
 from .metadata import matches_query, note_metadata, query_terms, search_result
@@ -105,11 +106,13 @@ def fingerprint(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-class Vault:
-    def __init__(self, root: str | Path, *, cache_dir=None, text_cache_bytes=4 * 1024 * 1024):
+class Vault(VaultPaths):
+    def __init__(self, root: str | Path, *, cache_dir=None, text_cache_bytes=4 * 1024 * 1024, options=None):
         self.root = Path(root).expanduser().resolve(strict=True)
         if not self.root.is_dir():
             raise VaultError('Choose a folder as your vault.')
+        from .vault_options import VaultOptions
+        self.options = options or VaultOptions()
         self.notes: dict[str, NoteRecord | None] = {}
         self.canvases: dict[str, str | None] = {}
         self.version_history = None
@@ -123,20 +126,6 @@ class Vault:
         except Exception:
             self.close()
             raise
-
-    def _visible_path(self, relative: str) -> Path:
-        # No symlink traversal. A vault never grants access outside its root.
-        path = PurePosixPath(relative)
-        if path.is_absolute() or not path.parts or any(p in ('.', '..') or p.startswith('.') for p in path.parts):
-            raise VaultError('Use a visible path inside the vault.')
-        current = self.root
-        if current.is_symlink():
-            raise VaultError('The vault folder was replaced by a symbolic link.')
-        for part in path.parts:
-            current = current / part
-            if current.is_symlink():
-                raise VaultError('Symbolic links are excluded from this prototype.')
-        return current
 
     def _path(self, relative: str) -> Path:
         current = self._visible_path(relative)
@@ -182,15 +171,10 @@ class Vault:
         notes = {}
         canvases = {}
         visible_folders = []
-        for directory, folders, files in os.walk(self.root, followlinks=False):
-            folders[:] = sorted(f for f in folders if not f.startswith('.') and not (Path(directory) / f).is_symlink())
+        for directory, folders, files in self.walk():
             visible_folders.extend((Path(directory) / name).relative_to(self.root).as_posix() for name in folders)
             for name in sorted(files):
-                if name.startswith('.'):
-                    continue
                 path = Path(directory) / name
-                if path.is_symlink():
-                    continue
                 relative = path.relative_to(self.root).as_posix()
                 lower = name.lower()
                 if lower.endswith('.md'):
@@ -248,7 +232,7 @@ class Vault:
         """
         roots = []
         for relative in sorted(set(paths), key=lambda value: (value.count('/'), value)):
-            if relative and any(part.startswith('.') for part in PurePosixPath(relative).parts):
+            if relative and not self.path_allowed(relative):
                 continue
             if not any(not parent or relative == parent or relative.startswith(parent + '/') for parent in roots):
                 roots.append(relative)
@@ -265,15 +249,11 @@ class Vault:
                 path = self._visible_path(relative)
                 if path.is_dir():
                     folders.add(relative)
-                    for directory, children, files in os.walk(path, followlinks=False):
-                        children[:] = [name for name in children if not name.startswith('.')
-                                       and not (Path(directory) / name).is_symlink()]
+                    for directory, children, files in self.walk(relative):
                         folders.update((Path(directory) / name).relative_to(self.root).as_posix()
                                        for name in children)
                         for name in files:
                             file = Path(directory) / name
-                            if name.startswith('.') or file.is_symlink():
-                                continue
                             listed = file.relative_to(self.root).as_posix()
                             if file.suffix.lower() == '.md':
                                 found[listed] = None
@@ -309,6 +289,8 @@ class Vault:
 
     def save(self, note: Note, text: str) -> Note:
         path = self._path(note.path)
+        if path.is_symlink():
+            path = path.resolve()
         try:
             raw = path.read_bytes()
         except FileNotFoundError as error:
@@ -422,31 +404,9 @@ class Vault:
         return create_canvas(self, relative)
 
     def resolve(self, source: str, target: str) -> list[str]:
-        """Return candidates. Never silently choose between ambiguous basenames."""
-        target = unquote(target.split('|', 1)[0].split('#', 1)[0]).strip()
-        if not target:
-            return [source] if source in self.notes else []
-        target = target.replace('\\', '/')
-        if not target.lower().endswith('.md'):
-            target += '.md'
-        parent = PurePosixPath(source).parent
-        # Explicit relative paths are resolved from the current note.
-        if target.startswith('./') or target.startswith('../'):
-            normalized = os.path.normpath(str(parent / target)).replace(os.sep, '/')
-            return [normalized] if normalized in self.notes else []
-        if target in self.notes:
-            return [target]
-        local = str(parent / target)
-        if local in self.notes:
-            return [local]
-        if '/' not in target:
-            candidates = sorted(path for path in self.notes if PurePosixPath(path).name == target)
-            if candidates:
-                return candidates
-            alias = target[:-3].casefold()
-            return sorted(path for path, note in self.notes.items() if note is not None and
-                          any(value.casefold() == alias for value in self.metadata(path).aliases))
-        return []
+        """Resolve paths and aliases without silently choosing ambiguous names."""
+        from .link_resolution import resolve_paths
+        return resolve_paths(self.notes, lambda path: self.metadata(path).aliases, source, target)
 
     def backlinks(self, relative: str) -> list[str]:
         return [path for path, note in self.notes.items() if note is not None and

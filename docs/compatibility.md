@@ -16,16 +16,17 @@ The compatibility specification starts with public documentation. These are docu
 
 | First-version target | Prototype status |
 | --- | --- |
-| Open an existing vault in place | Implemented for visible UTF-8 Markdown files; hidden paths and symlinks excluded |
+| Open an existing vault in place | UTF-8 Markdown files with per-vault opt-in hidden paths and internal symbolic links; cycles and external targets excluded |
 | Preserve arbitrary frontmatter and `.obsidian` settings | Frontmatter preserved as source; `.obsidian` left untouched |
 | Source editor and reading view | Live preview, full source, and native GTK reading modes implemented |
 | Undo/redo, find/replace, formatting commands | Per-tab grouped history, literal source find/replace, bold/italic/highlight/strikethrough toggles, Markdown link insertion, interactive table editing, folding, slash commands, multi-cursor editing, and optional Vim mode implemented |
 | Obsidian-style live-preview editing | Headings, emphasis, OFM highlights (`==`), strikethrough (`~~`), comments (`%%`), fenced-code syntax coloring, quotes, link labels, plus live widget previews for images, note/subpath embeds, math, Mermaid diagrams, tables, and callouts implemented |
-| Wikilinks and local Markdown links | Implemented, including display text, relative Markdown paths, and Ctrl-hover preview popovers |
+| Wikilinks and local Markdown links | Case-insensitive resolution, display text, relative Markdown paths, delayed hover cards, and immediate Ctrl-hover previews implemented |
 | Heading and block links | Exact `#Heading`, `#Parent#Child`, and `#^block-id` anchor resolution plus `#` and `#^` editor autocomplete implemented |
 | Backlinks and outgoing links | Implemented; backlinks index saved files |
 | Search, quick switcher, command palette | Saved-file snippets, highlighted matches, field filters, fuzzy path/alias switcher, and command palette implemented |
-| Tabs and workspace layouts | Per-vault tab/cursor/scroll/folder restoration, named workspace profiles, and shared-buffer split editor implemented |
+| Tabs and workspace layouts | Recursive horizontal/vertical pane groups, shared-buffer note windows, vertical tab headers, sliding note panes, movable sidebar docks, workspace restoration, and named layouts implemented |
+| Customizable hotkeys | Application and editor command rebinding in Settings, conflict detection, persistent overrides, and updated cheatsheet implemented |
 | Expandable file tree, create, rename, delete | Creation, rename/move with resolved-link updates, and recoverable vault-local trash implemented |
 | Atomic writes, external-change handling, recovery history | Atomic replacement, revision checks, autosave, unsaved crash drafts, and saved-version history snapshots implemented |
 | Properties, tags, aliases, unlinked mentions | Typed property forms with a vault-wide type registry, raw YAML editing, nested tag tree and bulk rename, alias resolution, advanced search operators, and unlinked mentions with one-click linking implemented |

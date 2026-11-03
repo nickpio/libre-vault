@@ -26,15 +26,13 @@ def build_graph(rows, query='', root=None, depth=1, orphans=True,
             tag_values[path] = metadata.tags
         if matches_query(path, content, terms, metadata):
             matching.add(path)
-    names, aliases = defaultdict(list), defaultdict(list)
+    from .link_resolution import PathResolver
+    resolver = PathResolver(records, lambda path: records[path][0])
     assets = set(attachment_paths) if attachments else set()
-    for path in list(records) + sorted(assets):
-        names[posixpath.basename(path)].append(path)
-    for path, (values, _) in records.items():
-        for alias in values:
-            aliases[alias.casefold()].append(path)
+    asset_names = defaultdict(list)
+    for path in assets:
+        asset_names[posixpath.basename(path).casefold()].append(path)
     edges, nodes = set(), set(records)
-    available = set(records) | assets
     def edge(source, destination):
         if destination != source:
             nodes.add(destination)
@@ -47,20 +45,15 @@ def build_graph(rows, query='', root=None, depth=1, orphans=True,
             raw = unquote(link['target'].split('|', 1)[0].split('#', 1)[0]).strip().replace('\\', '/')
             if not raw or '://' in raw or raw.startswith(('mailto:', 'data:')):
                 continue
-            asset_local = posixpath.normpath(posixpath.join(posixpath.dirname(source), raw))
-            is_asset = raw in assets or asset_local in assets or any(p in assets for p in names.get(raw, ()))
-            target = raw if raw.lower().endswith('.md') or is_asset else raw + '.md'
+            target = raw if raw.lower().endswith('.md') else raw + '.md'
             local = posixpath.normpath(posixpath.join(posixpath.dirname(source), target))
-            if target.startswith(('./', '../')):
-                candidates = [local] if local in available else []
-            elif target in available:
-                candidates = [target]
-            elif local in available:
-                candidates = [local]
-            elif '/' not in target:
-                candidates = names.get(target) or aliases.get(target.removesuffix('.md').casefold(), [])
-            else:
-                candidates = []
+            candidates = resolver.resolve(source, raw)
+            if not candidates and attachments:
+                asset_local = posixpath.normpath(posixpath.join(posixpath.dirname(source), raw))
+                candidates = ([raw] if raw in assets else [asset_local] if asset_local in assets else
+                              [p for p in assets if p.casefold() in (raw.casefold(), asset_local.casefold())])
+                if not candidates and '/' not in raw:
+                    candidates = asset_names.get(raw.casefold(), [])
             candidates = set(candidates)
             if len(candidates) == 1:
                 edge(source, next(iter(candidates)))
@@ -157,15 +150,14 @@ def graph_worker(connection, index_path, options):
             options = dict(options)
             vault_root = options.pop('vault_root', None)
             groups = options.pop('groups', [])
+            filesystem_options = options.pop('vault_options', {})
             if options.get('attachments') and vault_root:
-                import os
-                assets = []
-                for directory, folders, files in os.walk(vault_root, followlinks=False):
-                    folders[:] = [name for name in folders if not name.startswith('.') and not (Path(directory) / name).is_symlink()]
-                    assets.extend((Path(directory) / name).relative_to(vault_root).as_posix()
-                                  for name in files if not name.startswith('.') and not name.lower().endswith('.md')
-                                  and not (Path(directory) / name).is_symlink())
-                options['attachment_paths'] = assets
+                from .vault_options import VaultOptions, VaultPaths
+                filesystem = VaultPaths(vault_root, VaultOptions.from_dict(filesystem_options))
+                options['attachment_paths'] = [
+                    (Path(directory) / name).relative_to(vault_root).as_posix()
+                    for directory, folders, files in filesystem.walk()
+                    for name in files if not name.lower().endswith('.md')]
             colors = {}
             compiled = [(query_terms(group['query']), group['color']) for group in groups]
             def indexed_rows():

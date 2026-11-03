@@ -33,7 +33,7 @@ headerbar {
 headerbar .title { color: @bright; }
 spinbutton { color: @ink; background: @raised; border: 1px solid @edge; border-radius: 8px; }
 spinbutton entry { color: @ink; background: transparent; }
-.brand { color: @bright; font-size: 10pt; font-weight: bold; padding: 0 8px; }
+.brand { padding: 0 8px; }
 .breadcrumb { color: @soft; font-size: 9pt; }
 button {
     background: @button_bg;
@@ -126,12 +126,13 @@ frame.command-palette > border { border: none; }
 .keybind-list row:selected { background: @selected; border-color: @border; }
 .keybind-list row:focus { outline: none; }
 scrolledwindow, viewport { border: none; box-shadow: none; background: transparent; }
+scrolledwindow undershoot, scrolledwindow overshoot { background: none; box-shadow: none; }
 paned > separator { background: transparent; min-width: 1px; min-height: 1px; border: none; }
 .workspace-split > separator {
     background: transparent;
     min-width: 5px;
 }
-notebook { background: @canvas; border: none; }
+notebook, notebook > stack { background: @canvas; border: none; box-shadow: none; }
 notebook > header { background: @canvas; border: none; padding: 4px 10px; box-shadow: none; }
 notebook > header tabs { border: none; }
 notebook > header tab {
@@ -145,7 +146,10 @@ notebook > header tab {
 }
 notebook > header tab:hover { background: @hover; color: @ink; }
 notebook > header tab:checked { background: @selected; color: @bright; box-shadow: none; }
-textview, textview text { background: @canvas; color: @ink; caret-color: @accent; }
+notebook.sidebar-dock > header { padding-top: 2px; padding-bottom: 2px; }
+notebook.sidebar-dock > header tab { padding-top: 3px; padding-bottom: 3px; margin-top: 1px; margin-bottom: 1px; }
+notebook.sidebar-dock > header tab:checked { background: @selection_bg; color: @bright; font-weight: bold; }
+textview, textview text { background: @canvas; color: @ink; caret-color: @accent; border: none; box-shadow: none; }
 .reading-view, .reading-view viewport { background: @canvas; color: @ink; }
 .reading-table { padding: 8px 0; }
 .reading-table-heading { font-weight: bold; border-bottom: 1px solid @edge; padding-bottom: 6px; }
@@ -198,6 +202,8 @@ checkbutton.task-checkbox check:checked { background: @accent; border-color: @ac
 checkbutton.task-checkbox:hover check { border-color: @bright; }
 checkbutton.task-checkbox:focus { outline: 1px solid @soft; outline-offset: 2px; }
 textview text selection { background: @selection_bg; color: @bright; }
+button.details-view-button { padding: 3px 8px; min-width: 0; font-size: 9pt; }
+button.details-view-button:checked { background: @selection_bg; color: @bright; border-color: @focus_edge; }
 .context-link { background: transparent; border-color: transparent; padding: 8px; border-radius: 8px; font-size: 9pt; }
 .context-link:hover { background: @hover; border-color: transparent; }
 button.outline-heading {

@@ -230,6 +230,7 @@ class MentionsHistoryWindowTests(unittest.TestCase):
                 if isinstance(child, Gtk.Label)]
 
     def test_unlinked_mentions_can_be_opened_or_linked_from_the_details_panel(self):
+        self.window.details_buttons['links'].set_active(True)
         labels = self.section_labels()
         self.assertLess(labels.index('Backlinks · Saved files'), labels.index('Unlinked mentions'))
         buttons = mention_buttons(self.window)
