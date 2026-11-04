@@ -1596,6 +1596,16 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
             return
         self.counts.set_text(count_summary(pane.text(), pane.buffer.get_line_count()))
 
+    def recovery_failed(self, error):
+        """Receives background recovery failures without touching GTK off-thread."""
+        if not self.closed:
+            GLib.idle_add(self._show_recovery_error, str(error))
+
+    def _show_recovery_error(self, message):
+        if not self.in_destruction():
+            self.status.set_text(f'Could not write recovery draft: {message}')
+        return False
+
     def update_save_status(self):
         if self.in_destruction():
             return

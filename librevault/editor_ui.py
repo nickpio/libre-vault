@@ -269,13 +269,10 @@ class NotePane(EditorRenderMixin, Gtk.Box):
         if self.autosave_source is not None:
             GLib.source_remove(self.autosave_source)
             self.autosave_source = None
-        try:
-            if self.dirty:
-                self.window.recovery.write(self.note, self.text())
-            else:
-                self.window.recovery.remove(self.note.path)
-        except OSError as error:
-            self.window.status.set_text(f'Could not write recovery draft: {error}')
+        if self.dirty:
+            self.window.recovery.schedule_write(self.note, self.text())
+        else:
+            self.window.recovery.schedule_remove(self.note.path)
         if self.dirty:
             self.autosave_source = GLib.timeout_add_seconds(2, self.autosave)
         if not self._preserving_cursors and self.multicursor:

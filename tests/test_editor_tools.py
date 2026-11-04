@@ -82,6 +82,7 @@ class EditorToolsTests(unittest.TestCase):
     def test_autosave_writes_note_and_removes_recovery_draft(self):
         self.pane.buffer.insert_at_cursor(' autosaved')
         self.assertTrue(self.pane.dirty)
+        self.window.recovery.flush()
         drafts = list(self.window.recovery.session.glob('*.json'))
         self.assertEqual(len(drafts), 1)
         GLib.source_remove(self.pane.autosave_source)

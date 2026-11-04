@@ -65,6 +65,7 @@ class VaultLifecycleMixin:
         self.bookmark_items = self.bookmark_store.load(vault.root)
         self.navigation_history = NavigationHistory()
         self.recovery = RecoveryStore(vault.root)
+        self.recovery.on_error = self.recovery_failed
         self.version_history = VersionHistoryStore(vault.root)
         vault.version_history = self.version_history
         self.update_workspace_state()

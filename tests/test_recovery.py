@@ -41,3 +41,42 @@ class RecoveryTests(unittest.TestCase):
             next(store.session.glob('*.json')).write_text('{', encoding='utf-8')
             store.close()
             self.assertEqual(RecoveryStore(root, Path(directory) / 'state').drafts(), [])
+
+    def test_scheduled_writes_are_coalesced_and_flushed_by_shutdown(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory) / 'vault'
+            root.mkdir()
+            (root / 'Note.md').write_text('original', encoding='utf-8')
+            store = RecoveryStore(root, Path(directory) / 'state')
+            note = Vault(root).read('Note.md')
+            written = []
+            write_now = store._write_now
+
+            def record(written_note, text):
+                written.append(text)
+                write_now(written_note, text)
+
+            store._write_now = record
+            for text in ('d', 'dr', 'dra', 'draft'):
+                store.schedule_write(note, text)
+            store.flush()
+            self.assertEqual(written, ['draft'])
+            store.schedule_write(note, 'pending at shutdown')
+            store.close()
+            self.assertEqual(written, ['draft', 'pending at shutdown'])
+            draft, _, text = RecoveryStore(root, Path(directory) / 'state').drafts()[0]
+            self.assertEqual(text, 'pending at shutdown')
+            self.assertTrue(draft.exists())
+
+    def test_remove_cancels_a_pending_scheduled_write(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory) / 'vault'
+            root.mkdir()
+            (root / 'Note.md').write_text('original', encoding='utf-8')
+            store = RecoveryStore(root, Path(directory) / 'state')
+            note = Vault(root).read('Note.md')
+            store.schedule_write(note, 'draft')
+            store.remove(note.path)
+            store.flush()
+            self.assertEqual(list(store.session.glob('*.json')), [])
+            store.close()
