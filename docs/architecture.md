@@ -18,7 +18,10 @@ flowchart LR
         History["history.py"]
     end
     subgraph UI["GTK interface"]
-        App["app.py<br/>windows, tabs, buffers"]
+        App["app.py<br/>window shell, tabs, explorer"]
+        Editor["editor_ui.py + editor_render.py<br/>note buffers, live preview"]
+        Lifecycle["vault_lifecycle.py<br/>open, release, close"]
+        Work["workspace_ui.py<br/>saved layout state"]
         Panels["palette, switcher,<br/>settings, explorer"]
         Graph["graph view"]
     end
@@ -29,6 +32,9 @@ flowchart LR
     FS -. events .-> Monitor
     Monitor --> App
     App <--> Vault
+    App --> Editor
+    App --> Lifecycle
+    App --> Work
     App --> Formatting
     App --> Edits
     App --> History
@@ -67,7 +73,11 @@ saved = vault.save(note, '# Revised plan\n')
 | `librevault/vault.py` | Path validation, UTF-8 reads, revision checks, atomic replacement, link parsing, resolution, search, and backlinks |
 | `librevault/monitor.py` | Recursive Gio directory watches, coalesced filesystem events, and watch cleanup |
 | `librevault/index.py` | Disposable SQLite content, metadata, link and substring indexes, plus a byte-bounded text cache |
-| `librevault/app.py` | GTK windows, open tabs, dirty buffers, live text styles, user choices, and event-driven refresh |
+| `librevault/app.py` | Window shell, tabs, file tree, details panel, commands, and event-driven refresh |
+| `librevault/editor_ui.py` | Note editor ownership: buffer, history, autosave, recovery draft, folding, multicursor, vim, and editing commands |
+| `librevault/editor_render.py` | Live-preview rendering: syntax spans, widgets for media/math/tables/callouts/embeds, list controls, and widget positioning |
+| `librevault/vault_lifecycle.py` | Opening, releasing, and closing a vault, its stores, recovery drafts, watchers, and dirty-note confirmation |
+| `librevault/workspace_ui.py` | Capturing, persisting, restoring, naming, and deleting workspace layouts and their navigation remapping |
 | `librevault/formatting.py` | Pure source-offset formatting spans, syntax ranges, and list/task structure derived from Markdown tokens |
 | `librevault/editing.py` | Pure source edits for list continuation, emphasis toggles, link construction, and literal match offsets |
 | `librevault/history.py` | Per-buffer grouped source deltas, typing coalescence, selection restoration, and bounded undo/redo stacks |
