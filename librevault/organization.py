@@ -21,14 +21,14 @@ def _trash_directory(vault):
     return directory
 
 
-def _prepare_backup(vault, source, destination, originals, mapping):
+def _prepare_recovery(vault, name, details, originals):
     """Publish a complete recovery manifest before changing any note bytes."""
     from .vault import VaultError
     if not originals:
         return None
-    parent = _trash_directory(vault) / '.librevault-moves'
+    parent = _trash_directory(vault) / name
     if parent.is_symlink() or parent.exists() and not parent.is_dir():
-        raise VaultError('The move recovery path must be a real folder.')
+        raise VaultError('The recovery path must be a real folder.')
     parent.mkdir(mode=0o700, exist_ok=True)
     backup = parent / uuid.uuid4().hex
     backup.mkdir(mode=0o700)
@@ -42,7 +42,7 @@ def _prepare_backup(vault, source, destination, originals, mapping):
                 handle.flush()
                 os.fsync(handle.fileno())
             notes.append({'path': path, 'backup': filename, 'revision': hashlib.sha256(raw).hexdigest()})
-        manifest = {'source': source, 'destination': destination, 'mapping': mapping, 'notes': notes}
+        manifest = {**details, 'notes': notes}
         with (backup / 'manifest.tmp').open('x', encoding='utf-8') as handle:
             os.fchmod(handle.fileno(), 0o600)
             json.dump(manifest, handle, ensure_ascii=False, indent=2)
@@ -59,6 +59,31 @@ def _prepare_backup(vault, source, destination, originals, mapping):
     except Exception:
         shutil.rmtree(backup)
         raise
+
+
+def _prepare_backup(vault, source, destination, originals, mapping):
+    return _prepare_recovery(
+        vault, '.librevault-moves',
+        {'source': source, 'destination': destination, 'mapping': mapping},
+        originals,
+    )
+
+
+def _prepare_tag_backup(vault, old, new, originals):
+    """Keep original note bytes and intent before a vault-wide tag rename."""
+    return _prepare_recovery(
+        vault, '.librevault-tag-renames',
+        {'operation': 'tag-rename', 'old': old, 'new': new,
+         'source': old, 'destination': new},
+        originals,
+    )
+
+
+def _discard_backup(backup):
+    """Remove a completed recovery copy, including its now-empty parent."""
+    shutil.rmtree(backup)
+    if backup.parent.exists() and not any(backup.parent.iterdir()):
+        backup.parent.rmdir()
 
 
 def _protected_ranges(text, parser):

@@ -4,10 +4,11 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from librevault.metadata import matches_query, note_metadata, query_terms, rename_tag
 from librevault.graph import build_graph
-from librevault.vault import Vault
+from librevault.vault import Vault, VaultError
 
 
 class AdvancedSearchTests(unittest.TestCase):
@@ -128,3 +129,58 @@ class TagManagementTests(unittest.TestCase):
             for tag in ('', 'bad tag', 'a//b', '../outside', '42'):
                 with self.assertRaises(ValueError):
                     vault.rename_tag('office', tag)
+
+    def test_failed_tag_rename_rolls_back_preceding_edits(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'A.md').write_text('#work\n')
+            (root / 'B.md').write_text('#work\n')
+            vault = Vault(root)
+            self.addCleanup(vault.close)
+            save = vault.save
+            calls = []
+            def fail_during_second_save(note, text):
+                calls.append(note.path)
+                manifests = list((root / '.trash/.librevault-tag-renames').glob('*/manifest.json'))
+                self.assertEqual(len(manifests), 1, 'Backups must be complete before any mutation')
+                if len(calls) == 2:
+                    raise OSError('simulated write failure')
+                return save(note, text)
+            with patch.object(vault, 'save', side_effect=fail_during_second_save):
+                with self.assertRaises(OSError):
+                    vault.rename_tag('work', 'office')
+            self.assertEqual((root / 'A.md').read_text(), '#work\n')
+            self.assertEqual((root / 'B.md').read_text(), '#work\n')
+            self.assertEqual(list((root / '.trash/.librevault-tag-renames').glob('*/manifest.json')), [])
+            self.assertEqual(vault.search('tag:work'), ['A.md', 'B.md'])
+            self.assertIn('rolled back', vault.organization_notice)
+
+    def test_failed_tag_rollback_preserves_manifest_and_reports_partial_completion(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'A.md').write_text('---\ntags: [work]\n---\n#work\n')
+            (root / 'B.md').write_text('#work\n')
+            vault = Vault(root)
+            self.addCleanup(vault.close)
+            save = vault.save
+            calls = []
+            def fail_during_second_save(note, text):
+                calls.append(note.path)
+                if len(calls) == 2:
+                    (root / 'A.md').write_text('external intervening change')
+                    raise OSError('simulated write failure')
+                return save(note, text)
+            with patch.object(vault, 'save', side_effect=fail_during_second_save):
+                with self.assertRaisesRegex(VaultError, 'partial completion.*Original note bytes.*preserved') as raised:
+                    vault.rename_tag('work', 'office')
+            self.assertEqual((root / 'A.md').read_text(), 'external intervening change')
+            self.assertEqual((root / 'B.md').read_text(), '#work\n')
+            manifest = next((root / '.trash/.librevault-tag-renames').glob('*/manifest.json'))
+            data = json.loads(manifest.read_text())
+            self.assertEqual(data['operation'], 'tag-rename')
+            self.assertEqual(data['old'], 'work')
+            self.assertEqual(data['new'], 'office')
+            backups = {note['path']: (manifest.parent / note['backup']).read_bytes() for note in data['notes']}
+            self.assertEqual(backups['A.md'], b'---\ntags: [work]\n---\n#work\n')
+            self.assertEqual(backups['B.md'], b'#work\n')
+            self.assertIn('A.md', str(raised.exception))

@@ -85,9 +85,15 @@ class TagPane(Gtk.Expander):
                         raise ValueError('Save open notes before renaming tags.')
                 changed = self.owner.vault.rename_tag(old, entry.get_text().strip())
                 self.owner.refresh()
-                self.owner.status.set_text(f'Renamed tag in {len(changed)} notes')
+                status = f'Renamed tag in {len(changed)} notes'
+                if self.owner.vault.organization_notice:
+                    status += ' · ' + self.owner.vault.organization_notice
+                self.owner.status.set_text(status)
                 break
             except (ValueError, VaultError, OSError) as error:
-                problem.set_text(str(error))
+                message = str(error)
+                if self.owner.vault.organization_notice:
+                    message += ' · ' + self.owner.vault.organization_notice
+                problem.set_text(message)
                 self.owner.refresh()
         dialog.destroy()

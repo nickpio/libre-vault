@@ -455,22 +455,63 @@ class Vault(VaultPaths):
 
     def rename_tag(self, old, new):
         from .metadata import rename_tag
+        from .organization import _discard_backup, _prepare_tag_backup
+        self.organization_notice = ''
         rename_tag('', old, new)  # Validate even when the vault is empty.
         # Prepare every edit before writing, so malformed YAML cannot cause a
         # partially applied rename. save() checks disk revisions for each file.
         edits = []
+        originals = {}
         for path, record in self.notes.items():
             if record is None:
                 continue
             note = self.read(path)
             changed = rename_tag(note.text, old, new)
             if changed != note.text:
+                originals[path] = (b'\xef\xbb\xbf' if note.bom else b'') + note.text.encode('utf-8')
                 edits.append((note, changed))
-        changed_paths = []
-        for note, text in edits:
-            self.save(note, text)
-            changed_paths.append(note.path)
-        return changed_paths
+        # As with moves, publish the complete manifest first so a crash or a
+        # failed rollback always leaves recoverable original bytes behind.
+        backup = _prepare_tag_backup(self, old, new, originals)
+        written = []
+        try:
+            for note, text in edits:
+                written.append((note, self.save(note, text)))
+        except Exception as error:
+            rollback_errors = []
+            restored = []
+            for original, saved in reversed(written):
+                # Never overwrite an intervening external edit during rollback.
+                try:
+                    self.save(saved, original.text)
+                    restored.append(original.path)
+                except (Conflict, OSError) as rollback_error:
+                    rollback_errors.append((original.path, rollback_error))
+            self.refresh()
+            if rollback_errors:
+                still_changed = ', '.join(path for path, _ in rollback_errors)
+                restored_text = ', '.join(restored) or 'none'
+                raise VaultError(
+                    f'Tag rename stopped with partial completion. Restored: {restored_text}. '
+                    f'Could not roll back: {still_changed}. Original note bytes and the tag rename '
+                    f'manifest are preserved in {backup}. {rollback_errors[0][1]}'
+                ) from error
+            if backup:
+                try:
+                    _discard_backup(backup)
+                except OSError:
+                    raise VaultError(
+                        f'Tag rename stopped. Original notes were restored; a recovery copy '
+                        f'remains in {backup}. {error}'
+                    ) from error
+            self.organization_notice = 'All earlier tag changes were rolled back.'
+            raise
+        if backup:
+            try:
+                _discard_backup(backup)
+            except OSError:
+                self.organization_notice = f'Recovery copies retained in {backup}'
+        return [note.path for note, _ in edits]
 
     def move(self, relative: str, destination: str) -> dict[str, str]:
         """Rename or move a note/folder, updating unambiguous Markdown links."""
