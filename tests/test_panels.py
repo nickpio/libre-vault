@@ -91,6 +91,63 @@ class PanelTests(unittest.TestCase):
         self.window.notes_toggle.set_active(opened)
         self.window.details_toggle.set_active(opened)
 
+    def assert_sidebar_contents_fit(self):
+        for panel in (self.window.notes_panel, self.window.details_panel):
+            child = panel.get_child()
+            self.assertAlmostEqual(child.get_allocated_width(), panel.get_allocated_width(), delta=1)
+            self.assertAlmostEqual(child.get_allocated_height(), panel.get_allocated_height(), delta=1)
+        # The search field and shortcut button must stay inside the file dock.
+        for widget in (self.window.search_entry, self.window.file_views, self.window.keybind_hint):
+            x, y = widget.translate_coordinates(self.window.left_dock, 0, 0)
+            self.assertGreaterEqual(x, 0)
+            self.assertGreaterEqual(y, 0)
+            self.assertLessEqual(x + widget.get_allocated_width(), self.window.left_dock.get_allocated_width())
+            self.assertLessEqual(y + widget.get_allocated_height(), self.window.left_dock.get_allocated_height())
+
+    def test_sidebar_contents_follow_small_window_allocations(self):
+        # Shrink after a large allocation to catch revealers retaining their
+        # children's natural width, which clips the search field and file tree.
+        for width, height in ((1024, 600), (800, 600), (640, 480), (1360, 850)):
+            with self.subTest(size=(width, height)):
+                self.window.resize(width, height)
+                self.wait(150)
+                self.assertEqual(tuple(self.window.get_size()), (width, height))
+                self.assert_sidebar_contents_fit()
+                self.assertGreaterEqual(self.window.tabs.get_allocated_width(), EDITOR_MIN)
+
+    def test_sidebar_contents_fit_after_reopening_in_a_smaller_window(self):
+        self.toggle(False)
+        self.wait(300)
+        self.window.resize(800, 600)
+        self.wait(150)
+        self.toggle(True)
+        self.wait(300)
+        self.assert_sidebar_contents_fit()
+
+    def test_file_tree_scrolls_to_last_note_in_a_short_window(self):
+        from librevault.bookmarks import Bookmark
+        root = self.window.vault.root
+        for index in range(40):
+            (root / f'Note {index:02}.md').write_text('# Note\n')
+        self.window.refresh()
+        self.window.bookmark_items = [Bookmark('note', path=f'Note {index:02}.md') for index in range(20)]
+        self.window.refresh_bookmark_list()
+        self.window.resize(800, 480)
+        self.wait(150)
+        self.assertEqual(tuple(self.window.get_size()), (800, 480))
+        self.assert_sidebar_contents_fit()
+        scroll = self.window.file_views.get_visible_child()
+        adjustment = scroll.get_vadjustment()
+        self.assertGreater(adjustment.get_page_size(), 0)
+        self.assertGreater(adjustment.get_upper(), adjustment.get_page_size())
+        adjustment.set_value(adjustment.get_upper() - adjustment.get_page_size())
+        self.wait(40)
+        last = self.window.files.get_children()[-1]
+        self.assertLessEqual(last.get_allocation().y + last.get_allocated_height(),
+                             adjustment.get_value() + adjustment.get_page_size() + 1)
+        last.activate()
+        self.assertEqual(self.window.current().note.path, last.path)
+
     def test_destroy_cancels_pending_sidebar_callbacks(self):
         self.window.fit_sidebars(self.window.notes_panel.paned.get_allocated_width())
         fit_source = self.window._sidebar_fit_source

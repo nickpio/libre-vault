@@ -75,6 +75,21 @@ class SlidingPanel(Gtk.Revealer):
         self.connect_after('map', self.mapped)
         self.connect('destroy', self.cleanup)
 
+    def do_size_allocate(self, allocation):
+        Gtk.Revealer.do_size_allocate(self, allocation)
+        if self.transitioning or not self.get_child_revealed():
+            return
+        # GtkRevealer keeps its child at least as large as its natural size,
+        # even when fully open. Let the dock use the available space instead,
+        # so entries shrink and scrolled lists scroll on small windows.
+        child = self.get_child()
+        child_allocation = child.get_allocation()
+        if (child_allocation.width != allocation.width
+                or child_allocation.height != allocation.height):
+            child_allocation.width = allocation.width
+            child_allocation.height = allocation.height
+            child.size_allocate(child_allocation)
+
     def draw_inner_border(self, _, context):
         width, height = self.get_allocated_width(), self.get_allocated_height()
         _, color = self.get_style_context().lookup_color('panel_border')
@@ -162,6 +177,7 @@ class SlidingPanel(Gtk.Revealer):
             # Hiding the collapsed wrapper also removes the splitter handle.
             self.hide()
         self.transitioning = False
+        self.queue_resize()
         if animated:
             # Let the final allocation settle before capturing a width for
             # another transition. Auto-repeat must not restart it mid-layout.
