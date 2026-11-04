@@ -1,4 +1,5 @@
 """Lifetime regressions using real GTK objects and weak references."""
+from tests.gui_wait import wait_for_work
 import gc
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -31,6 +32,7 @@ class MemoryTests(unittest.TestCase):
         (self.root / 'Note.md').write_text('# Heading\n\n- [ ] Task\n')
         self.window = Window(self.app, self.root,
                              preferences_path=Path(self.directory.name) / 'settings.json')
+        wait_for_work(self.window)
         self.addCleanup(self.window.destroy)
         self.drain()
 
@@ -58,6 +60,7 @@ class MemoryTests(unittest.TestCase):
     def test_switching_vault_releases_old_panes(self):
         pane = weakref.ref(self.window.current())
         self.window.load_vault(self.root)
+        wait_for_work(self.window)
         self.drain()
         self.assertIsNone(pane())
 
@@ -106,6 +109,7 @@ class MemoryTests(unittest.TestCase):
     def test_rebuilt_context_widgets_are_collected(self):
         references = [weakref.ref(child) for child in self.window.context.get_children()]
         self.window.update_context()
+        wait_for_work(self.window)
         self.drain()
         self.assertTrue(all(reference() is None for reference in references))
 

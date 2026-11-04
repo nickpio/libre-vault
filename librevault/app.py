@@ -7,6 +7,7 @@ import difflib
 import posixpath
 from pathlib import Path
 import re
+from time import monotonic
 from urllib.parse import unquote
 import gi
 
@@ -38,6 +39,7 @@ from .bookmarks import (BOOKMARK_ICONS, Bookmark, BookmarkManager, BookmarkStore
                         ask_text, confirm, graph_open_state, with_moved_root)
 from .editor_ui import NotePane, line_hits, math_pixbuf, selection_overlaps
 from .vault_lifecycle import VaultLifecycleMixin
+from .worker import Snapshot, VaultWorker
 from .widgets import count_summary, scrolled, text_buffer
 from .workspace_ui import WorkspaceStateMixin
 from .workspace import LastVaultStore, SavedWorkspacesStore, WorkspaceStore
@@ -264,6 +266,13 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
         self.split_view = None
         self.note_windows = set()
         self.closed = False
+        self.worker = VaultWorker(GLib.idle_add)
+        self.loading_vault = False
+        self.refresh_paths = set()
+        self.file_render_source = None
+        self.pending_file_selection = None
+        self.file_row_limit = 200
+        self.file_query = None
         self.sliding_views = []
         self.tab_mode = 'tabs'
         self.workspace_source = None
@@ -368,7 +377,7 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
         self.search_entry = Gtk.SearchEntry(placeholder_text='Search notes…')
         # Let the file tree become narrower than the entry's default width.
         self.search_entry.set_width_chars(8)
-        self.search_entry.connect('search-changed', lambda *_: self.populate_files())
+        self.search_entry.connect('changed', lambda *_: self.populate_files())
         sidebar.pack_start(self.search_entry, False, False, 0)
         self.bookmarks_heading = Gtk.Label(label='Bookmarks', xalign=0)
         self.bookmarks_heading.get_style_context().add_class('caption')
@@ -424,6 +433,10 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
         empty.pack_start(clear_search, False, False, 0)
         self.file_views.add_named(empty, 'empty')
         sidebar.pack_start(self.file_views, True, True, 0)
+        self.more_files = Gtk.Button(label='Show more files')
+        self.more_files.set_no_show_all(True)
+        self.more_files.connect('clicked', self.show_more_files)
+        sidebar.pack_start(self.more_files, False, False, 0)
         hint = self.keybind_hint = Gtk.Button()
         hint.get_style_context().add_class('sidebar-command')
         hint.set_margin_top(12)
@@ -529,6 +542,14 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
         statusbar.pack_start(self.settings_button, False, False, 0)
         self.status.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
         statusbar.pack_start(self.status, True, True, 0)
+        self.work_status = Gtk.Label(xalign=0)
+        self.work_status.get_style_context().add_class('status')
+        self.work_status.get_accessible().set_name('Background work progress')
+        statusbar.pack_start(self.work_status, False, False, 0)
+        self.work_cancel = Gtk.Button(label='Cancel work')
+        self.work_cancel.set_no_show_all(True)
+        self.work_cancel.connect('clicked', lambda *_: self.cancel_work(user=True))
+        statusbar.pack_start(self.work_cancel, False, False, 0)
         self.save_status = Gtk.Label(xalign=1)
         self.save_status.set_width_chars(13)
         self.save_status.get_style_context().add_class('status')
@@ -574,6 +595,8 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
 
     def cleanup(self, *_):
         self.closed = True
+        self.worker.close()
+        self.cancel_file_render()
         for name in ('_sidebar_fit_source', '_sidebar_ratios_source'):
             source = getattr(self, name)
             if source is not None:
@@ -726,15 +749,96 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
         return True
 
 
+    def cancel_file_render(self):
+        if self.file_render_source is not None:
+            GLib.source_remove(self.file_render_source)
+            self.file_render_source = None
+
+    def cancel_work(self, *, user=False):
+        self.cancel_file_render()
+        self.worker.cancel_all()
+        self.tag_pane.signature = None
+        self.loading_vault = False
+        self.refresh_paths.clear()
+        self.work_cancel.hide()
+        self.work_status.set_text('Cancelled' if user else '')
+        if user and self.search_entry.get_text().strip():
+            self.files_heading.set_text('Search cancelled')
+            self.search_empty_label.set_text('Search cancelled. Edit the query to search again.')
+            self.file_views.set_visible_child_name('empty')
+            self.more_files.hide()
+
+    def vault_job(self, channel, operation, done):
+        """Capture UI-owned state before dispatch; never pass widgets to a job."""
+        vault = self.vault
+        if vault is None or self.closed:
+            return
+        changes = vault.index.connection.total_changes
+        snapshot = Snapshot.of(vault)
+
+        def completed(value):
+            if self.vault is not vault:
+                return
+            if changes != vault.index.connection.total_changes:
+                # A foreground save/create/move happened while the job ran.
+                if channel == 'refresh':
+                    self.refresh()
+                else:
+                    self.vault_job(channel, operation, done)
+                return
+            self.work_cancel.set_visible(bool(self.worker.requests))
+            if not self.worker.requests:
+                self.work_status.set_text('')
+            done(value)
+
+        def failed(error):
+            self.work_cancel.set_visible(bool(self.worker.requests))
+            if not self.worker.requests:
+                self.work_status.set_text('')
+            self.status.set_text(str(error))
+
+        self.work_cancel.show()
+        self.worker.submit(channel, vault.root, vault.options, operation, completed,
+                           failed,
+                           lambda count: self.work_status.set_text(f'{channel.capitalize()} · {count} files…'),
+                           snapshot=snapshot)
+
+    def show_more_files(self, *_):
+        self.file_row_limit += 200
+        self.populate_files()
+
     def populate_files(self):
         from .metadata import query_terms
-        error = query_terms(self.search_entry.get_text()).error
+        self.cancel_file_render()
+        query = self.search_entry.get_text()
+        if query != self.file_query:
+            self.file_query = query
+            self.file_row_limit = 200
+        error = query_terms(query).error
         self.search_entry.set_tooltip_text('Invalid search: ' + error if error else 'Search saved notes')
         if hasattr(self, 'tag_pane'):
             self.tag_pane.refresh()
+        self.worker.cancel('search')
+        if self.vault and query.strip() and not error:
+            self.more_files.hide()
+            self.files_heading.set_text('Searching…')
+            # Clear old results immediately so they cannot be mistaken for this query.
+            self.file_views.set_visible_child_name('empty')
+            self.search_empty_label.set_text('Searching…')
+            self.vault_job('search', lambda vault: vault.search_results(query),
+                           lambda results: self._populate_files({result.path: result for result in results}))
+            return
+        if self.vault and not query.strip():
+            collapsed = set(self.collapsed_folders)
+            self.vault_job('search', lambda vault: tree_paths(
+                [*vault.notes, *vault.canvases], vault.folders, collapsed),
+                lambda paths: self._populate_files({}, paths))
+        else:
+            self._populate_files({})
+
+    def _populate_files(self, results, tree=None):
         searching = bool(self.search_entry.get_text().strip())
-        results = {result.path: result for result in self.vault.search_results(self.search_entry.get_text())} if self.vault else {}
-        paths = list(results)
+        paths = list(results) if tree is None else tree
         self.files = self.file_lists['search' if searching else 'tree']
         if searching:
             count = len(paths)
@@ -744,85 +848,113 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
         else:
             self.files_heading.set_text('Files')
             self.file_views.set_visible_child_name('tree')
-        if self.vault and not searching:
-            paths = tree_paths([*paths, *self.vault.canvases], self.vault.folders, self.collapsed_folders)
+        total = len(paths)
+        self.more_files.set_visible(total > self.file_row_limit)
+        self.more_files.set_label(f'Show 200 more · {min(total, self.file_row_limit)} of {total}')
+        paths = paths[:self.file_row_limit]
         rows = self.files.get_children()
         if [row.path for row in rows] == paths and all(
                 row.search_result == searching and
                 (not searching or getattr(row, 'search_signature', None) == results[row.path]) and
                 (not row.path.endswith('/') or row.expanded == (row.path[:-1] not in self.collapsed_folders))
                 for row in rows):
+            if self.pending_file_selection:
+                for row in rows:
+                    if row.path == self.pending_file_selection:
+                        self.files.select_row(row)
+                        break
+                self.pending_file_selection = None
             return
-        for row in rows:
-            row.destroy()
-        for path in paths:
-            row = Gtk.ListBoxRow()
-            row.path = path
-            row.search_result = searching
-            row.search_signature = results.get(path) if searching else None
-            content = Gtk.Box(spacing=6)
-            is_folder = path.endswith('/')
-            if not searching:
-                content.set_margin_start(path.rstrip('/').count('/') * 18)
-                row.get_style_context().add_class('tree-row')
-                if is_folder:
-                    row.expanded = path[:-1] not in self.collapsed_folders
-                    indicator = Gtk.Image.new_from_icon_name(
-                        'pan-down-symbolic' if row.expanded else 'pan-end-symbolic', Gtk.IconSize.MENU)
-                    row.get_accessible().set_name(
-                        f"{Path(path).name}, folder, {'expanded' if row.expanded else 'collapsed'}")
+        self.cancel_file_render()
+        # GTK row construction also needs bounded slices for large result sets.
+        file_list = self.files
+        def rows_in_batches():
+            for row in rows:
+                row.destroy()
+                yield
+            for path in paths:
+                row = Gtk.ListBoxRow()
+                row.path = path
+                row.search_result = searching
+                row.search_signature = results.get(path) if searching else None
+                content = Gtk.Box(spacing=6)
+                is_folder = path.endswith('/')
+                if not searching:
+                    content.set_margin_start(path.rstrip('/').count('/') * 18)
+                    row.get_style_context().add_class('tree-row')
+                    if is_folder:
+                        row.expanded = path[:-1] not in self.collapsed_folders
+                        indicator = Gtk.Image.new_from_icon_name(
+                            'pan-down-symbolic' if row.expanded else 'pan-end-symbolic', Gtk.IconSize.MENU)
+                        row.get_accessible().set_name(
+                            f"{Path(path).name}, folder, {'expanded' if row.expanded else 'collapsed'}")
+                    else:
+                        indicator = Gtk.Box()
+                    indicator.set_size_request(16, -1)
+                    content.pack_start(indicator, False, False, 0)
+                if path.lower().endswith('.canvas') and not is_folder:
+                    icon = Gtk.Image.new_from_icon_name('x-office-drawing-symbolic', Gtk.IconSize.MENU)
+                    icon.get_style_context().add_class('muted')
                 else:
-                    indicator = Gtk.Box()
-                indicator.set_size_request(16, -1)
-                content.pack_start(indicator, False, False, 0)
-            if path.lower().endswith('.canvas') and not is_folder:
-                icon = Gtk.Image.new_from_icon_name('x-office-drawing-symbolic', Gtk.IconSize.MENU)
-                icon.get_style_context().add_class('muted')
-            else:
-                icon = file_tree_icon(is_folder)
-            content.pack_start(icon, False, False, 0)
-            names = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
-            show_name = is_folder or path.lower().endswith('.canvas')
-            label = Gtk.Label(label=Path(path).name if show_name else Path(path).stem, xalign=0)
-            label.set_ellipsize(Pango.EllipsizeMode.END)
-            if is_folder:
-                label.get_style_context().add_class('tree-folder')
-            names.pack_start(label, False, False, 0)
-            if searching and Path(path).parent != Path('.'):
-                folder = Gtk.Label(label=str(Path(path).parent), xalign=0)
-                folder.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
-                folder.get_style_context().add_class('note-folder')
-                names.pack_start(folder, False, False, 0)
-            if searching and results[path].snippet:
-                result = results[path]
-                markup, start = [], 0
-                for begin, end in result.highlights:
-                    markup.append(GLib.markup_escape_text(result.snippet[start:begin]))
-                    markup.append('<b>' + GLib.markup_escape_text(result.snippet[begin:end]) + '</b>')
-                    start = end
-                markup.append(GLib.markup_escape_text(result.snippet[start:]))
-                snippet = Gtk.Label(xalign=0)
-                snippet.set_markup(''.join(markup))
-                snippet.set_ellipsize(Pango.EllipsizeMode.END)
-                snippet.set_max_width_chars(24)
-                snippet.get_style_context().add_class('note-folder')
-                names.pack_start(snippet, False, False, 0)
-            content.pack_start(names, True, True, 0)
-            row.add(content)
-            row.set_tooltip_text(path)
-            self.files.add(row)
-        pane = self.current()
-        selected_path = pane.note.path if pane else None
-        if selected_path is None:
-            page = self.active_page()
-            if isinstance(page, CanvasView):
-                selected_path = page.path
-        if selected_path:
-            for row in self.files.get_children():
-                if row.path == selected_path:
-                    self.files.select_row(row)
-                    break
-        self.files.show_all()
+                    icon = file_tree_icon(is_folder)
+                content.pack_start(icon, False, False, 0)
+                names = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
+                show_name = is_folder or path.lower().endswith('.canvas')
+                label = Gtk.Label(label=Path(path).name if show_name else Path(path).stem, xalign=0)
+                label.set_ellipsize(Pango.EllipsizeMode.END)
+                if is_folder:
+                    label.get_style_context().add_class('tree-folder')
+                names.pack_start(label, False, False, 0)
+                if searching and Path(path).parent != Path('.'):
+                    folder = Gtk.Label(label=str(Path(path).parent), xalign=0)
+                    folder.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+                    folder.get_style_context().add_class('note-folder')
+                    names.pack_start(folder, False, False, 0)
+                if searching and results[path].snippet:
+                    result = results[path]
+                    markup, start = [], 0
+                    for begin, end in result.highlights:
+                        markup.append(GLib.markup_escape_text(result.snippet[start:begin]))
+                        markup.append('<b>' + GLib.markup_escape_text(result.snippet[begin:end]) + '</b>')
+                        start = end
+                    markup.append(GLib.markup_escape_text(result.snippet[start:]))
+                    snippet = Gtk.Label(xalign=0)
+                    snippet.set_markup(''.join(markup))
+                    snippet.set_ellipsize(Pango.EllipsizeMode.END)
+                    snippet.set_max_width_chars(24)
+                    snippet.get_style_context().add_class('note-folder')
+                    names.pack_start(snippet, False, False, 0)
+                content.pack_start(names, True, True, 0)
+                row.add(content)
+                row.set_tooltip_text(path)
+                file_list.add(row)
+                row.show_all()
+                yield
+            pane = self.current()
+            selected_path = self.pending_file_selection or (pane.note.path if pane else None)
+            self.pending_file_selection = None
+            if selected_path is None:
+                page = self.active_page()
+                if isinstance(page, CanvasView):
+                    selected_path = page.path
+            if selected_path:
+                for row in file_list.get_children():
+                    if row.path == selected_path:
+                        file_list.select_row(row)
+                        break
+            file_list.show_all()
+
+        pending = rows_in_batches()
+        def render_batch():
+            deadline = monotonic() + .006
+            while monotonic() < deadline:
+                try:
+                    next(pending)
+                except StopIteration:
+                    self.file_render_source = None
+                    return False
+            return True
+        self.file_render_source = GLib.idle_add(render_batch, priority=GLib.PRIORITY_LOW)
 
     def activate_file(self, _, row):
         if row.path.endswith('/'):
@@ -838,6 +970,7 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
             self.collapsed_folders.remove(folder)
         else:
             self.collapsed_folders.add(folder)
+        self.pending_file_selection = path
         self.populate_files()
         for row in self.files.get_children():
             if row.path == path:
@@ -1256,6 +1389,7 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
                 elif kind == 'canvas':
                     self.open_canvas(created.path)
                 else:
+                    self.pending_file_selection = created + '/'
                     for row in self.files.get_children():
                         if row.path == created + '/':
                             self.files.select_row(row)
@@ -1646,6 +1780,7 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
     def update_context(self):
         if self.closed:
             return False
+        self.worker.cancel('links')
         self.update_vim_status()
         self.update_save_status()
         if self.vault:
@@ -1729,28 +1864,11 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
             for link in links(pane.text()):
                 self.context_button(('↳ ' if link.embedded else '') + link.label,
                                     lambda target=link.target: self.follow_link(pane.note.path, target))
-            self.section('Backlinks · Saved files')
-            for path in self.vault.backlinks(pane.note.path):
-                self.context_button(path.removesuffix('.md'), lambda path=path: self.open_note(path))
-            self.section('Unlinked mentions')
-            texts = {path: item.text() for path, item in self.panes.items()}
-            mentions = self.vault.unlinked_mentions(pane.note.path, texts)
-            if not mentions:
-                empty = Gtk.Label(label='No unlinked mentions.', xalign=0)
-                empty.set_ellipsize(Pango.EllipsizeMode.END)
-                empty.get_style_context().add_class('outline-empty')
-                self.context.pack_start(empty, False, False, 0)
-            else:
-                shown = mentions[:100]
-                for mention in shown:
-                    self.add_unlinked_mention(mention)
-                if len(mentions) > len(shown):
-                    more = Gtk.Label(
-                        label=f'{len(shown)} of {len(mentions)} unlinked mentions are shown.', xalign=0)
-                    more.set_line_wrap(True)
-                    more.set_max_width_chars(28)
-                    more.get_style_context().add_class('outline-empty')
-                    self.context.pack_start(more, False, False, 0)
+            path = pane.note.path
+            texts = {name: item.text() for name, item in self.panes.items()}
+            def scan(vault):
+                return vault.backlinks(path), vault.unlinked_mentions(path, texts)
+            self.vault_job('links', scan, lambda result: self._show_links(pane, result, texts))
         else:
             self.section('Properties')
             metadata = note_metadata(pane.text())
@@ -1786,6 +1904,35 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
         self.update_counts()
         return False
 
+    def _show_links(self, pane, result, texts):
+        if self.current() is not pane or self.details_view != 'links':
+            return
+        if texts != {name: item.text() for name, item in self.panes.items()}:
+            self.update_context()
+            return
+        backlinks, mentions = result
+        self.section('Backlinks · Saved files')
+        for path in backlinks:
+            self.context_button(path.removesuffix('.md'), lambda path=path: self.open_note(path))
+        self.section('Unlinked mentions')
+        if not mentions:
+            empty = Gtk.Label(label='No unlinked mentions.', xalign=0)
+            empty.set_ellipsize(Pango.EllipsizeMode.END)
+            empty.get_style_context().add_class('outline-empty')
+            self.context.pack_start(empty, False, False, 0)
+        else:
+            shown = mentions[:100]
+            for mention in shown:
+                self.add_unlinked_mention(mention)
+            if len(mentions) > len(shown):
+                more = Gtk.Label(
+                    label=f'{len(shown)} of {len(mentions)} unlinked mentions are shown.', xalign=0)
+                more.set_line_wrap(True)
+                more.set_max_width_chars(28)
+                more.get_style_context().add_class('outline-empty')
+                self.context.pack_start(more, False, False, 0)
+        self.context.show_all()
+
     def queue_reading_refresh(self):
         if self.reading_source is None and any(pane.mode == 'reading' for pane in self.panes.values()):
             self.reading_source = GLib.idle_add(self.refresh_reading, priority=GLib.PRIORITY_LOW)
@@ -1800,11 +1947,28 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
     def refresh(self, paths=None):
         if not self.vault:
             return True
+        for channel in ('search', 'links', 'tags'):
+            self.worker.cancel(channel)
+        self.tag_pane.signature = None
+        self.refresh_paths.update({''} if paths is None else paths)
+        requested = set(self.refresh_paths)
+        def scan(vault):
+            vault.update_paths(requested)
+            return Snapshot.of(vault)
+        def completed(snapshot):
+            self.refresh_paths.clear()
+            snapshot.apply(self.vault)
+            if self.vault_monitor:
+                self.vault_monitor.watch_tree('')
+            self._refresh_views()
+        self.vault_job('refresh', scan, completed)
+        return True
+
+    def _refresh_views(self):
+        selected = self.files.get_selected_row()
+        if selected and selected.path.endswith('/'):
+            self.pending_file_selection = selected.path
         try:
-            if paths is None:
-                self.vault.refresh()
-            else:
-                self.vault.update_paths(paths)
             self.collapsed_folders.intersection_update(self.vault.folders)
             self.populate_files()
             for path, pane in self.panes.items():
@@ -2314,6 +2478,7 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
         ancestors = {str(parent) for parent in Path(folder).parents if str(parent) not in ('.', '')}
         self.collapsed_folders.difference_update(ancestors)
         self.collapsed_folders.discard(folder)
+        self.pending_file_selection = folder + '/'
         if self.search_entry.get_text():
             self.search_entry.set_text('')
         else:

@@ -1,4 +1,5 @@
 """Navigation, shared-buffer splits, and real workspace restoration."""
+from tests.gui_wait import wait_for_work
 import json
 import os
 from pathlib import Path
@@ -80,6 +81,7 @@ class WorkspaceFlowTests(unittest.TestCase):
 
     def make_window(self):
         window = Window(self.app, preferences_path=self.preferences)
+        wait_for_work(window)
         self.windows.append(window)
         return window
 
@@ -97,6 +99,14 @@ class WorkspaceFlowTests(unittest.TestCase):
         self.window.workspace_store.save(self.root, {'tabs': [{'path': 'A.md', 'scroll': 10}]})
         with patch.object(self.window, 'restore_scroll', wraps=self.window.restore_scroll) as restore:
             self.window.load_vault(self.root)
+            # Stop as soon as installation schedules restoration, before its
+            # timeout runs; the test intentionally destroys an unsettled UI.
+            import time
+            deadline = time.monotonic() + 5
+            context = GLib.MainContext.default()
+            while self.window.loading_vault and time.monotonic() < deadline:
+                context.iteration(False)
+                time.sleep(.001)
             self.assertTrue(self.window.scroll_restore_sources)
             self.window.destroy()
             self.settle()
@@ -105,6 +115,7 @@ class WorkspaceFlowTests(unittest.TestCase):
 
     def test_switcher_uses_alias_and_opens_selected_note(self):
         self.window.load_vault(self.root)
+        wait_for_work(self.window)
         self.window.show_quick_switcher()
         switcher = self.window.quick_switcher
         switcher.search.set_text('launch')
@@ -116,6 +127,7 @@ class WorkspaceFlowTests(unittest.TestCase):
 
     def test_back_forward_restores_cursor_and_split_shares_edits(self):
         self.window.load_vault(self.root)
+        wait_for_work(self.window)
         alpha = self.window.open_note('A.md')
         alpha.buffer.place_cursor(alpha.buffer.get_iter_at_offset(5))
         self.window.open_note('Folder/B.md')
@@ -135,6 +147,7 @@ class WorkspaceFlowTests(unittest.TestCase):
     def test_reopen_restores_tabs_cursor_scroll_folders_and_split(self):
         self.assertEqual(self.window.workspace_stack.get_visible_child_name(), 'welcome')
         self.window.load_vault(self.root)
+        wait_for_work(self.window)
         alpha = self.window.open_note('A.md')
         beta = self.window.open_note('Folder/B.md')
         alpha.buffer.place_cursor(alpha.buffer.get_iter_at_offset(80))
@@ -160,6 +173,7 @@ class WorkspaceFlowTests(unittest.TestCase):
 
     def test_link_completion_inserts_as_one_undo_action(self):
         self.window.load_vault(self.root)
+        wait_for_work(self.window)
         pane = self.window.open_note('A.md')
         before = pane.text()
         pane.buffer.place_cursor(pane.buffer.get_end_iter())
@@ -176,6 +190,7 @@ class WorkspaceFlowTests(unittest.TestCase):
         store = self.window.workspace_store
         store.save(self.root, {'tabs': []})
         self.window.load_vault(self.root)
+        wait_for_work(self.window)
         self.assertIsNone(self.window.current())
         # Malformed persisted entries must not reach GTK or dict lookup.
         store.save(self.root, {'tabs': [{'path': []}, {'path': {}}, {'path': 'A.md',
@@ -183,6 +198,7 @@ class WorkspaceFlowTests(unittest.TestCase):
                          'active': [], 'collapsed_folders': [{}, 4, 'Folder'], 'split': {}})
         self.window.vault = None  # Preserve the deliberately malformed fixture on load.
         self.window.load_vault(self.root)
+        wait_for_work(self.window)
         self.settle()
         self.assertEqual(list(self.window.panes), ['A.md'])
         self.assertEqual(self.window.panes['A.md'].scroll.get_vadjustment().get_value(), 0)
@@ -190,6 +206,7 @@ class WorkspaceFlowTests(unittest.TestCase):
 
     def test_unresolved_link_creation_is_explicit_and_cancellable(self):
         self.window.load_vault(self.root)
+        wait_for_work(self.window)
         with patch('librevault.app.Gtk.MessageDialog') as constructor:
             constructor.return_value.run.return_value = Gtk.ResponseType.CANCEL
             self.window.follow_link('A.md', 'Missing')
@@ -211,6 +228,7 @@ class WorkspaceFlowTests(unittest.TestCase):
 
     def test_ctrl_click_follows_real_markdown_and_wiki_links(self):
         self.window.load_vault(self.root)
+        wait_for_work(self.window)
         pane = self.window.open_note('A.md')
         for source, label, target in (
                 ('[label](<Folder/B.md> "title")', 'label', 'Folder/B.md'),
@@ -235,6 +253,7 @@ class WorkspaceFlowTests(unittest.TestCase):
 
     def test_split_renders_task_controls_and_cleans_up_pending_layout(self):
         self.window.load_vault(self.root)
+        wait_for_work(self.window)
         pane = self.window.open_note('A.md')
         pane.buffer.set_text('# List\n\n- [ ] Task\n- Bullet\n')
         self.window.open_split(pane)

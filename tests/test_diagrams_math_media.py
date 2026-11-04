@@ -1,4 +1,5 @@
 """Mermaid diagrams, math environments, callouts, footnotes, HTML, and media."""
+from tests.gui_wait import wait_for_work
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -225,6 +226,7 @@ class DiagramReadingTests(unittest.TestCase):
         self.root.mkdir()
         (self.root / 'Note.md').write_text('# Note\n')
         self.window = Window(self.app, self.root, preferences_path=Path(self.directory.name) / 'settings.json')
+        wait_for_work(self.window)
         self.addCleanup(self.window.destroy)
         self.pane = self.window.current()
 

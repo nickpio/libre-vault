@@ -1,4 +1,5 @@
 """Keyboard-to-palette-to-cheatsheet behavior on the real GTK widgets."""
+from tests.gui_wait import wait_for_work
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -29,6 +30,7 @@ class CommandTests(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         (Path(self.directory.name) / 'Note.md').write_text('# Original\n')
         self.window = Window(self.app, self.directory.name)
+        wait_for_work(self.window)
         self.addCleanup(self.window.destroy)
         self.drain_events()
 

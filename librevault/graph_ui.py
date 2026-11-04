@@ -149,7 +149,7 @@ class GraphView(Gtk.Box):
         self.reload_source = GLib.timeout_add(250, self.reload)
 
     def refresh_if_changed(self):
-        signature = self.owner.vault.index.connection.total_changes
+        signature = self.owner.vault.index.generation
         if self.signature != signature:
             self.signature = signature
             self.schedule_reload()
@@ -234,7 +234,7 @@ class GraphView(Gtk.Box):
         self.hover = self.selected = self.drag = None
         self.status.set_text('Loading saved-note graph…')
         self.canvas.queue_draw()
-        self.signature = self.owner.vault.index.connection.total_changes
+        self.signature = self.owner.vault.index.generation
         context = multiprocessing.get_context('spawn')
         self.pipe, child = context.Pipe()
         self.process = context.Process(target=graph_worker, args=(child, str(self.owner.vault.index.path),

@@ -1,4 +1,5 @@
 """Obsidian highlights, comments, strikethrough, and fenced code colors."""
+from tests.gui_wait import wait_for_work
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -242,6 +243,7 @@ class LivePreviewTests(unittest.TestCase):
         (self.root / 'Note.md').write_text('Start\n', encoding='utf-8')
         self.window = Window(self.app, self.root,
                              preferences_path=Path(self.directory.name) / 'settings.json')
+        wait_for_work(self.window)
         self.addCleanup(self.window.destroy)
         self.pane = self.window.current()
         self.drain()

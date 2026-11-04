@@ -82,6 +82,7 @@ Libre Vault opens a folder of Markdown files and gives you a fast, keyboard-driv
 - Edit properties and tags, and search by path, filename, content, tag, alias, or property.
 - Explore connections in global and local graphs.
 - Import attachments and preview images, PDFs, embedded notes, tables, callouts, and math.
+- Edit tables in a cell grid with adjustable editing widths, row and column actions, sorting, and 50-row pages. Use Tab or Shift+Tab between cells and Enter for the next row. Apply saves one undoable Markdown edit; Cancel discards changes. Widths last for the editing session.
 - Navigate with a command palette, quick switcher, and keyboard shortcuts.
 - Restore tabs, split panes, and cursor positions for each vault.
 - Autosave with conflict checks and recovery drafts.

@@ -1,0 +1,67 @@
+{
+  "environment": {
+    "platform": "Linux-7.3.1-1-cachyos-x86_64-with-glibc2.44",
+    "python": "3.14.9",
+    "cpu": "AMD Ryzen 5 3600 6-Core Processor",
+    "budgets_ms": {
+      "submit_ms": 50,
+      "heartbeat_p99_ms": 50,
+      "heartbeat_max_ms": 250,
+      "cancel_ms": 250
+    }
+  },
+  "results": [
+    {
+      "notes": 10000,
+      "approx_text_mib": 18.23,
+      "cold_open_s": 12.403,
+      "warm_refresh_s": 2.13,
+      "search_rare_s": 0.033,
+      "search_broad_s": 2.744,
+      "backlinks_s": 0.123,
+      "mentions_s": 0.847,
+      "after_cancel_s": 0.001,
+      "cancel_ms": 1.2,
+      "submit_ms": 0.37,
+      "heartbeat_p99_ms": 10.75,
+      "heartbeat_max_ms": 41.84,
+      "window_open_and_search_s": 8.565,
+      "window_rows": 200,
+      "window_heartbeat_p99_ms": 18.78,
+      "window_heartbeat_max_ms": 120.62,
+      "stalls_over_100ms": [
+        [
+          "window_open",
+          120.62
+        ]
+      ],
+      "max_gc_pause_ms": 14.86
+    },
+    {
+      "notes": 50000,
+      "approx_text_mib": 91.31,
+      "cold_open_s": 65.015,
+      "warm_refresh_s": 11.039,
+      "search_rare_s": 0.168,
+      "search_broad_s": 14.135,
+      "backlinks_s": 0.552,
+      "mentions_s": 4.109,
+      "after_cancel_s": 0.001,
+      "cancel_ms": 1.16,
+      "submit_ms": 0.23,
+      "heartbeat_p99_ms": 10.88,
+      "heartbeat_max_ms": 204.04,
+      "window_open_and_search_s": 40.189,
+      "window_rows": 200,
+      "window_heartbeat_p99_ms": 11.91,
+      "window_heartbeat_max_ms": 51.75,
+      "stalls_over_100ms": [
+        [
+          "cold_open",
+          204.04
+        ]
+      ],
+      "max_gc_pause_ms": 42.09
+    }
+  ]
+}

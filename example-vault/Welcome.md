@@ -21,3 +21,17 @@ Use **Ctrl+S** to save your changes. Open several notes in tabs, or search their
 - [ ] Write your first note
 
 `Nothing needs an account.`
+
+| H1                   | H2    | H3    |
+| :------------------- | :---- | :---- |
+| Data1                | Data2 | Data3 |
+| Data4                | Data5 | Data6 |
+| DataDataDataDataData |       |       |
+|                      |       |       |
+
+
+
+
+
+
+

@@ -23,7 +23,7 @@ from .tables import (
     TableEditorDialog, cell_offset, format_table, table_add_column_left, table_add_column_right,
     table_add_row_above, table_add_row_below, table_align_column, table_at, table_delete_column,
     table_delete_row, table_from_model, table_move_column, table_move_row, table_next_cell,
-    table_previous_cell, table_sort_column,
+    table_previous_cell, table_sort_column, table_break_after_row,
 )
 from .vault import VaultError
 from .vim import Session, VimState, dispatch, display_selection, retreat
@@ -321,6 +321,13 @@ class NotePane(EditorRenderMixin, Gtk.Box):
                 and not (modifiers & ~Gdk.ModifierType.SHIFT_MASK)
                 and not self.buffer.get_has_selection() and self.navigate_table(view, event)):
             return True
+        if (event.keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter)
+                and not modifiers and not self.buffer.get_has_selection()):
+            edit = table_break_after_row(self.text(), self.cursor_offset())
+            if edit is not None:
+                self.apply_table_change(edit)
+                view.scroll_mark_onscreen(self.buffer.get_insert())
+                return True
         if not self.window.preferences.continue_lists:
             return False
         if event.keyval not in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):

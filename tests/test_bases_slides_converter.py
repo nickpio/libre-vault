@@ -1,4 +1,5 @@
 """Property tables, slide splitting, and Markdown format conversion."""
+from tests.gui_wait import wait_for_work
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -271,6 +272,7 @@ class PluginUITests(unittest.TestCase):
 
     def make_window(self):
         window = Window(self.app, self.root, preferences_path=self.root / '.settings.json')
+        wait_for_work(window)
         self.addCleanup(window.destroy)
         return window
 

@@ -1,4 +1,5 @@
 """Folding, slash commands, multiple cursors, and optional Vim mode."""
+from tests.gui_wait import wait_for_work
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
@@ -359,6 +360,7 @@ class EditorErgonomicsTests(unittest.TestCase):
         (self.root / 'Note.md').write_text('# Original\n', encoding='utf-8')
         self.preferences_path = Path(self.directory.name) / 'settings.json'
         self.window = Window(self.app, self.root, preferences_path=self.preferences_path)
+        wait_for_work(self.window)
         self.addCleanup(self.window.destroy)
         self.pane = self.window.current()
         self.drain()

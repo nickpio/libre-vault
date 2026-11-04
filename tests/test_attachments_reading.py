@@ -1,4 +1,5 @@
 """Attachment bytes, native reading widgets and source fidelity."""
+from tests.gui_wait import wait_for_work
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -94,6 +95,7 @@ class ReadingTests(unittest.TestCase):
         self.root.mkdir()
         (self.root / 'Note.md').write_text('# Note\n\n**bold**\n')
         self.window = Window(self.app, self.root, preferences_path=Path(self.directory.name) / 'settings.json')
+        wait_for_work(self.window)
         self.addCleanup(self.window.destroy)
         self.pane = self.window.current()
 
@@ -217,12 +219,14 @@ class ReadingTests(unittest.TestCase):
         self.assertEqual(original, self.pane.reading.body.get_children())
         child.write_text('After external edit, longer content')
         self.window.refresh()
+        wait_for_work(self.window)
         labels = [widget.get_text() for widget in self.descendants(self.pane.reading.body)
                   if isinstance(widget, Gtk.Label)]
         self.assertIn('After external edit, longer content', labels)
         self.assertNotEqual(original, self.pane.reading.body.get_children())
         refreshed = self.pane.reading.body.get_children()
         self.window.refresh()
+        wait_for_work(self.window)
         self.assertEqual(refreshed, self.pane.reading.body.get_children())
 
     def test_reading_refresh_tracks_assets_unsaved_embeds_and_theme(self):

@@ -1,4 +1,5 @@
 """JSON Canvas documents, vault files, and the canvas workspace tab."""
+from tests.gui_wait import wait_for_work
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -249,6 +250,7 @@ class CanvasUITests(unittest.TestCase):
         (self.root / 'Note.md').write_text('# Note\n\nBody\n')
         (self.root / 'Other.md').write_text('Other\n')
         self.window = Window(self.app, self.root, preferences_path=self.root / 'settings.json')
+        wait_for_work(self.window)
         self.addCleanup(self.safe_destroy, self.window)
         self.drain()
 
@@ -266,6 +268,7 @@ class CanvasUITests(unittest.TestCase):
     def open_board(self):
         created = self.window.vault.create_canvas('Board')
         self.window.populate_files()
+        wait_for_work(self.window)
         view = self.window.open_canvas(created.path)
         self.drain()
         view.drawing.set_size_request(800, 600)
@@ -407,6 +410,7 @@ class CanvasUITests(unittest.TestCase):
         board.dirty = False
         board.cancel_autosave()
         self.window.refresh()
+        wait_for_work(self.window)
         self.drain()
         self.assertEqual(board.document.nodes, [])
 
@@ -421,6 +425,7 @@ class CanvasUITests(unittest.TestCase):
         self.window.persist_workspace()
         self.safe_destroy(self.window)
         restored = Window(self.app, self.root, preferences_path=self.root / 'settings.json')
+        wait_for_work(restored)
         self.addCleanup(self.safe_destroy, restored)
         self.drain()
         paths = [restored.tabs.get_nth_page(index).path

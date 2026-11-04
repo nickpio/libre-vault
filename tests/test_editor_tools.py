@@ -1,4 +1,5 @@
 """Undo, formatting, and find/replace operate on real GTK Markdown buffers."""
+from tests.gui_wait import wait_for_work
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -32,6 +33,7 @@ class EditorToolsTests(unittest.TestCase):
         (self.root / 'Note.md').write_text('# Original\n\nOne café and one CAFE.\n', encoding='utf-8')
         self.window = Window(self.app, self.root,
                              preferences_path=Path(self.directory.name) / 'settings.json')
+        wait_for_work(self.window)
         self.addCleanup(self.window.destroy)
         self.pane = self.window.current()
         self.drain()
@@ -168,6 +170,7 @@ class EditorToolsTests(unittest.TestCase):
         self.assertTrue(self.pane.history.can_undo)
         (self.root / 'Note.md').write_text('# External\n')
         self.window.refresh()
+        wait_for_work(self.window)
         self.assertEqual(self.pane.text(), '# External\n')
         self.assertFalse(self.pane.history.can_undo)
         self.assertFalse(self.pane.history.can_redo)
@@ -175,6 +178,7 @@ class EditorToolsTests(unittest.TestCase):
         local = self.pane.text()
         (self.root / 'Note.md').write_text('# Competing\n')
         self.window.refresh()
+        wait_for_work(self.window)
         self.assertEqual(self.pane.text(), local)
         self.assertTrue(self.pane.history.can_undo)
 
@@ -195,6 +199,7 @@ class EditorToolsTests(unittest.TestCase):
         self.pane.buffer.place_cursor(self.pane.buffer.get_start_iter())
         self.pane.render()
         self.window.update_context()
+        wait_for_work(self.window)
         self.drain()
         self.assertFalse(self.pane.history.can_undo)
         self.assertFalse(self.pane.dirty)
@@ -334,6 +339,7 @@ class EditorToolsTests(unittest.TestCase):
             target.set_text('https://example.com')
             (self.root / 'Note.md').write_text('# External\n')
             self.window.refresh()
+            wait_for_work(self.window)
             dialog.response(Gtk.ResponseType.OK)
             return False
         GLib.idle_add(answer)

@@ -1,4 +1,5 @@
 """Typed property controls, tag tree, graph options, and worker integration."""
+from tests.gui_wait import wait_for_work
 from datetime import date
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -42,6 +43,7 @@ class PropertyTagUITests(unittest.TestCase):
             app = Gtk.Application(application_id='org.librevault.FeatureTests', flags=Gio.ApplicationFlags.NON_UNIQUE)
             app.register(None)
             window = Window(app, root, preferences_path=root / '.settings.json')
+            wait_for_work(window)
             self.addCleanup(window.destroy)
             window.show_all()
             window.open_note('A.md')
@@ -124,5 +126,6 @@ class PropertyTagUITests(unittest.TestCase):
                 return False
             GLib.idle_add(rename_dialog)
             window.tag_pane.rename()
+            wait_for_work(window)
             self.assertEqual(window.vault.search('tag:office'), ['A.md'])
             self.assertIn('office/project', pane.text())

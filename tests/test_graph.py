@@ -1,4 +1,5 @@
 """Graph resolution, filtering, bounded layout and real GTK worker lifecycle."""
+from tests.gui_wait import wait_for_work
 import json
 import math
 from pathlib import Path
@@ -85,6 +86,7 @@ class GraphUITests(unittest.TestCase):
             app = Gtk.Application(flags=Gio.ApplicationFlags.NON_UNIQUE)
             app.register(None)
             window = Window(app, root, preferences_path=root / '.settings.json')
+            wait_for_work(window)
             self.addCleanup(window.destroy)
             window.show_all()
             window.open_note('A.md')
@@ -100,6 +102,7 @@ class GraphUITests(unittest.TestCase):
             graph.search.set_text('')
             (root / 'C.md').write_text('[[A]]')
             window.refresh()
+            wait_for_work(window)
             self.pump_until(lambda: len(graph.paths) == 3)
             self.pump_until(lambda: graph.process is None)
             self.assertIsNone(graph.poll_source)
@@ -133,6 +136,7 @@ class GraphUITests(unittest.TestCase):
         app = Gtk.Application(flags=Gio.ApplicationFlags.NON_UNIQUE)
         app.register(None)
         window = Window(app, root, preferences_path=root / '.settings.json')
+        wait_for_work(window)
         self.addCleanup(window.destroy)
         window.show_all()
         return window

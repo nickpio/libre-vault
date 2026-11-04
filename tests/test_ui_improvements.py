@@ -1,4 +1,5 @@
 """Regression checks for the outline, link navigation, and unchanged UI state."""
+from tests.gui_wait import wait_for_work
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -43,6 +44,7 @@ class WindowImprovementTests(unittest.TestCase):
         (self.root / 'A.md').write_text('# Source\n\n[[B]]\n')
         (self.root / 'B.md').write_text('Introduction\n\n# My heading\n\nBody\n')
         self.window = Window(self.app, str(self.root))
+        wait_for_work(self.window)
         self.addCleanup(self.window.destroy)
         self.drain_events()
 
@@ -156,23 +158,28 @@ class WindowImprovementTests(unittest.TestCase):
         rows = self.window.files.get_children()
         selected = self.window.files.get_selected_row()
         self.window.refresh()
+        wait_for_work(self.window)
         self.assertEqual(self.window.files.get_children(), rows)
         self.assertEqual(self.window.files.get_selected_row(), selected)
         (self.root / 'C.md').write_text('New note\n')
         self.window.refresh()
+        wait_for_work(self.window)
         self.assertEqual([row.path for row in self.window.files.get_children()],
                          ['A.md', 'B.md', 'C.md'])
 
     def test_search_and_vault_switch_still_update_rows(self):
         self.window.search_entry.set_text('Source')
         self.window.populate_files()
+        wait_for_work(self.window)
         self.assertEqual([row.path for row in self.window.files.get_children()], ['A.md'])
         (self.root / 'B.md').write_text('Source now matches\n')
         self.window.refresh()
+        wait_for_work(self.window)
         self.assertEqual([row.path for row in self.window.files.get_children()], ['A.md', 'B.md'])
         with TemporaryDirectory() as other:
             (Path(other) / 'Different.md').write_text('# Different\n')
             self.window.load_vault(other)
+            wait_for_work(self.window)
             self.assertEqual([row.path for row in self.window.files.get_children()], ['Different.md'])
 
     def test_switching_vault_with_same_paths_reuses_rows_and_selects_new_active_note(self):
@@ -183,6 +190,7 @@ class WindowImprovementTests(unittest.TestCase):
             (Path(other) / 'A.md').write_text('# Different source\n')
             (Path(other) / 'B.md').write_text('# Different target\n')
             self.window.load_vault(other)
+            wait_for_work(self.window)
             self.assertEqual(self.window.files.get_children(), rows)
             self.assertEqual(self.window.files.get_selected_row().path, 'A.md')
             self.assertEqual(self.window.current().text(), '# Different source\n')

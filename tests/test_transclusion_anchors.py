@@ -1,4 +1,5 @@
 """Heading sections, block ids, transclusion, completion, and link previews."""
+from tests.gui_wait import wait_for_work
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import re
@@ -301,6 +302,7 @@ class TransclusionUiTests(unittest.TestCase):
         self.root = Path(self.directory.name)
         (self.root / 'A.md').write_text('# Host\n')
         self.window = Window(self.app, str(self.root))
+        wait_for_work(self.window)
         self.addCleanup(self.window.destroy)
         self.pane = self.window.current()
         self.drain_events()

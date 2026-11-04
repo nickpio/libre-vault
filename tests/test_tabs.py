@@ -1,4 +1,5 @@
 """Workspace tab order, restoration, and animation lifecycle."""
+from tests.gui_wait import wait_for_work
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -30,6 +31,7 @@ class TabTests(unittest.TestCase):
 
     def make_window(self):
         window = Window(self.app, self.root, preferences_path=self.root / '.settings.json')
+        wait_for_work(window)
         self.addCleanup(window.destroy)
         window.show_all()
         return window

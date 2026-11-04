@@ -48,13 +48,16 @@ def find_mentions(source_path, text, terms):
         patterns.append(re.compile(r'(?<!\w)' + re.escape(cleaned) + r'(?!\w)', re.IGNORECASE))
     if not patterns:
         return []
-    blocked = _excluded_ranges(text)
     matches = []
     for pattern in patterns:
         for match in pattern.finditer(text):
-            if _overlaps(match.start(), match.end(), blocked):
-                continue
             matches.append(match)
+    if not matches:
+        return []
+    # Most documents do not contain a candidate. Only scan Markdown exclusion
+    # ranges after the inexpensive term matcher finds something to inspect.
+    blocked = _excluded_ranges(text)
+    matches = [match for match in matches if not _overlaps(match.start(), match.end(), blocked)]
     matches.sort(key=lambda match: (match.start(), -(match.end() - match.start())))
     chosen = []
     last_end = -1

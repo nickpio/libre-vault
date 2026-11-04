@@ -107,22 +107,27 @@ def fingerprint(raw: bytes) -> str:
 
 
 class Vault(VaultPaths):
-    def __init__(self, root: str | Path, *, cache_dir=None, text_cache_bytes=4 * 1024 * 1024, options=None):
-        self.root = Path(root).expanduser().resolve(strict=True)
-        if not self.root.is_dir():
+    def __init__(self, root: str | Path, *, cache_dir=None, text_cache_bytes=4 * 1024 * 1024,
+                 options=None, scan=True, verify_index=True, resolve_root=True, cancelled=None):
+        self.root = Path(root).expanduser().resolve(strict=True) if resolve_root else Path(root)
+        if resolve_root and not self.root.is_dir():
             raise VaultError('Choose a folder as your vault.')
         from .vault_options import VaultOptions
         self.options = options or VaultOptions()
         self.notes: dict[str, NoteRecord | None] = {}
         self.canvases: dict[str, str | None] = {}
         self.version_history = None
+        self.folders = []
+        self.check_work = lambda: None
+        self.report_work = lambda: None
         try:
-            self.index = NoteIndex(self.root, cache_dir)
+            self.index = NoteIndex(self.root, cache_dir, verify=verify_index, cancelled=cancelled)
         except (OSError, sqlite3.Error) as error:
             raise VaultError(f'Could not open the note index: {error}') from error
         self.text_cache = TextCache(text_cache_bytes)
         try:
-            self.refresh()
+            if scan:
+                self.refresh()
         except Exception:
             self.close()
             raise
@@ -172,8 +177,11 @@ class Vault(VaultPaths):
         canvases = {}
         visible_folders = []
         for directory, folders, files in self.walk():
+            self.check_work()
             visible_folders.extend((Path(directory) / name).relative_to(self.root).as_posix() for name in folders)
             for name in sorted(files):
+                self.check_work()
+                self.report_work()
                 path = Path(directory) / name
                 relative = path.relative_to(self.root).as_posix()
                 lower = name.lower()
@@ -199,6 +207,8 @@ class Vault(VaultPaths):
         if self.index.revision(note.path) != note.revision:
             self.index.store(note, note_metadata(note.text), links(note.text))
             self.text_cache.remove(note.path)
+        if getattr(self, 'background', False):
+            self.index.connection.commit()
         record = NoteRecord(note.path, note.revision, note.bom)
         previous = self.notes.get(note.path)
         return previous if previous == record else record
@@ -237,6 +247,7 @@ class Vault(VaultPaths):
             if not any(not parent or relative == parent or relative.startswith(parent + '/') for parent in roots):
                 roots.append(relative)
         for relative in roots:
+            self.check_work()
             if not relative:
                 self.refresh()
                 return
@@ -266,6 +277,8 @@ class Vault(VaultPaths):
             except (VaultError, OSError):
                 pass
             for name in found:
+                self.check_work()
+                self.report_work()
                 try:
                     found[name] = self._index_note(self.read(name))
                 except (VaultError, OSError):
@@ -348,6 +361,8 @@ class Vault(VaultPaths):
         overrides = texts or {}
         found = []
         for path, record in self.notes.items():
+            self.check_work()
+            self.report_work()
             if path == relative or record is None:
                 continue
             text = overrides.get(path)
@@ -409,8 +424,16 @@ class Vault(VaultPaths):
         return resolve_paths(self.notes, lambda path: self.metadata(path).aliases, source, target)
 
     def backlinks(self, relative: str) -> list[str]:
-        return [path for path, note in self.notes.items() if note is not None and
-                any(self.resolve(path, link.target) == [relative] for link in self._saved_links(note))]
+        from .link_resolution import PathResolver
+        resolver = PathResolver(self.notes, lambda path: self.metadata(path).aliases)
+        found = []
+        for path, note in self.notes.items():
+            self.check_work()
+            self.report_work()
+            if note is not None and any(resolver.resolve(path, link.target) == [relative]
+                                        for link in self._saved_links(note)):
+                found.append(path)
+        return found
 
     def _saved_links(self, note: NoteRecord) -> list[Link]:
         # Resolve against current paths, while syntax lives in the disk index.
@@ -429,6 +452,8 @@ class Vault(VaultPaths):
         candidates = set(self.index.candidates(terms))
         results = []
         for path, record in self.notes.items():
+            self.check_work()
+            self.report_work()
             if record is not None and path not in candidates:
                 continue
             # Stream one document at a time; searching never fills the text cache.
@@ -445,6 +470,8 @@ class Vault(VaultPaths):
         import json
         counts = {}
         for (tags,) in self.index.connection.execute('SELECT tags FROM notes'):
+            self.check_work()
+            self.report_work()
             seen = set()
             for tag in json.loads(tags):
                 parts = tag.split('/')
@@ -463,6 +490,8 @@ class Vault(VaultPaths):
         edits = []
         originals = {}
         for path, record in self.notes.items():
+            self.check_work()
+            self.report_work()
             if record is None:
                 continue
             note = self.read(path)

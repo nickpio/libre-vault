@@ -1,4 +1,5 @@
 """Daily-use features cooperate across source buffers and real vault files."""
+from tests.gui_wait import wait_for_work
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import os
@@ -54,9 +55,11 @@ class FeatureWorkflowTests(unittest.TestCase):
                 '# Draft\n\n| Name | Value |\n| --- | --- |\n| One | Two |\n\n![[Reference]]\n\n')
             preferences = Path(directory) / 'config' / 'settings.json'
             window = Window(self.app, preferences_path=preferences)
+            wait_for_work(window)
             self.addCleanup(window.destroy)
             self.assertEqual(window.workspace_stack.get_visible_child_name(), 'welcome')
             window.load_vault(root)
+            wait_for_work(window)
             window.show_quick_switcher()
             switcher = window.quick_switcher
             switcher.search.set_text('blueprint')
@@ -104,6 +107,7 @@ class FeatureWorkflowTests(unittest.TestCase):
             window.destroy()
 
             restored = Window(self.app, preferences_path=preferences)
+            wait_for_work(restored)
             self.addCleanup(restored.destroy)
             self.assertEqual(restored.vault.root, root)
             self.settle()

@@ -1,4 +1,5 @@
 """Settings controls change the running editor and persist outside the vault."""
+from tests.gui_wait import wait_for_work
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -33,6 +34,7 @@ class SettingsTests(unittest.TestCase):
         (self.root / 'Note.md').write_text('# Heading\n\nBody `code`\n')
         self.preferences_path = Path(self.directory.name) / 'config' / 'settings.json'
         self.window = Window(self.app, self.root, preferences_path=self.preferences_path)
+        wait_for_work(self.window)
         self.addCleanup(self.window.destroy)
         self.window.settings_button.clicked()
         self.dialog = self.window.settings_dialog
@@ -122,6 +124,7 @@ class SettingsTests(unittest.TestCase):
         self.dialog.save(expected)
         self.window.destroy()
         reopened = Window(self.app, self.root, preferences_path=self.preferences_path)
+        wait_for_work(reopened)
         self.addCleanup(reopened.destroy)
         self.assertEqual(reopened.preferences, expected)
         self.assertEqual(reopened.current().editor.get_wrap_mode(), Gtk.WrapMode.NONE)
@@ -143,6 +146,7 @@ class SettingsTests(unittest.TestCase):
 
     def test_preferences_update_other_open_windows(self):
         other = Window(self.app, self.root, preferences_path=self.preferences_path)
+        wait_for_work(other)
         self.addCleanup(other.destroy)
         expected = replace(Preferences(), editor_size=18, wrap_lines=False)
         self.dialog.save(expected)

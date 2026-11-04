@@ -2,7 +2,7 @@
 from io import BytesIO
 import re
 
-from gi.repository import GdkPixbuf, GLib, Gtk
+from gi.repository import GdkPixbuf, GLib, Gtk, Pango
 
 from .appearance import PALETTES
 from .attachments import local_path
@@ -119,6 +119,9 @@ class EditorRenderMixin:
             self.editor.set_right_margin(margin)
             self.tags['quote'].set_property('left-margin', margin + 18)
             self.update_list_margins()
+        for _start, _end, widget, tag in self.table_widgets:
+            self.size_table_preview(widget)
+            tag.set_property('pixels-above-lines', widget.get_preferred_height().natural_height + 8)
         self.queue_positions()
 
     def render(self):
@@ -322,6 +325,9 @@ class EditorRenderMixin:
             self.embed_widgets.append((embed.start, embed.end, widget, tag))
         for table in layout.tables:
             _anchor, widget, tag = self.attach_preview(self.table_preview(table), table.start)
+            # Keep one real newline as the table's layout slot. Locations for
+            # invisible characters do not include paragraph spacing in GTK.
+            widget.source_anchor = text.rfind('\n', table.start, table.end)
             self.table_widgets.append((table.start, table.end, widget, tag))
         for callout in layout.callouts:
             _anchor, widget, tag = self.attach_preview(self.callout_preview(callout), callout.start)
@@ -417,23 +423,65 @@ class EditorRenderMixin:
 
     def table_preview(self, table):
         grid = Gtk.Grid(column_spacing=14, row_spacing=4)
+        grid.table_columns = [[] for _ in table.headers]
         grid.get_style_context().add_class('live-table')
-        grid.set_tooltip_text('Place the cursor inside the table to edit the Markdown')
+        grid.set_tooltip_text('Use Edit table to edit cells, resize columns, or browse all rows')
         shown = table.rows[:12]
         for column, header in enumerate(table.headers):
             label = Gtk.Label(label=self.cell_label(header), xalign=self.cell_xalign(table.alignments[column]))
             label.get_style_context().add_class('live-table-heading')
+            self.wrap_table_label(label)
+            grid.table_columns[column].append(label)
             grid.attach(label, column, 0, 1, 1)
         for row_index, row in enumerate(shown, 1):
             for column, cell in enumerate(row):
                 alignment = table.alignments[column] if column < len(table.alignments) else 'left'
                 label = Gtk.Label(label=self.cell_label(cell), xalign=self.cell_xalign(alignment))
+                self.wrap_table_label(label)
+                grid.table_columns[column].append(label)
                 grid.attach(label, column, row_index, 1, 1)
         if len(table.rows) > len(shown):
             more = Gtk.Label(label=f'{len(table.rows) - len(shown)} more rows', xalign=0)
             more.get_style_context().add_class('muted')
             grid.attach(more, 0, len(shown) + 1, max(len(table.headers), 1), 1)
+        edit = Gtk.Button(label='Edit table…')
+        edit.connect('clicked', lambda _: self.edit_preview_table(table.start))
+        grid.attach(edit, 0, len(shown) + 2, max(len(table.headers), 1), 1)
+        self.size_table_preview(grid)
         return grid
+
+    def size_table_preview(self, grid):
+        # TextView overlay children receive their minimum width, not the
+        # natural width of wrapping labels. Reserve a measured width per
+        # column so ordinary values do not collapse into narrow strips.
+        desired = [min(360, max(40, max(label.create_pango_layout(label.get_text()).get_pixel_size()[0]
+                                         for label in column)))
+                   for column in grid.table_columns]
+        available = (self.editor.get_allocated_width() - self.editor.get_left_margin()
+                     - self.editor.get_right_margin())
+        budget = max(80 * len(desired), available - 22 - 14 * (len(desired) - 1))
+        widths = list(desired)
+        # Keep compact columns intact and share the remaining room among
+        # longer columns. Cap long prose at 360px even in a wide note.
+        while sum(widths) > budget:
+            largest = max(widths)
+            if largest <= 80:
+                break
+            widths = [width - 1 if width == largest else width for width in widths]
+        for column, width in zip(grid.table_columns, widths):
+            for label in column:
+                if label.get_size_request().width != width:
+                    label.set_size_request(width, -1)
+
+    def edit_preview_table(self, start):
+        self.buffer.place_cursor(self.buffer.get_iter_at_offset(start))
+        self.prompt_edit_table()
+
+    def wrap_table_label(self, label):
+        label.set_line_wrap(True)
+        label.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        label.set_max_width_chars(32)
+        label.set_selectable(True)
 
     def callout_preview(self, callout):
         box = Gtk.Box(spacing=8)
@@ -496,7 +544,13 @@ class EditorRenderMixin:
             revealed = line_hits(text, start, end, cursor) or selection_overlaps(selected, start, end)
             widget.set_visible(not revealed)
             if not revealed:
-                self.conceal_block(start, end, tag)
+                anchor = widget.source_anchor
+                self.buffer.apply_tag(self.hidden, self.buffer.get_iter_at_offset(start),
+                                      self.buffer.get_iter_at_offset(anchor))
+                self.buffer.apply_tag(self.hidden, self.buffer.get_iter_at_offset(anchor + 1),
+                                      self.buffer.get_iter_at_offset(end))
+                self.buffer.apply_tag(tag, self.buffer.get_iter_at_offset(start),
+                                      self.buffer.get_iter_at_offset(anchor + 1))
         for start, end, widget, tag in self.embed_widgets:
             if covered(start):
                 widget.hide()
@@ -616,7 +670,7 @@ class EditorRenderMixin:
         for start, _, widget, _ in (*self.image_widgets, *self.diagram_widgets, *self.preview_entries()):
             if not widget.get_visible():
                 continue
-            position = self.buffer.get_iter_at_offset(start)
+            position = self.buffer.get_iter_at_offset(getattr(widget, 'source_anchor', start))
             rect = self.editor.get_iter_location(position)
             x, y = self.editor.buffer_to_window_coords(Gtk.TextWindowType.WIDGET, rect.x, rect.y)
             height = widget.get_preferred_height().natural_height

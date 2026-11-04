@@ -286,3 +286,20 @@ scrollbar slider:hover { background: @focus_edge; }
 .math-preview { color: @bright; }
 .callout { background: @raised; border-radius: 8px; padding: 6px 10px; }
 .callout-kind, .callout-title { font-weight: bold; color: @bright; }
+
+/* The table editor uses a continuous cell grid, with controls above it. */
+.table-editor-summary { color: @soft; padding: 4px 0; }
+.table-editor-grid { background: @edge; }
+.table-editor-grid entry.table-editor-cell {
+    border-radius: 0; border: 1px solid @edge; margin: 0;
+    padding: 8px 10px; background: @canvas; box-shadow: none;
+}
+.table-editor-grid entry.table-editor-stripe { background: @raised; }
+.table-editor-grid entry.table-editor-header { background: @raised; color: @bright; font-weight: bold; }
+.table-editor-grid entry.table-editor-selected {
+    border-color: @accent; background: @selected; box-shadow: inset 0 0 0 1px @accent;
+}
+.table-editor-axis { background: @raised; color: @muted; padding: 8px; min-width: 36px; }
+.table-editor-column { border-radius: 0; background: @raised; color: @soft; }
+
+.table-editor-axis-selected { background: @selected; color: @bright; font-weight: bold; }

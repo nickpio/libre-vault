@@ -1,4 +1,5 @@
 """Exercise organization, metadata editing, and filtered results through GTK."""
+from tests.gui_wait import wait_for_work
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -31,6 +32,7 @@ class OrganizationUiTests(unittest.TestCase):
         (self.root / 'A.md').write_text('# A\n')
         (self.root / 'B.md').write_text('---\ntags: [work]\nstatus: active\n---\n[[A]] alpha result\n')
         self.window = Window(self.app, self.root, preferences_path=base / 'config/settings.json')
+        wait_for_work(self.window)
         self.addCleanup(self.window.destroy)
         self.drain()
 
@@ -102,12 +104,14 @@ class OrganizationUiTests(unittest.TestCase):
         self.assertEqual(len(tags), 1)
         tags[0].clicked()
         self.window.populate_files()
+        wait_for_work(self.window)
         self.assertEqual(self.window.search_entry.get_text(), 'tag:#work')
         self.assertEqual([row.path for row in self.window.files.get_children()], ['B.md'])
 
     def test_search_renders_highlighted_snippet_and_updates_unchanged_path(self):
         self.window.search_entry.set_text('path:B alpha')
         self.window.populate_files()
+        wait_for_work(self.window)
         row = self.window.files.get_children()[0]
         self.assertEqual(row.path, 'B.md')
         labels = row.get_child().get_children()[1].get_children()
@@ -116,6 +120,7 @@ class OrganizationUiTests(unittest.TestCase):
         note = self.window.vault.read('B.md')
         self.window.vault.save(note, note.text.replace('result', 'updated snippet'))
         self.window.populate_files()
+        wait_for_work(self.window)
         new_row = self.window.files.get_children()[0]
         self.assertIsNot(new_row, row)
         self.assertIn('updated snippet', new_row.search_signature.snippet)
@@ -125,6 +130,7 @@ class OrganizationUiTests(unittest.TestCase):
             (self.root / f'Note {index:02}.md').write_text('other content\n')
         self.window.vault.refresh()
         self.window.populate_files()
+        wait_for_work(self.window)
         self.window.show_all()
         self.drain()
         scroll = self.window.file_views.get_child_by_name('tree')
@@ -135,16 +141,19 @@ class OrganizationUiTests(unittest.TestCase):
 
         self.window.search_entry.set_text('alpha')
         self.window.populate_files()
+        wait_for_work(self.window)
         self.assertEqual(self.window.files_heading.get_text(), 'Search results (1)')
         self.assertEqual(self.window.file_views.get_visible_child_name(), 'search')
         self.window.search_entry.set_text('no such note')
         self.window.populate_files()
+        wait_for_work(self.window)
         self.assertEqual(self.window.files_heading.get_text(), 'Search results (0)')
         self.assertEqual(self.window.search_empty_label.get_text(), 'No notes match ‘no such note’')
         self.assertEqual(self.window.file_views.get_visible_child_name(), 'empty')
         empty = self.window.file_views.get_child_by_name('empty')
         empty.get_children()[1].clicked()
         self.window.populate_files()
+        wait_for_work(self.window)
         self.drain()
         self.assertEqual(self.window.search_entry.get_text(), '')
         self.assertEqual(self.window.files_heading.get_text(), 'Files')

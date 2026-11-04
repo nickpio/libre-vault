@@ -1,4 +1,5 @@
 """Real GTK transitions reclaim editor space and preserve splitter widths."""
+from tests.gui_wait import wait_for_work
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -59,6 +60,7 @@ class PanelTests(unittest.TestCase):
         self.addCleanup(settings.set_property, 'gtk-enable-animations', animations)
         settings.set_property('gtk-enable-animations', True)
         self.window = Window(self.app, root)
+        wait_for_work(self.window)
         self.addCleanup(self.window.destroy)
         self.wait_for_sidebars()
 
@@ -130,6 +132,7 @@ class PanelTests(unittest.TestCase):
         for index in range(40):
             (root / f'Note {index:02}.md').write_text('# Note\n')
         self.window.refresh()
+        wait_for_work(self.window)
         self.window.bookmark_items = [Bookmark('note', path=f'Note {index:02}.md') for index in range(20)]
         self.window.refresh_bookmark_list()
         self.window.resize(800, 480)

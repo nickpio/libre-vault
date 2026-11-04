@@ -1,4 +1,5 @@
 """Filesystem policies, shared link resolution, and complete workspace flows."""
+from tests.gui_wait import wait_for_work
 from dataclasses import replace
 import json
 from pathlib import Path
@@ -109,6 +110,7 @@ class WorkspaceCustomizationUITests(unittest.TestCase):
             (root / 'B.md').write_text('Beta')
             preferences = root / '.settings.json'
             window = Window(self.app, root, preferences_path=preferences)
+            wait_for_work(window)
             self.addCleanup(window.destroy)
             a = window.open_note('A.md')
             window.split_right()
@@ -143,6 +145,7 @@ class WorkspaceCustomizationUITests(unittest.TestCase):
             window.persist_workspace()
             window.destroy()
             restored = Window(self.app, root, preferences_path=preferences)
+            wait_for_work(restored)
             self.addCleanup(restored.destroy)
             self.assertEqual(len(restored.workspace_layout.groups), 3)
             self.assertEqual(restored.tab_mode, 'sliding')
@@ -168,6 +171,7 @@ class WorkspaceCustomizationUITests(unittest.TestCase):
             (root / 'B.md').write_text('Body')
             preferences = root / '.settings.json'
             window = Window(self.app, root, preferences_path=preferences)
+            wait_for_work(window)
             self.addCleanup(window.destroy)
             graph = window.show_graph_tab()
             window.open_split(graph)
@@ -176,6 +180,7 @@ class WorkspaceCustomizationUITests(unittest.TestCase):
             window.persist_workspace()
             window.destroy()
             restored = Window(self.app, root, preferences_path=preferences)
+            wait_for_work(restored)
             self.addCleanup(restored.destroy)
             self.assertIsInstance(restored.split_view, GraphView)
             self.assertEqual(restored.split_view.search.get_text(), 'file:A')
@@ -191,6 +196,7 @@ class WorkspaceCustomizationUITests(unittest.TestCase):
             (root / 'A.md').write_text('[[B]]')
             (root / 'B.md').write_text('# Preview heading\nPreview body')
             window = Window(self.app, root, preferences_path=root / '.settings.json')
+            wait_for_work(window)
             self.addCleanup(window.destroy)
             pane = window.open_note('A.md')
             save_id = shortcut_id('app', next(s for s in APP_SHORTCUTS if s.handler == 'save_current'))

@@ -2,6 +2,7 @@
 from io import BytesIO
 import multiprocessing
 import os
+import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -33,6 +34,12 @@ def main():
         try:
             assert window.vault is None
             window.load_vault(root)
+            deadline = time.monotonic() + 10
+            context = GLib.MainContext.default()
+            while window.loading_vault or window.vault is None:
+                assert time.monotonic() < deadline, 'Background vault open timed out'
+                context.iteration(False)
+                time.sleep(.002)
             window.open_note('A.md')
             pane = window.current()
             assert pane.note.path == 'A.md'

@@ -32,17 +32,26 @@ class VaultMonitor:
             return None
 
     def watch_tree(self, relative):
+        if self.vault.root.is_symlink() or not self.vault.root.is_dir():
+            for watched in self.monitors.values():
+                self.cancel(watched)
+            self.monitors.clear()
+            return
         try:
             path = self.vault._visible_path(relative) if relative else self.vault.root
         except VaultError:
             return
         if not path.is_dir():
             return
-        for directory, children, _ in self.vault.walk(relative):
-            key = Path(directory).relative_to(self.vault.root).as_posix()
-            key = '' if key == '.' else key
+        if self.vault.root.is_symlink():
+            return
+        # Scans already discovered the folders. Installing watches must not walk
+        # and stat every note again on the UI thread.
+        keys = ['', *self.vault.folders] if not relative else [relative, *(
+            name for name in self.vault.folders if name.startswith(relative + '/'))]
+        for key in keys:
             if key not in self.monitors:
-                watched = self.watch(directory, self.event)
+                watched = self.watch(self.vault.root / key, self.event)
                 if watched:
                     self.monitors[key] = watched
 

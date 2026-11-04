@@ -92,6 +92,9 @@ class VaultPaths:
                     return
                 children, files = [], []
                 for child in sorted(path.iterdir()):
+                    check = getattr(self, 'check_work', None)
+                    if check is not None:
+                        check()
                     listed = child.relative_to(self.root).as_posix()
                     try:
                         self._visible_path(listed)

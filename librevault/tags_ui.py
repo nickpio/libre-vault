@@ -37,11 +37,17 @@ class TagPane(Gtk.Expander):
 
     def refresh(self):
         vault = self.owner.vault
-        signature = (id(vault), vault.index.connection.total_changes) if vault else None
+        signature = (id(vault), vault.index.generation) if vault else None
         if signature == self.signature:
             return
         self.signature = signature
-        counts = vault.tag_counts() if vault else {}
+        if vault:
+            self.owner.vault_job('tags', lambda worker: worker.tag_counts(), self._apply_counts)
+        else:
+            self.owner.worker.cancel('tags')
+            self._apply_counts({})
+
+    def _apply_counts(self, counts):
         if counts == self.counts:
             return
         self.counts = counts

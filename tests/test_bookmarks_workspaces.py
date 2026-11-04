@@ -1,4 +1,5 @@
 """Bookmarks and named workspace layouts, stored outside the vault."""
+from tests.gui_wait import wait_for_work
 import json
 import os
 from pathlib import Path
@@ -222,6 +223,7 @@ class BookmarkWorkspaceUiTests(unittest.TestCase):
 
     def make_window(self):
         window = Window(self.app, preferences_path=self.preferences)
+        wait_for_work(window)
         self.windows.append(window)
         return window
 
@@ -253,6 +255,7 @@ class BookmarkWorkspaceUiTests(unittest.TestCase):
 
     def test_star_sidebar_and_commands_open_and_remove_a_note(self):
         self.window.load_vault(self.root)
+        wait_for_work(self.window)
         pane = self.window.open_note('A.md')
         self.assertEqual(pane.bookmark_button.get_tooltip_text(), 'Bookmark current note')
         self.assertTrue(self.window.bookmarks_empty.get_visible())
@@ -275,6 +278,7 @@ class BookmarkWorkspaceUiTests(unittest.TestCase):
 
     def test_heading_search_folder_and_graph_bookmarks_open(self):
         self.window.load_vault(self.root)
+        wait_for_work(self.window)
         self.window.add_note_bookmark('A.md', 'Details')
         self.window.open_note('Folder/B.md')
         self.window.open_bookmark(self.window.bookmark_items[0])
@@ -294,6 +298,7 @@ class BookmarkWorkspaceUiTests(unittest.TestCase):
         self.window.bookmark_selected_folder()
         self.window.collapsed_folders.add('Folder')
         self.window.populate_files()
+        wait_for_work(self.window)
         self.window.open_bookmark(next(item for item in self.window.bookmark_items if item.type == 'folder'))
         self.assertNotIn('Folder', self.window.collapsed_folders)
         self.assertEqual(self.window.files.get_selected_row().path, 'Folder/')
@@ -313,6 +318,7 @@ class BookmarkWorkspaceUiTests(unittest.TestCase):
 
     def test_move_and_trash_remap_bookmarks_outside_the_vault(self):
         self.window.load_vault(self.root)
+        wait_for_work(self.window)
         self.window.add_note_bookmark('A.md')
         self.window.add_note_bookmark('Folder/B.md', 'Beta')
         self.window.bookmark_items.append(Bookmark(type='folder', path='Folder'))
@@ -340,6 +346,7 @@ class BookmarkWorkspaceUiTests(unittest.TestCase):
 
     def test_manager_renames_reorders_and_deletes(self):
         self.window.load_vault(self.root)
+        wait_for_work(self.window)
         self.window.add_note_bookmark('A.md')
         self.window.add_note_bookmark('Folder/B.md')
         self.window.show_bookmarks()
@@ -360,6 +367,7 @@ class BookmarkWorkspaceUiTests(unittest.TestCase):
 
     def test_named_workspace_saves_loads_and_deletes_layout(self):
         self.window.load_vault(self.root)
+        wait_for_work(self.window)
         alpha = self.window.open_note('A.md')
         beta = self.window.open_note('Folder/B.md')
         alpha.buffer.place_cursor(alpha.buffer.get_iter_at_offset(4))
@@ -396,6 +404,7 @@ class BookmarkWorkspaceUiTests(unittest.TestCase):
 
     def test_save_command_prompts_and_palette_lists_layout_commands(self):
         self.window.load_vault(self.root)
+        wait_for_work(self.window)
         self.window.open_note('A.md')
         with patch('librevault.app.ask_text', return_value='Research') as prompt:
             self.window.save_workspace_layout()
@@ -421,6 +430,7 @@ class BookmarkWorkspaceUiTests(unittest.TestCase):
 
     def test_loading_a_layout_can_be_cancelled_while_a_note_is_dirty(self):
         self.window.load_vault(self.root)
+        wait_for_work(self.window)
         self.window.open_note('A.md')
         self.window.open_note('Folder/B.md')
         self.window.save_named_workspace('Writing')

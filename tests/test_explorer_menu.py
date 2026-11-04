@@ -1,4 +1,5 @@
 """Explorer creation actions use the clicked folder and preserve vault bounds."""
+from tests.gui_wait import wait_for_work
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -58,10 +59,12 @@ class ExplorerMenuTests(unittest.TestCase):
         (self.root / 'Projects').mkdir()
         (self.root / 'Projects' / 'Existing.md').write_text('# Existing\n')
         self.window = Window(self.app, str(self.root))
+        wait_for_work(self.window)
         self.addCleanup(self.window.destroy)
         self.drain_events()
 
     def drain_events(self):
+        wait_for_work(self.window)
         context = GLib.MainContext.default()
         for _ in range(1000):
             if not context.pending():
@@ -120,6 +123,7 @@ class ExplorerMenuTests(unittest.TestCase):
         self.assertEqual(self.window.files.get_selected_row().path, 'Projects/')
         self.assertEqual(self.window.current().note.path, 'Projects/Existing.md')
         self.window.files.emit('row-activated', self.row('Projects/'))
+        wait_for_work(self.window)
         self.assertEqual(self.window.current().note.path, 'Projects/Existing.md')
 
     def test_cancel_and_existing_name_do_not_create_files(self):
@@ -135,6 +139,7 @@ class ExplorerMenuTests(unittest.TestCase):
         self.window.vault.create_folder('Projects/Research')
         self.window.vault.create('Projects/Research/Ideas')
         self.window.populate_files()
+        wait_for_work(self.window)
         self.assertEqual([row.path for row in self.window.files.get_children()],
                          ['Projects/', 'Projects/Research/', 'Projects/Research/Ideas.md',
                           'Projects/Existing.md'])
@@ -142,20 +147,25 @@ class ExplorerMenuTests(unittest.TestCase):
             'Projects/', 'Projects/Research/', 'Projects/Research/Ideas.md')]
         self.assertEqual(margins, [0, 18, 36])
         self.window.files.emit('row-activated', self.row('Projects/'))
+        wait_for_work(self.window)
         self.assertEqual([row.path for row in self.window.files.get_children()], ['Projects/'])
         self.window.refresh()
+        wait_for_work(self.window)
         self.assertEqual([row.path for row in self.window.files.get_children()], ['Projects/'])
         self.window.open_note('Projects/Research/Ideas.md')
+        wait_for_work(self.window)
         self.assertEqual(self.window.files.get_selected_row().path, 'Projects/Research/Ideas.md')
 
     def test_search_and_creation_reveal_notes_in_collapsed_folders(self):
         self.window.toggle_folder('Projects/')
         self.window.search_entry.set_text('Existing')
         self.window.populate_files()
+        wait_for_work(self.window)
         self.assertEqual([row.path for row in self.window.files.get_children()], ['Projects/Existing.md'])
         self.assertTrue(self.row('Projects/Existing.md').search_result)
         self.window.search_entry.set_text('')
         self.window.populate_files()
+        wait_for_work(self.window)
         self.activate_creation(self.row('Projects/'), 0, 'Projects/New note', 'Projects/')
         self.assertEqual(self.window.files.get_selected_row().path, 'Projects/New note.md')
 
@@ -165,14 +175,18 @@ class ExplorerMenuTests(unittest.TestCase):
         event.keyval = Gdk.KEY_Left
         event.state = 0
         self.assertTrue(self.window.files_key_press(self.window.files, event))
+        wait_for_work(self.window)
         self.assertFalse(self.row('Projects/').expanded)
         event.keyval = Gdk.KEY_Right
         self.assertTrue(self.window.files_key_press(self.window.files, event))
+        wait_for_work(self.window)
         self.assertTrue(self.row('Projects/').expanded)
         self.assertTrue(self.window.files_key_press(self.window.files, event))
+        wait_for_work(self.window)
         self.assertEqual(self.window.files.get_selected_row().path, 'Projects/Existing.md')
         event.keyval = Gdk.KEY_Left
         self.assertTrue(self.window.files_key_press(self.window.files, event))
+        wait_for_work(self.window)
         self.assertEqual(self.window.files.get_selected_row().path, 'Projects/')
 
 

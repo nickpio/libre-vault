@@ -7,7 +7,6 @@ import os
 from pathlib import Path
 import sqlite3
 import sys
-import weakref
 
 import yaml
 
@@ -53,12 +52,14 @@ class CorruptIndex(sqlite3.DatabaseError):
 class NoteIndex:
     VERSION = 2
 
-    def __init__(self, root, cache_dir=None):
+    def __init__(self, root, cache_dir=None, *, verify=True, cancelled=None):
         base = Path(cache_dir) if cache_dir is not None else Path(
             os.environ.get('XDG_CACHE_HOME') or Path.home() / '.cache') / 'libre-vault'
         base.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.path = base / (hashlib.sha256(str(root).encode()).hexdigest() + '.sqlite3')
         self.connection = None
+        self.verify = verify
+        self.cancelled = cancelled
         try:
             self.open()
         except sqlite3.DatabaseError as error:
@@ -70,19 +71,24 @@ class NoteIndex:
                 raise
             self.path.unlink(missing_ok=True)
             self.open()
-        self._finalizer = weakref.finalize(self, self.connection.close)
 
     def open(self):
         descriptor = os.open(self.path, os.O_CREAT | os.O_RDWR, 0o600)
         os.close(descriptor)
         self.connection = sqlite3.connect(self.path)
         db = self.connection
+        if self.cancelled is not None:
+            db.set_progress_handler(lambda: int(self.cancelled()), 1000)
         db.execute('PRAGMA cache_size=-2048')
         db.execute('PRAGMA mmap_size=0')
         db.execute('PRAGMA temp_store=FILE')
-        if db.execute('PRAGMA quick_check').fetchone()[0] != 'ok':
+        db.execute('PRAGMA journal_mode=WAL')
+        if self.verify and db.execute('PRAGMA quick_check').fetchone()[0] != 'ok':
             raise CorruptIndex('Invalid derived index')
         version = db.execute('PRAGMA user_version').fetchone()[0]
+        if not self.verify and version == self.VERSION:
+            self.fts = db.execute("SELECT 1 FROM sqlite_master WHERE name='search'").fetchone() is not None
+            return
         if version != self.VERSION:
             db.executescript('DROP TABLE IF EXISTS search; DROP TABLE IF EXISTS notes;')
         db.execute('''CREATE TABLE IF NOT EXISTS notes (
@@ -105,6 +111,10 @@ class NoteIndex:
                 db.execute('INSERT INTO search(rowid,path,body) VALUES (?,?,?)', (rowid, path, body))
         db.execute(f'PRAGMA user_version={self.VERSION}')
         db.commit()
+
+    @property
+    def generation(self):
+        return self.connection.total_changes, self.connection.execute('PRAGMA data_version').fetchone()[0]
 
     def store(self, note, metadata, links):
         db = self.connection
@@ -167,6 +177,8 @@ class NoteIndex:
             yield from (row[0] for row in self.connection.execute('SELECT path FROM notes ORDER BY path'))
 
     def close(self):
+        # Close explicitly on the owning thread. A weakref finalizer can run on
+        # a different thread when that thread triggers garbage collection.
         if self.connection is not None:
-            self._finalizer()
+            self.connection.close()
             self.connection = None

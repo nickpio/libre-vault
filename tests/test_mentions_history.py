@@ -1,4 +1,5 @@
 """Unlinked mentions, saved-version history, and live note counts."""
+from tests.gui_wait import wait_for_work
 import os
 import stat
 from pathlib import Path
@@ -213,10 +214,12 @@ class MentionsHistoryWindowTests(unittest.TestCase):
         (self.root / 'Welcome.md').write_text(WELCOME, encoding='utf-8')
         (self.root / 'Other.md').write_text(OTHER, encoding='utf-8')
         self.window = Window(self.app, str(self.root))
+        wait_for_work(self.window)
         self.addCleanup(self.window.destroy)
         self.drain_events()
 
     def drain_events(self):
+        wait_for_work(self.window)
         from librevault.app import GLib
         context = GLib.MainContext.default()
         for _ in range(1000):
@@ -231,6 +234,7 @@ class MentionsHistoryWindowTests(unittest.TestCase):
 
     def test_unlinked_mentions_can_be_opened_or_linked_from_the_details_panel(self):
         self.window.details_buttons['links'].set_active(True)
+        wait_for_work(self.window)
         labels = self.section_labels()
         self.assertLess(labels.index('Backlinks · Saved files'), labels.index('Unlinked mentions'))
         buttons = mention_buttons(self.window)
@@ -245,8 +249,10 @@ class MentionsHistoryWindowTests(unittest.TestCase):
         cursor = pane.buffer.get_iter_at_mark(pane.buffer.get_insert()).get_offset()
         self.assertEqual(pane.text()[cursor:cursor + len('Hello World')], 'Hello World')
         self.window.open_note('Welcome.md')
+        wait_for_work(self.window)
         self.window.open_note('Other.md')
         self.window.open_note('Welcome.md')
+        wait_for_work(self.window)
         link = next(button for button in mention_buttons(self.window)
                     if button.mention_action == 'link' and button.mention.matched_term == 'Welcome')
         link.clicked()
@@ -259,7 +265,9 @@ class MentionsHistoryWindowTests(unittest.TestCase):
         self.assertIn('See Welcome soon.', other.text())
         other.dirty = False
         self.window.open_note('Welcome.md')
+        wait_for_work(self.window)
         self.window.close_note(other)
+        wait_for_work(self.window)
         link = next(button for button in mention_buttons(self.window)
                     if button.mention_action == 'link' and button.mention.matched_term == 'Welcome')
         link.clicked()
@@ -271,6 +279,7 @@ class MentionsHistoryWindowTests(unittest.TestCase):
         self.assertIn('Hello World', remaining)
         self.assertNotIn('Welcome', remaining)
         self.window.open_note('Other.md')
+        wait_for_work(self.window)
         self.assertIn('No unlinked mentions.', self.section_labels())
 
     def test_version_history_command_restores_one_undoable_edit(self):

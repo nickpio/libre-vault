@@ -1,4 +1,5 @@
 """Exercise GTK pointer hit-testing in a child process, since failures abort."""
+from tests.gui_wait import wait_for_work
 from pathlib import Path
 import subprocess
 import sys
@@ -41,6 +42,7 @@ def probe():
         example = (ROOT / 'example-vault' / 'Welcome.md').read_text(encoding='utf-8')
         note.write_text(example, encoding='utf-8')
         window = Window(app, directory)
+        wait_for_work(window)
         window.set_accept_focus(False)
         window.set_focus_on_map(False)
         pane = window.current()

@@ -2,6 +2,7 @@
 
 Run from the repository root with PYTHONPATH=., optionally under xvfb-run.
 """
+from tests.gui_wait import wait_for_work
 from pathlib import Path
 import shutil
 from tempfile import TemporaryDirectory
@@ -36,10 +37,12 @@ def main():
         example = Path(__file__).resolve().parents[1] / 'example-vault'
         shutil.copytree(example, root)
         window = Window(app, preferences_path=Path(folder) / 'settings.json')
+        wait_for_work(window)
         try:
             assert window.vault is None
             assert window.workspace_stack.get_visible_child_name() == 'welcome'
             window.load_vault(root)
+            wait_for_work(window)
             drain_events()
             assert window.current().note.path == 'Welcome.md'
             window.follow_link('Welcome.md', 'Projects/Field notes')
@@ -63,6 +66,7 @@ def main():
             # A clean editor must reload an external edit.
             path.write_text('# External revision\n', encoding='utf-8')
             window.refresh()
+            wait_for_work(window)
             drain_events()
             assert pane.text() == '# External revision\n'
             assert not pane.dirty
@@ -84,6 +88,7 @@ def main():
             local = pane.text()
             path.write_text('# Competing external revision\n', encoding='utf-8')
             window.refresh()
+            wait_for_work(window)
             drain_events()
             assert pane.text() == local
             assert pane.dirty
@@ -98,10 +103,12 @@ def main():
 
             window.search_entry.set_text('competing external')
             window.populate_files()
+            wait_for_work(window)
             drain_events()
             assert [row.path for row in window.files.get_children()] == ['Projects/Field notes.md']
             window.search_entry.set_text('does-not-exist')
             window.populate_files()
+            wait_for_work(window)
             assert window.files.get_children() == []
             print('GTK smoke passed: link, edit, undo/redo, find/replace, save, external reload, conflict, search')
         finally:

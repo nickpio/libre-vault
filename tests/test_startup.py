@@ -1,4 +1,5 @@
 """Welcome startup, optional vault arguments, and working-directory-safe launch."""
+from tests.gui_wait import wait_for_work
 import json
 import os
 from pathlib import Path
@@ -93,6 +94,7 @@ class WelcomeTests(unittest.TestCase):
         self.root.mkdir()
         self.preferences = Path(self.directory.name) / 'config' / 'settings.json'
         self.window = application.Window(self.app, preferences_path=self.preferences)
+        wait_for_work(self.window)
         self.addCleanup(self.window.destroy)
 
     def test_no_vault_has_welcome_and_no_filesystem_side_effects(self):
@@ -118,6 +120,7 @@ class WelcomeTests(unittest.TestCase):
             chooser.return_value.run.return_value = Gtk.ResponseType.OK
             chooser.return_value.get_filename.return_value = str(self.root)
             self.window.open_vault_button.clicked()
+            wait_for_work(self.window)
         self.assertEqual(self.window.workspace_stack.get_visible_child_name(), 'workspace')
         self.assertEqual(self.window.current().note.path, 'Note.md')
         self.assertTrue(self.window.save_button.get_sensitive())
@@ -128,6 +131,7 @@ class WelcomeTests(unittest.TestCase):
         with patch.object(application.Gtk, 'FileChooserDialog') as chooser:
             chooser.return_value.run.return_value = Gtk.ResponseType.CANCEL
             self.window.open_vault_button.clicked()
+            wait_for_work(self.window)
         self.assertIsNone(self.window.vault)
         self.assertEqual(self.window.workspace_stack.get_visible_child_name(), 'welcome')
 
@@ -154,6 +158,7 @@ class WelcomeTests(unittest.TestCase):
         self.assertFalse(self.window.panel_widths_initialized)
         (self.root / 'Note.md').write_text('# Note\n\n## Section\n')
         self.window.load_vault(self.root)
+        wait_for_work(self.window)
         settle_sidebars()
         left = self.window.notes_panel.get_allocated_width()
         right = self.window.details_panel.get_allocated_width()
@@ -167,12 +172,14 @@ class WelcomeTests(unittest.TestCase):
         adjusted = self.window.details_panel.get_allocated_width()
         self.assertAlmostEqual(adjusted, right + 60, delta=1)
         self.window.load_vault(self.root)
+        wait_for_work(self.window)
         self.window.queue_resize()
         settle()
         self.assertAlmostEqual(self.window.details_panel.get_allocated_width(), adjusted, delta=1)
 
     def test_empty_folder_can_be_opened_before_creating_first_note(self):
         self.window.load_vault(self.root)
+        wait_for_work(self.window)
         self.assertEqual(self.window.workspace_stack.get_visible_child_name(), 'workspace')
         self.assertIsNone(self.window.current())
         self.assertFalse(self.window.save_button.get_sensitive())
@@ -193,6 +200,7 @@ class WelcomeTests(unittest.TestCase):
     def test_invalid_startup_path_leaves_welcome_available(self):
         with patch.object(application.Window, 'error') as error:
             window = application.Window(self.app, self.root / 'missing', preferences_path=self.preferences)
+            wait_for_work(window)
             self.addCleanup(window.destroy)
         error.assert_called_once()
         self.assertIsNone(window.vault)
@@ -201,14 +209,17 @@ class WelcomeTests(unittest.TestCase):
     def test_launch_reopens_last_vault_and_explicit_path_takes_precedence(self):
         (self.root / 'Note.md').write_text('# Note\n')
         self.window.load_vault(self.root)
+        wait_for_work(self.window)
         self.window.destroy()
         reopened = application.Window(self.app, preferences_path=self.preferences)
+        wait_for_work(reopened)
         self.addCleanup(reopened.destroy)
         self.assertEqual(reopened.vault.root, self.root)
         self.assertEqual(reopened.current().note.path, 'Note.md')
         other = Path(self.directory.name) / 'other'
         other.mkdir()
         explicit = application.Window(self.app, other, preferences_path=self.preferences)
+        wait_for_work(explicit)
         self.addCleanup(explicit.destroy)
         self.assertEqual(explicit.vault.root, other)
         self.assertEqual(explicit.last_vault_store.load(), str(other))
@@ -218,6 +229,7 @@ class WelcomeTests(unittest.TestCase):
         self.window.last_vault_store.save(missing)
         with patch.object(application.Window, 'error') as error:
             window = application.Window(self.app, preferences_path=self.preferences)
+            wait_for_work(window)
             self.addCleanup(window.destroy)
         error.assert_not_called()
         self.assertIsNone(window.vault)
@@ -232,12 +244,14 @@ class WelcomeTests(unittest.TestCase):
             with self.subTest(contents=contents):
                 path.write_text(contents)
                 window = application.Window(self.app, preferences_path=self.preferences)
+                wait_for_work(window)
                 self.assertIsNone(window.vault)
                 window.destroy()
 
     def test_close_vault_from_palette_returns_to_welcome_and_forgets_startup(self):
         (self.root / 'Note.md').write_text('# Note\n')
         self.window.load_vault(self.root)
+        wait_for_work(self.window)
         pane = self.window.current()
         monitor = self.window.vault_monitor
         self.window.open_split(pane)
@@ -254,12 +268,14 @@ class WelcomeTests(unittest.TestCase):
         self.assertIsNone(self.window.last_vault_store.load())
         self.assertEqual(self.window.workspace_store.load(self.root)['tabs'][0]['path'], 'Note.md')
         reopened = application.Window(self.app, preferences_path=self.preferences)
+        wait_for_work(reopened)
         self.addCleanup(reopened.destroy)
         self.assertIsNone(reopened.vault)
 
     def test_cancel_close_retains_dirty_note_and_last_vault(self):
         (self.root / 'Note.md').write_text('# Note\n')
         self.window.load_vault(self.root)
+        wait_for_work(self.window)
         pane = self.window.current()
         pane.buffer.insert_at_cursor('local change')
         with patch.object(application.Gtk, 'MessageDialog') as dialog:
@@ -272,6 +288,7 @@ class WelcomeTests(unittest.TestCase):
     def test_discard_close_cancels_autosave_and_save_close_preserves_edits(self):
         (self.root / 'Note.md').write_text('# Note\n')
         self.window.load_vault(self.root)
+        wait_for_work(self.window)
         pane = self.window.current()
         pane.buffer.insert_at_cursor('discard this')
         with patch.object(application.Gtk, 'MessageDialog') as dialog:
@@ -280,6 +297,7 @@ class WelcomeTests(unittest.TestCase):
         self.assertIsNone(pane.autosave_source)
         self.assertEqual((self.root / 'Note.md').read_text(), '# Note\n')
         self.window.load_vault(self.root)
+        wait_for_work(self.window)
         self.window.current().buffer.insert_at_cursor('save this')
         with patch.object(application.Gtk, 'MessageDialog') as dialog:
             dialog.return_value.run.return_value = Gtk.ResponseType.YES

@@ -1,4 +1,5 @@
 """Live preview for tables, callouts, math, and wiki embeds, plus table edits."""
+from tests.gui_wait import wait_for_work
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -241,6 +242,7 @@ class LivePreviewTableGuiTests(unittest.TestCase):
         (self.root / 'Child.md').write_text('Saved excerpt line\n', encoding='utf-8')
         self.window = Window(self.app, self.root,
                              preferences_path=Path(self.directory.name) / 'settings.json')
+        wait_for_work(self.window)
         self.addCleanup(self.window.destroy)
         self.window.open_note('Note.md')
         self.pane = self.window.current()
@@ -286,7 +288,7 @@ class LivePreviewTableGuiTests(unittest.TestCase):
         self.assertTrue(self.pane.buffer.get_iter_at_offset(start).has_tag(self.pane.hidden))
         self.assertTrue(self.pane.buffer.get_iter_at_offset(start).has_tag(tag))
         body = text.index('Ada')
-        self.assertFalse(self.pane.buffer.get_iter_at_offset(body).has_tag(tag))
+        self.assertTrue(self.pane.buffer.get_iter_at_offset(body).has_tag(tag))
         self.assertEqual(self.pane.text(), text)
         self.show(text, body)
         self.assertFalse(widget.get_visible())
@@ -294,6 +296,93 @@ class LivePreviewTableGuiTests(unittest.TestCase):
         self.pane.set_mode('source')
         self.assertFalse(widget.get_visible())
         self.assertEqual(self.pane.text(), text)
+
+    def settle_layout(self):
+        loop = GLib.MainLoop()
+        GLib.timeout_add(80, lambda: (loop.quit(), False)[1])
+        loop.run()
+
+    def test_table_preview_occupies_its_note_position(self):
+        table = format_table(['A', 'B'], ['left', 'left'], [['', ''], ['', '']])
+        for suffix in ('\nAfter\n', ''):
+            text = 'Before\n' + table + suffix
+            self.show(text, 0)
+            self.settle_layout()
+            start, end, widget, tag = self.pane.table_widgets[0]
+            allocation = widget.get_allocation()
+            before = self.pane.editor.get_iter_location(self.pane.buffer.get_start_iter())
+            x, y = self.pane.editor.buffer_to_window_coords(Gtk.TextWindowType.WIDGET,
+                                                          before.x, before.y)
+            self.assertGreaterEqual(allocation.y, y + before.height)
+            self.assertEqual(allocation.x, x)
+            self.assertFalse(self.pane.buffer.get_iter_at_offset(widget.source_anchor).has_tag(self.pane.hidden))
+            if suffix:
+                after = self.pane.editor.get_iter_location(self.pane.buffer.get_iter_at_offset(end))
+                _, after_y = self.pane.editor.buffer_to_window_coords(Gtk.TextWindowType.WIDGET,
+                                                                    after.x, after.y)
+                self.assertLessEqual(allocation.y + allocation.height, after_y)
+            self.assertEqual(self.pane.text(), text)
+            self.pane.set_mode('source')
+            self.assertFalse(widget.get_visible())
+            self.pane.set_mode('live')
+
+    def test_table_columns_fit_short_values_and_wrap_long_prose(self):
+        text = 'Before\n' + format_table(
+            ['Date', 'Status', 'Description'], ['left'] * 3,
+            [['2026-11-04', 'In progress', 'A longer description with several words. ' * 20]]) + '\nAfter\n'
+        self.show(text, 0)
+        for width in (1200, 920):
+            self.window.resize(width, 750)
+            self.settle_layout()
+            widget = self.pane.table_widgets[0][2]
+            for column in widget.table_columns[:2]:
+                for label in column:
+                    self.assertEqual(label.get_layout().get_line_count(), 1, label.get_text())
+            long_cell = widget.table_columns[2][1]
+            self.assertGreater(long_cell.get_layout().get_line_count(), 1)
+            self.assertLessEqual(long_cell.get_allocated_width(), 360)
+            self.assertGreater(widget.get_allocated_width(), 300)
+            editor = self.pane.editor
+            available = editor.get_allocated_width() - editor.get_left_margin() - editor.get_right_margin()
+            self.assertLessEqual(widget.get_allocated_width(), available)
+            end = self.pane.table_widgets[0][1]
+            after = editor.get_iter_location(self.pane.buffer.get_iter_at_offset(end))
+            _, after_y = editor.buffer_to_window_coords(Gtk.TextWindowType.WIDGET, after.x, after.y)
+            allocation = widget.get_allocation()
+            self.assertLessEqual(allocation.y + allocation.height, after_y)
+
+    def test_insert_then_reopen_preview_and_add_content(self):
+        self.show('Before\n', len('Before\n'))
+
+        def insert():
+            dialog = next(w for w in Gtk.Window.list_toplevels()
+                          if isinstance(w, Gtk.Dialog) and w.get_title() == 'Insert table')
+            dialog.response(Gtk.ResponseType.OK)
+            return False
+
+        GLib.idle_add(insert)
+        self.pane.prompt_insert_table()
+        original = self.pane.text()
+        self.pane.buffer.place_cursor(self.pane.buffer.get_start_iter())
+        self.pane.render()
+        self.settle_layout()
+        widget = self.pane.table_widgets[0][2]
+        button = next(child for child in widget.get_children() if isinstance(child, Gtk.Button))
+
+        def edit():
+            dialog = next(w for w in Gtk.Window.list_toplevels()
+                          if isinstance(w, Gtk.Dialog) and w.get_title() == 'Edit table')
+            dialog.add_row()
+            dialog.entries[-1][0].set_text('Added later')
+            dialog.response(Gtk.ResponseType.OK)
+            return False
+
+        GLib.idle_add(edit)
+        button.clicked()
+        self.assertEqual(len(find_tables(self.pane.text())[0].rows), 3)
+        self.assertEqual(find_tables(self.pane.text())[0].rows[-1][0], 'Added later')
+        self.pane.undo()
+        self.assertEqual(self.pane.text(), original)
 
     def test_long_tables_stop_after_twelve_rows(self):
         rows = '\n'.join(f'| {index} |' for index in range(14))
@@ -406,6 +495,25 @@ class LivePreviewTableGuiTests(unittest.TestCase):
 
         GLib.idle_add(cancel)
         palette.search.emit('activate')
+        self.assertEqual(self.pane.text(), text)
+
+    def test_enter_finishes_current_row_instead_of_splitting_cell(self):
+        from dataclasses import replace
+        text = 'Before\n| Name | Status |\n| --- | --- |\n| Alpha | In progress |\n| Beta | Done |\n'
+        for mode in ('live', 'source'):
+            for continue_lists in (True, False):
+                self.window.preferences = replace(self.window.preferences, continue_lists=continue_lists)
+                self.pane.set_mode(mode)
+                self.show(text, text.index('Alpha') + 2)
+                self.assertTrue(self.key(Gdk.KEY_Return))
+                self.assertEqual(self.pane.text(), text.replace('| Beta', '\n| Beta'))
+                self.assertEqual(find_tables(self.pane.text())[0].rows, [['Alpha', 'In progress']])
+                self.pane.undo()
+                self.assertEqual(self.pane.text(), text)
+        self.show(text, text.index('Alpha') + 2)
+        event = Gdk.Event.new(Gdk.EventType.KEY_PRESS)
+        event.keyval, event.state = Gdk.KEY_Return, Gdk.ModifierType.SHIFT_MASK
+        self.assertFalse(self.pane.editor_key_press(self.pane.editor, event))
         self.assertEqual(self.pane.text(), text)
 
     def test_tab_navigates_cells_and_appends_a_row_as_one_undo(self):

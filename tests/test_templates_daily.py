@@ -1,4 +1,5 @@
 """Templates, daily notes, unique notes, and random notes."""
+from tests.gui_wait import wait_for_work
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
@@ -247,6 +248,7 @@ class TemplateWindowTests(unittest.TestCase):
         (self.root / 'Templates' / 'Day.md').write_text(DAY, encoding='utf-8')
         self.preferences_path = Path(self.directory.name) / 'settings.json'
         self.window = Window(self.app, self.root, preferences_path=self.preferences_path)
+        wait_for_work(self.window)
         self.addCleanup(self.window.destroy)
         self.drain()
 
@@ -299,6 +301,7 @@ class TemplateWindowTests(unittest.TestCase):
         with patch('librevault.templates.current_time', return_value=WHEN):
             self.assertTrue(self.window.key_press(
                 self.window, self.event(Gdk.KEY_d, Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.MOD1_MASK)))
+        wait_for_work(self.window)
         pane = self.window.current()
         self.assertEqual(pane.note.path, 'Daily/2026-11-02.md')
         self.assertEqual(pane.text(), '# 2026-11-02\n2026-11-02 08:00\nMonday 00\n')
@@ -417,6 +420,7 @@ class TemplateWindowTests(unittest.TestCase):
     def test_palette_lists_commands_and_opens_a_random_note(self):
         (self.root / 'Beta.md').write_text('beta\n', encoding='utf-8')
         self.window.refresh()
+        wait_for_work(self.window)
         self.assertTrue(self.window.key_press(self.window, self.event(Gdk.KEY_p, Gdk.ModifierType.MOD1_MASK)))
         loop = GLib.MainLoop()
         GLib.timeout_add(30, lambda: loop.quit() or False)

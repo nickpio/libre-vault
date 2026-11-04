@@ -122,7 +122,7 @@ class BasesView(Gtk.Box):
         if vault is None:
             return None
         opened = tuple((path, hash(pane.text())) for path, pane in sorted(self.owner.panes.items()))
-        return (vault.index.connection.total_changes, self.search.get_text(), opened)
+        return (vault.index.generation, self.search.get_text(), opened)
 
     def refresh_if_changed(self):
         if self.closed or self.editing or self.reloading or self.owner.vault is None:

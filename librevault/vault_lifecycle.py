@@ -5,6 +5,7 @@ from .monitor import VaultMonitor
 from .navigation import NavigationHistory
 from .recovery import RecoveryStore, VersionHistoryStore
 from .vault import Vault, VaultError
+from .worker import Snapshot
 
 
 class VaultLifecycleMixin:
@@ -55,13 +56,56 @@ class VaultLifecycleMixin:
         return True
 
     def load_vault(self, folder):
-        vault = Vault(folder, options=self.vault_options_store.load(folder))
-        if not self.confirm_panes(self.editors()):
-            vault.close()
-            return
+        from pathlib import Path
+        root = Path(folder).expanduser().resolve(strict=True)
+        if not root.is_dir():
+            raise VaultError('Choose a folder as your vault.')
+        options = self.vault_options_store.load(root)
+        previous = self.vault
+        changes = previous.index.connection.total_changes if previous is not None else None
+        self.cancel_work()
+        self.loading_vault = True
+        self.work_status.set_text(f'Opening {root.name}…')
+        self.work_cancel.show()
+
+        def scan(vault):
+            vault.refresh()
+            return Snapshot.of(vault)
+
+        def loaded(snapshot):
+            self.loading_vault = False
+            self.work_cancel.hide()
+            self.work_status.set_text('')
+            if not self.confirm_panes(self.editors()):
+                return
+            if (self.vault is previous and previous is not None and previous.root == root
+                    and changes != previous.index.connection.total_changes):
+                # Saving an editor while reopening this vault invalidates the scan.
+                self.load_vault(root)
+                return
+            try:
+                vault = Vault(root, options=options, scan=False, verify_index=False)
+            except (VaultError, OSError) as error:
+                failed(error)
+                return
+            snapshot.apply(vault)
+            self._install_vault(vault)
+
+        def failed(error):
+            self.loading_vault = False
+            self.work_cancel.hide()
+            self.work_status.set_text('')
+            self.error(error)
+
+        self.worker.submit('open', root, options, scan, loaded, failed,
+                           lambda count: self.work_status.set_text(f'Opening {root.name} · {count} files…'))
+
+    def _install_vault(self, vault):
         self.persist_workspace()
         self.release_vault()
         self.vault = vault
+        self.pending_file_selection = None
+        self.file_row_limit = 200
         self.bookmark_items = self.bookmark_store.load(vault.root)
         self.navigation_history = NavigationHistory()
         self.recovery = RecoveryStore(vault.root)
@@ -103,6 +147,7 @@ class VaultLifecycleMixin:
         self.panes.clear()
 
     def release_vault(self):
+        self.cancel_work()
         for window in (self.version_dialog, self.graph_window, self.slides_window,
                        self.converter_dialog, self.bookmark_manager, self.workspace_manager):
             if window is not None:
@@ -127,6 +172,7 @@ class VaultLifecycleMixin:
         self.refresh_bookmark_list()
 
     def close_vault(self, *_):
+        self.cancel_work()
         if self.vault is None:
             return True
         if not self.confirm_panes(self.editors()):

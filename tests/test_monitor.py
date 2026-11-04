@@ -1,4 +1,5 @@
 """Incremental indexing and real Gio notifications, including watch teardown."""
+from tests.gui_wait import wait_for_work
 import gc
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -93,6 +94,7 @@ class MonitorTests(unittest.TestCase):
         (self.root / 'B.md').write_text('B')
         self.window = Window(self.app, self.root,
                              preferences_path=Path(self.directory.name) / 'settings.json')
+        wait_for_work(self.window)
         self.addCleanup(self.window.destroy)
         self.wait_for(lambda: self.window.vault_monitor.source is None)
 
@@ -109,14 +111,14 @@ class MonitorTests(unittest.TestCase):
 
     def test_external_atomic_edit_reads_only_affected_file_and_protects_dirty_note(self):
         pane = self.window.open_note('A.md')
-        with patch.object(self.window.vault, 'refresh', side_effect=AssertionError('Unexpected full scan')):
-            with patch.object(self.window.vault, 'read', wraps=self.window.vault.read) as read:
+        with patch.object(Vault, 'refresh', side_effect=AssertionError('Unexpected full scan')):
+            with patch.object(Vault, 'read', autospec=True, side_effect=Vault.read) as read:
                 temporary = self.root / '.replacement'
                 temporary.write_text('External')
                 temporary.replace(self.root / 'A.md')
                 self.wait_for(lambda: pane.text() == 'External')
                 self.assertTrue(read.called)
-                self.assertEqual({call.args[0] for call in read.call_args_list}, {'A.md'})
+                self.assertEqual({call.args[1] for call in read.call_args_list}, {'A.md'})
             pane.buffer.insert_at_cursor(' draft')
             (self.root / 'A.md').write_text('Competing')
             self.wait_for(lambda: self.window.vault.indexed_note('A.md').text == 'Competing')
@@ -167,6 +169,7 @@ class MonitorTests(unittest.TestCase):
         old = self.window.vault_monitor
         old.queue('A.md')
         self.window.load_vault(self.root)
+        wait_for_work(self.window)
         self.assertTrue(old.closed)
         self.assertIsNone(old.source)
         self.assertFalse(old.monitors)
