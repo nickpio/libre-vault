@@ -5,6 +5,9 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
+import librevault.durable as durable
+from librevault.durable import AtomicReplacementError, DirectorySyncError
+from librevault.recovery import VersionHistoryStore
 from librevault.vault import Conflict, Vault, VaultError, links
 
 
@@ -74,14 +77,93 @@ class VaultTests(unittest.TestCase):
             vault.save(note, 'local')
         self.assertFalse(path.exists())
 
+    def test_save_fsyncs_the_note_directory_only_after_replacement(self):
+        path = self.write('Folder/Note.md', 'original')
+        vault = Vault(self.root)
+        seen = []
+        real_sync = durable.sync_directory
+
+        def spy(directory):
+            seen.append(Path(directory).resolve())
+            self.assertEqual(path.read_text(encoding='utf-8'), 'revised')
+            real_sync(directory)
+
+        with patch('librevault.durable.sync_directory', spy):
+            saved = vault.save(vault.read('Folder/Note.md'), 'revised')
+        self.assertEqual(seen, [path.parent.resolve()])
+        self.assertEqual(saved.text, 'revised')
+        self.assertEqual(vault.notes['Folder/Note.md'].revision, saved.revision)
+
+    def test_save_write_failure_keeps_original_and_removes_temporary(self):
+        path = self.write('Note.md', 'original')
+        vault = Vault(self.root)
+        note = vault.read('Note.md')
+        with patch('librevault.vault.os.fchmod', side_effect=OSError('mode')):
+            with self.assertRaises(OSError) as caught:
+                vault.save(note, 'revised')
+        self.assertNotIsInstance(caught.exception, (AtomicReplacementError, DirectorySyncError))
+        self.assertEqual(path.read_text(encoding='utf-8'), 'original')
+        self.assertEqual(vault.notes['Note.md'].revision, note.revision)
+        self.assertEqual(list(self.root.glob('.librevault-*')), [])
+
+    def test_save_file_sync_failure_keeps_original_and_removes_temporary(self):
+        path = self.write('Note.md', 'original')
+        vault = Vault(self.root)
+        note = vault.read('Note.md')
+        with patch('librevault.durable.sync_file', side_effect=OSError('file sync failed')):
+            with self.assertRaises(OSError) as caught:
+                vault.save(note, 'revised')
+        self.assertNotIsInstance(caught.exception, (AtomicReplacementError, DirectorySyncError))
+        self.assertEqual(path.read_text(encoding='utf-8'), 'original')
+        self.assertEqual(vault.notes['Note.md'].revision, note.revision)
+        self.assertEqual(list(self.root.glob('.librevault-*')), [])
+
     def test_failed_atomic_replace_keeps_original_and_removes_temporary(self):
         path = self.write('Note.md', 'original')
         vault = Vault(self.root)
-        with patch('librevault.vault.os.replace', side_effect=OSError('disk failure')):
-            with self.assertRaises(OSError):
-                vault.save(vault.read('Note.md'), 'new')
-        self.assertEqual(path.read_text(), 'original')
+        note = vault.read('Note.md')
+        with patch('librevault.durable.replace_file', side_effect=OSError('disk failure')):
+            with self.assertRaises(AtomicReplacementError):
+                vault.save(note, 'new')
+        self.assertEqual(path.read_text(encoding='utf-8'), 'original')
+        self.assertEqual(vault.notes['Note.md'].revision, note.revision)
         self.assertEqual(list(self.root.glob('.librevault-*')), [])
+
+    def test_directory_sync_failure_leaves_published_note_and_previous_revision(self):
+        path = self.write('Note.md', 'original')
+        vault = Vault(self.root)
+        note = vault.read('Note.md')
+        with patch('librevault.durable.sync_directory', side_effect=OSError('power loss')):
+            with self.assertRaises(DirectorySyncError) as caught:
+                vault.save(note, 'revised')
+        self.assertIn('could not sync its directory', str(caught.exception))
+        self.assertEqual(path.read_text(encoding='utf-8'), 'revised')
+        self.assertEqual(vault.notes['Note.md'].revision, note.revision)
+        self.assertNotEqual(vault.read('Note.md').revision, note.revision)
+        self.assertEqual(list(self.root.glob('.librevault-*')), [])
+
+    def test_directory_sync_failure_retries_the_same_bytes_without_a_conflict(self):
+        path = self.write('Note.md', 'original')
+        vault = Vault(self.root)
+        store = VersionHistoryStore(self.root, self.root / 'history')
+        vault.version_history = store
+        note = vault.read('Note.md')
+        real_sync = durable.sync_directory
+
+        def fail_note_directory(directory):
+            if Path(directory).resolve() == path.parent.resolve():
+                raise OSError('power loss')
+            real_sync(directory)
+
+        with patch('librevault.durable.sync_directory', fail_note_directory):
+            with self.assertRaises(DirectorySyncError):
+                vault.save(note, 'revised')
+        self.assertEqual([item.text for item in store.versions('Note.md')], ['original', 'revised'])
+        saved = vault.save(note, 'revised')
+        self.assertEqual(saved.text, 'revised')
+        self.assertEqual(path.read_text(encoding='utf-8'), 'revised')
+        self.assertEqual(vault.notes['Note.md'].revision, saved.revision)
+        self.assertEqual([item.text for item in store.versions('Note.md')], ['original', 'revised'])
 
     def test_create_does_not_overwrite_or_create_missing_folders(self):
         vault = Vault(self.root)

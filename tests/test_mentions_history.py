@@ -7,6 +7,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
+from librevault.durable import AtomicReplacementError, DirectorySyncError
 from librevault.mentions import find_mentions, link_mention
 from librevault.recovery import VersionHistoryStore
 from librevault.vault import Vault, VaultError
@@ -181,6 +182,88 @@ class VersionHistoryTests(unittest.TestCase):
             with self.assertRaises(VaultError):
                 vault.save(note, 'two\n')
             self.assertEqual(note_path.read_text(encoding='utf-8'), 'one\n')
+
+    def test_history_write_stages_leave_the_note_unchanged(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory) / 'vault'
+            root.mkdir()
+            note_path = root / 'Note.md'
+            note_path.write_text('one\n', encoding='utf-8')
+            vault = Vault(root)
+            self.addCleanup(vault.close)
+            store = VersionHistoryStore(root, Path(directory) / 'history')
+            vault.version_history = store
+            note = vault.read('Note.md')
+            vault.save(note, 'two\n')
+            saved = vault.read('Note.md')
+            stages = (
+                ('write failed', OSError,
+                 patch('librevault.recovery.json.dump', side_effect=OSError('write failed'))),
+                ('disk failure', AtomicReplacementError,
+                 patch('librevault.durable.replace_file', side_effect=OSError('disk failure'))),
+            )
+            for label, error_type, stage in stages:
+                with self.subTest(stage=label):
+                    with stage:
+                        with self.assertRaises(VaultError) as caught:
+                            vault.save(saved, 'three\n')
+                    self.assertIsInstance(caught.exception.__cause__, error_type)
+                    if error_type is OSError:
+                        self.assertNotIsInstance(
+                            caught.exception.__cause__, (AtomicReplacementError, DirectorySyncError))
+                    self.assertEqual(note_path.read_text(encoding='utf-8'), 'two\n')
+                    self.assertEqual([item.text for item in store.versions('Note.md')], ['one\n', 'two\n'])
+                    self.assertEqual(list(store.directory.glob('.history-*')), [])
+                    self.assertEqual(list(root.glob('.librevault-*')), [])
+
+    def test_history_record_distinguishes_each_write_stage(self):
+        with TemporaryDirectory() as directory:
+            store = VersionHistoryStore(Path(directory) / 'vault', Path(directory) / 'history')
+            store.record('Note.md', 'r1', 'one', timestamp='2026-11-04T00:00:01+00:00')
+            stages = (
+                ('mode', OSError, patch('librevault.recovery.os.fchmod', side_effect=OSError('mode'))),
+                ('file sync failed', OSError,
+                 patch('librevault.durable.sync_file', side_effect=OSError('file sync failed'))),
+                ('disk failure', AtomicReplacementError,
+                 patch('librevault.durable.replace_file', side_effect=OSError('disk failure'))),
+            )
+            for label, error_type, stage in stages:
+                with self.subTest(stage=label):
+                    with stage:
+                        with self.assertRaises(error_type) as caught:
+                            store.record('Note.md', 'r2', 'two', previous=('r1', 'one'),
+                                         timestamp='2026-11-04T00:00:02+00:00')
+                    if error_type is OSError:
+                        self.assertNotIsInstance(
+                            caught.exception, (AtomicReplacementError, DirectorySyncError))
+                    self.assertEqual([item.text for item in store.versions('Note.md')], ['one'])
+                    self.assertEqual(list(store.directory.glob('.history-*')), [])
+            with patch('librevault.durable.sync_directory', side_effect=OSError('power loss')):
+                with self.assertRaises(DirectorySyncError):
+                    store.record('Note.md', 'r2', 'two', previous=('r1', 'one'),
+                                 timestamp='2026-11-04T00:00:02+00:00')
+            self.assertEqual([item.text for item in store.versions('Note.md')], ['one', 'two'])
+            self.assertEqual(list(store.directory.glob('.history-*')), [])
+
+    def test_history_directory_sync_failure_publishes_history_and_leaves_the_note(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory) / 'vault'
+            root.mkdir()
+            note_path = root / 'Note.md'
+            note_path.write_text('one\n', encoding='utf-8')
+            vault = Vault(root)
+            self.addCleanup(vault.close)
+            store = VersionHistoryStore(root, Path(directory) / 'history')
+            vault.version_history = store
+            note = vault.read('Note.md')
+            with patch('librevault.durable.sync_directory', side_effect=OSError('power loss')):
+                with self.assertRaises(VaultError) as caught:
+                    vault.save(note, 'two\n')
+            self.assertIsInstance(caught.exception.__cause__, DirectorySyncError)
+            self.assertEqual(note_path.read_text(encoding='utf-8'), 'one\n')
+            self.assertEqual([item.text for item in store.versions('Note.md')], ['one\n', 'two\n'])
+            self.assertEqual(list(store.directory.glob('.history-*')), [])
+            self.assertEqual(list(root.glob('.librevault-*')), [])
 
 
 def mention_buttons(window):

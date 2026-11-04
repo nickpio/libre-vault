@@ -11,10 +11,10 @@ import json
 import os
 from pathlib import Path
 import queue
-import tempfile
 import threading
 import uuid
 
+from .durable import replace_durably, synced_temporary
 from .vault import Note
 
 
@@ -36,8 +36,9 @@ class RecoveryStore:
     Editor changes call ``schedule_write``/``schedule_remove``. They only
     update the latest pending operation for each note, so bursts of typing
     collapse into one draft write after a short bounded delay. A single
-    worker performs serialization and fsync away from the UI thread, and
-    ``flush``/``close`` wait for pending work before shutdown.
+    worker performs serialization, file fsync, atomic replacement, and
+    directory fsync away from the UI thread, and ``flush``/``close`` wait
+    for pending work before shutdown.
     """
 
     COALESCE_SECONDS = 0.25
@@ -66,16 +67,12 @@ class RecoveryStore:
     def _write_now(self, note, text):
         self._start()
         target = self.session / (hashlib.sha256(note.path.encode()).hexdigest() + '.json')
-        fd, temporary = tempfile.mkstemp(dir=self.session, prefix='.draft-')
-        try:
-            with os.fdopen(fd, 'w', encoding='utf-8') as handle:
-                json.dump({'note': asdict(note), 'text': text}, handle, ensure_ascii=False)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary, target)
-        finally:
-            if os.path.exists(temporary):
-                os.unlink(temporary)
+
+        def write(handle):
+            json.dump({'note': asdict(note), 'text': text}, handle, ensure_ascii=False)
+
+        with synced_temporary(self.session, write, prefix='.draft-', binary=False) as temporary:
+            replace_durably(temporary, target)
 
     def _remove_now(self, path):
         target = self.session / (hashlib.sha256(path.encode()).hexdigest() + '.json')
@@ -274,6 +271,8 @@ class VersionHistoryStore:
     def record(self, path, revision, text, previous=None, timestamp=None, previous_mtime=None):
         """Append the saved text when it differs from the latest snapshot."""
         versions = self.versions(path)
+        if versions and versions[-1].revision == revision and versions[-1].text == text:
+            return versions
         original = list(versions)
         stamp = timestamp or datetime.now(timezone.utc).isoformat(timespec='microseconds')
         if previous is not None:
@@ -295,21 +294,12 @@ class VersionHistoryStore:
     def _write(self, path, versions):
         self._ensure()
         target = self._file(path)
-        descriptor, temporary = tempfile.mkstemp(dir=self.directory, prefix='.history-')
-        try:
-            with os.fdopen(descriptor, 'w', encoding='utf-8') as handle:
-                os.fchmod(handle.fileno(), 0o600)
-                json.dump([asdict(version) for version in versions], handle, ensure_ascii=False)
-                handle.write('\n')
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary, target)
-            os.chmod(target, 0o600)
-        finally:
-            if os.path.exists(temporary):
-                os.unlink(temporary)
-        directory = os.open(self.directory, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
+
+        def write(handle):
+            os.fchmod(handle.fileno(), 0o600)
+            json.dump([asdict(version) for version in versions], handle, ensure_ascii=False)
+            handle.write('\n')
+
+        with synced_temporary(self.directory, write, prefix='.history-', binary=False) as temporary:
+            replace_durably(temporary, target)
+        os.chmod(target, 0o600)

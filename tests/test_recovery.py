@@ -1,8 +1,12 @@
 """Recovery drafts survive interrupted sessions and preserve conflict checks."""
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
+import librevault.durable as durable
+from librevault.durable import AtomicReplacementError, DirectorySyncError
 from librevault.recovery import RecoveryStore
 from librevault.vault import Conflict, Vault
 
@@ -80,3 +84,83 @@ class RecoveryTests(unittest.TestCase):
             store.flush()
             self.assertEqual(list(store.session.glob('*.json')), [])
             store.close()
+
+    def test_draft_publish_syncs_the_session_directory_after_replacement(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory) / 'vault'
+            root.mkdir()
+            (root / 'Note.md').write_text('original', encoding='utf-8')
+            store = RecoveryStore(root, Path(directory) / 'state')
+            vault = Vault(root)
+            note = vault.read('Note.md')
+            seen = []
+            real_sync = durable.sync_directory
+
+            def spy(folder):
+                seen.append(Path(folder).resolve())
+                draft = next(store.session.glob('*.json'))
+                self.assertEqual(json.loads(draft.read_text(encoding='utf-8'))['text'], 'unsaved')
+                real_sync(folder)
+
+            try:
+                with patch('librevault.durable.sync_directory', spy):
+                    store.write(note, 'unsaved')
+                self.assertEqual(seen, [store.session.resolve()])
+                self.assertEqual(list(store.session.glob('.draft-*')), [])
+            finally:
+                store.close()
+                vault.close()
+
+    def test_draft_failures_before_replacement_keep_the_previous_draft(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory) / 'vault'
+            root.mkdir()
+            (root / 'Note.md').write_text('original', encoding='utf-8')
+            store = RecoveryStore(root, Path(directory) / 'state')
+            vault = Vault(root)
+            note = vault.read('Note.md')
+            try:
+                store.write(note, 'kept')
+                stages = (
+                    ('write failed', OSError,
+                     patch('librevault.recovery.json.dump', side_effect=OSError('write failed'))),
+                    ('file sync failed', OSError,
+                     patch('librevault.durable.sync_file', side_effect=OSError('file sync failed'))),
+                    ('disk failure', AtomicReplacementError,
+                     patch('librevault.durable.replace_file', side_effect=OSError('disk failure'))),
+                )
+                for label, error_type, stage in stages:
+                    with self.subTest(stage=label):
+                        with stage:
+                            with self.assertRaises(error_type) as caught:
+                                store.write(note, 'lost')
+                        if error_type is OSError:
+                            self.assertNotIsInstance(
+                                caught.exception, (AtomicReplacementError, DirectorySyncError))
+                        draft = json.loads(next(store.session.glob('*.json')).read_text(encoding='utf-8'))
+                        self.assertEqual(draft['text'], 'kept')
+                        self.assertEqual(list(store.session.glob('.draft-*')), [])
+            finally:
+                store.close()
+                vault.close()
+
+    def test_draft_directory_sync_failure_keeps_the_published_draft(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory) / 'vault'
+            root.mkdir()
+            (root / 'Note.md').write_text('original', encoding='utf-8')
+            store = RecoveryStore(root, Path(directory) / 'state')
+            vault = Vault(root)
+            note = vault.read('Note.md')
+            try:
+                store.write(note, 'kept')
+                with patch('librevault.durable.sync_directory', side_effect=OSError('power loss')):
+                    with self.assertRaises(DirectorySyncError) as caught:
+                        store.write(note, 'published')
+                self.assertIn('could not sync its directory', str(caught.exception))
+                draft = json.loads(next(store.session.glob('*.json')).read_text(encoding='utf-8'))
+                self.assertEqual(draft['text'], 'published')
+                self.assertEqual(list(store.session.glob('.draft-*')), [])
+            finally:
+                store.close()
+                vault.close()

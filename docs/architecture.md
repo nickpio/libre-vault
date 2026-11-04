@@ -70,7 +70,8 @@ saved = vault.save(note, '# Revised plan\n')
 
 | Module | Owns |
 | --- | --- |
-| `librevault/vault.py` | Path validation, UTF-8 reads, revision checks, atomic replacement, link parsing, resolution, search, and backlinks |
+| `librevault/vault.py` | Path validation, UTF-8 reads, revision checks, durable replacement, link parsing, resolution, search, and backlinks |
+| `librevault/durable.py` | Fsynced temporary files, atomic replacement, and parent-directory fsync shared by note saves, recovery drafts, and version history |
 | `librevault/monitor.py` | Recursive Gio directory watches, coalesced filesystem events, and watch cleanup |
 | `librevault/index.py` | Disposable SQLite content, metadata, link and substring indexes, plus a byte-bounded text cache |
 | `librevault/worker.py` | Serial background vault jobs, per-job SQLite connections, cancellation, progress, snapshots, and rejection of superseded callbacks |
@@ -130,7 +131,7 @@ Disk files are authoritative. The index is disposable and rebuilt from files. Ea
 
 Application preferences live in the user's XDG configuration directory, independently of vaults. Loading missing or malformed preferences uses defaults without writing files. Changes save through atomic replacement before applying to all open windows. CSS and Markdown text tags share the same theme colors. Appearance updates change widget styles and layout without rewriting note buffers or changing dirty state. A failed settings save retains the previous preferences and reports the error in the settings dialog.
 
-A save writes a temporary file in the note's directory, flushes it, checks the source revision again, and atomically replaces the note. The temporary file is removed after a failure. This is optimistic conflict detection, not a filesystem transaction with other editors. Directory fsync, recovery versions, and a stronger concurrent-writer design remain release prerequisites.
+A save writes a temporary file in the note's directory, fsyncs it, checks the source revision again, and records version history before publishing the note. Publishing is two steps. `os.replace` is atomic: a crash leaves the previous file or the complete new file. The following fsync of that file's directory makes the new name persistent across power loss. Recovery drafts and version history use the same sequence. A failure while creating, writing, or fsyncing the temporary file, or while replacing the destination, leaves the previous file and removes the temporary file. A failure while fsyncing the directory leaves the new file in place and raises `DirectorySyncError`. The in-memory note revision stays unchanged, so the editor still treats that save as unfinished. Saving those same bytes again publishes once more, including the directory fsync. A save whose bytes differ from the file on disk still raises `Conflict`. A stronger concurrent-writer design remains a release prerequisite.
 
 ## Live editing
 

@@ -11,11 +11,11 @@ from pathlib import Path, PurePosixPath
 import re
 import stat
 import sqlite3
-import tempfile
 from urllib.parse import unquote, urlsplit
 
 from markdown_it import MarkdownIt
 
+from .durable import synced_temporary, replace_durably
 from .vault_options import VaultPaths
 from .index import NoteIndex, TextCache
 from .mentions import Mention, find_mentions
@@ -308,32 +308,32 @@ class Vault(VaultPaths):
             raw = path.read_bytes()
         except FileNotFoundError as error:
             raise Conflict('The note was removed outside the app. Your edits are still in the editor.') from error
-        if fingerprint(raw) != note.revision:
-            raise Conflict('The file changed outside the app. Save was stopped; your edits are still in the editor. Copy them before reloading.')
         # Gtk.TextBuffer uses LF. Preserve the file's existing uniform CRLF convention.
         newline = '\r\n' if '\r\n' in note.text and '\n' not in note.text.replace('\r\n', '') else '\n'
         text = text.replace('\r\n', '\n')
         if newline == '\r\n':
             text = text.replace('\n', '\r\n')
         output = (b'\xef\xbb\xbf' if note.bom else b'') + text.encode('utf-8')
-        descriptor, temporary = tempfile.mkstemp(prefix='.librevault-', dir=path.parent)
-        try:
-            with os.fdopen(descriptor, 'wb') as handle:
-                os.fchmod(handle.fileno(), stat.S_IMODE(path.stat().st_mode))
-                handle.write(output)
-                handle.flush()
-                os.fsync(handle.fileno())
+        # The destination can already hold this save when a previous publish
+        # replaced the file and the directory sync failed. Saving the same
+        # bytes again retries that sync.
+        if fingerprint(raw) != note.revision and raw != output:
+            raise Conflict('The file changed outside the app. Save was stopped; your edits are still in the editor. Copy them before reloading.')
+
+        def write(handle):
+            os.fchmod(handle.fileno(), stat.S_IMODE(path.stat().st_mode))
+            handle.write(output)
+
+        with synced_temporary(path.parent, write, prefix='.librevault-') as temporary:
             # Recheck after writing the temporary file to catch intervening edits.
-            if fingerprint(path.read_bytes()) != note.revision:
+            current = path.read_bytes()
+            if fingerprint(current) != note.revision and current != output:
                 raise Conflict('The file changed during save. Your edits remain in the editor.')
             self._path(note.path)
             # Record history before replacing the note. A history failure leaves
             # the saved file untouched, so the editor revision stays valid.
             self._remember_version(note, fingerprint(output), text, path.stat().st_mtime)
-            os.replace(temporary, path)
-        finally:
-            if os.path.exists(temporary):
-                os.unlink(temporary)
+            replace_durably(temporary, path)
         saved = self.read(note.path)
         self.notes[note.path] = self._index_note(saved)
         self.index.connection.commit()
