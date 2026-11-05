@@ -227,6 +227,57 @@ class SettingsTests(unittest.TestCase):
         ids = [row[1] for row in control.get_model()]
         self.assertEqual(ids, ['sans', 'serif', 'monospace', 'choose-font'])
 
+    def test_language_font_is_used_for_its_script_on_open_editors(self):
+        families = {family.get_name() for family in self.dialog.get_pango_context().list_families()}
+        needed = {'Noto Sans Arabic', 'Noto Sans CJK JP', 'Noto Sans CJK SC', 'Noto Sans Hebrew',
+                  'Noto Serif CJK JP', 'Noto Naskh Arabic'}
+        if not needed <= families:
+            self.skipTest('Noto Arabic, Hebrew, and CJK fonts are not installed')
+        sample = '日本語 مرحبا שלום'
+        pane = self.window.current()
+        pane.buffer.set_text(sample)
+        pane.set_mode('reading')
+        self.drain()
+        reading = next(label for label in self.labels(pane) if sample in label.get_text())
+        self.dialog.change('editor_font', 'Noto Sans Arabic')
+        self.drain()
+        for widget in (pane.editor, self.preview_label(), reading):
+            faces = self.font_faces(widget, sample)
+            self.assertIn('Noto Sans Arabic', faces)
+            self.assertIn('Noto Sans CJK JP', faces)
+            self.assertIn('Noto Sans Hebrew', faces)
+            self.assertNotIn('WenQuanYi Zen Hei', faces)
+            self.assertNotIn('DejaVu Sans', faces)
+        self.dialog.change('editor_font', 'Noto Sans CJK SC')
+        self.drain()
+        self.assertEqual(self.font_faces(pane.editor, '日本語'), ['Noto Sans CJK SC'])
+        self.assertEqual(self.font_faces(reading, '日本語'), ['Noto Sans CJK SC'])
+        self.dialog.change('editor_font', 'serif')
+        self.drain()
+        serif_faces = self.font_faces(pane.editor, '日本語 مرحبا')
+        self.assertIn('Noto Serif CJK JP', serif_faces)
+        self.assertIn('Noto Naskh Arabic', serif_faces)
+        self.assertNotIn('WenQuanYi Zen Hei', serif_faces)
+
+    def font_faces(self, widget, text):
+        layout = widget.create_pango_layout(text)
+        line = layout.get_line_readonly(0)
+        faces = []
+        for run in line.runs or []:
+            family = run.item.analysis.font.describe().get_family()
+            if family not in faces:
+                faces.append(family)
+        return faces
+
+    def labels(self, widget):
+        found = []
+        if isinstance(widget, Gtk.Label):
+            found.append(widget)
+        if isinstance(widget, Gtk.Container):
+            for child in widget.get_children():
+                found.extend(self.labels(child))
+        return found
+
     def font_family(self, widget):
         description = widget.get_style_context().get_property('font', Gtk.StateFlags.NORMAL)
         family = description.get_family() or ''

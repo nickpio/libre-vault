@@ -39,17 +39,50 @@ PALETTES['lights_out'] = {
     'code_number': '#e0af68', 'code_builtin': '#7dcfff',
 }
 
-FONTS = {'sans': '"Inter", "Cantarell", sans-serif', 'serif': 'serif', 'monospace': 'monospace'}
+_LATIN_SANS = ('Inter', 'Cantarell')
+# A generic family in this list is glued onto the family name. Fontconfig then
+# misses the selected face and draws Han text with a bitmap font. Names that
+# are not installed are skipped.
+_SCRIPT_SANS = (
+    'Noto Sans',
+    'Noto Sans CJK JP', 'Noto Sans CJK KR', 'Noto Sans CJK SC', 'Noto Sans CJK TC', 'Noto Sans CJK HK',
+    'Noto Sans Arabic', 'Noto Sans Hebrew',
+    'Noto Sans Devanagari', 'Noto Sans Bengali', 'Noto Sans Tamil', 'Noto Sans Telugu',
+    'Noto Sans Thai', 'Noto Sans Gujarati', 'Noto Sans Gurmukhi', 'Noto Sans Kannada',
+    'Noto Sans Malayalam', 'Noto Sans Oriya', 'Noto Sans Sinhala',
+    'Noto Sans Khmer', 'Noto Sans Lao', 'Noto Sans Myanmar',
+    'Noto Sans Armenian', 'Noto Sans Georgian', 'Noto Sans Ethiopic',
+)
+_SCRIPT_SERIF = (
+    'Noto Serif',
+    'Noto Serif CJK JP', 'Noto Serif CJK KR', 'Noto Serif CJK SC', 'Noto Serif CJK TC', 'Noto Serif CJK HK',
+    'Noto Naskh Arabic', 'Noto Serif Hebrew',
+    'Noto Serif Devanagari', 'Noto Serif Bengali', 'Noto Serif Tamil', 'Noto Serif Telugu',
+    'Noto Serif Thai', 'Noto Serif Gujarati', 'Noto Serif Gurmukhi', 'Noto Serif Kannada',
+    'Noto Serif Malayalam', 'Noto Serif Oriya', 'Noto Serif Sinhala',
+    'Noto Serif Khmer', 'Noto Serif Lao', 'Noto Serif Myanmar',
+    'Noto Serif Armenian', 'Noto Serif Georgian', 'Noto Serif Ethiopic',
+    'Liberation Serif',
+)
+
+
+def _quoted_families(names):
+    unique = []
+    for name in names:
+        if name not in unique:
+            unique.append(name)
+    return ', '.join(f'"{name}"' for name in unique)
 
 
 def font_family_css(name):
     """CSS font-family value for a stored editor font, falling back to the sans preset."""
-    preset = FONTS.get(name)
-    if preset is not None:
-        return preset
-    if normalize_editor_font(name) != name:
-        return FONTS['sans']
-    return f'"{name}", sans-serif'
+    if name == 'monospace':
+        return 'monospace'
+    if name == 'serif':
+        return _quoted_families(_SCRIPT_SERIF)
+    if name != 'sans' and normalize_editor_font(name) == name:
+        return _quoted_families((name, *_LATIN_SANS, *_SCRIPT_SANS))
+    return _quoted_families((*_LATIN_SANS, *_SCRIPT_SANS))
 
 
 def stylesheet(source, preferences):

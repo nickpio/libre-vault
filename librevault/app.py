@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 from time import monotonic
 from urllib.parse import unquote
+import warnings
 import gi
 
 gi.require_version('Gtk', '3.0')
@@ -2036,6 +2037,28 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
         self.brand.set_from_pixbuf(GdkPixbuf.Pixbuf.new_from_file_at_scale(str(logo_path), 40, 40, True))
         for pane in self.panes.values():
             pane.apply_preferences()
+        self.reload_shown_fonts()
+
+    def reload_shown_fonts(self):
+        """Draw the editor font on widgets that are already on screen.
+
+        Loading a new stylesheet updates the CSS font property, but a realized
+        widget keeps its previous Pango font until its style context is invalidated.
+        """
+        roots = [self, self.settings_dialog, self.slides_window, *tuple(self.note_windows)]
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', DeprecationWarning)
+            for root in roots:
+                if root is not None:
+                    self._invalidate_fonts(root)
+
+    def _invalidate_fonts(self, widget):
+        # GTK 3.24 still needs this deprecated call. Replacing the provider,
+        # toggling the CSS class, and reset_style() leave the old face in place.
+        widget.get_style_context().invalidate()
+        if isinstance(widget, Gtk.Container):
+            for child in widget.get_children():
+                self._invalidate_fonts(child)
 
     def update_keybind_hint(self):
         shortcut = next(item for item in APP_SHORTCUTS if item.handler == 'show_keybinds')
