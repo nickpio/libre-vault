@@ -153,7 +153,8 @@ class GraphUITests(unittest.TestCase):
             graph = window.show_local_graph_tab()
             self.pump_until(lambda: len(graph.paths) == 2)
             self.assertIsNone(window.current())
-            self.assertFalse(window.note_toolbars.get_visible())
+            self.assertIs(note.toolbar.get_parent(), note)
+            self.assertFalse(note.toolbar.get_mapped())
             window.save_current()  # Graph tabs must not enter the note save path.
             window.toggle_split()
             split = window.split_view
@@ -217,7 +218,7 @@ class GraphUITests(unittest.TestCase):
             (root / 'A.md').write_text('[[B]]')
             (root / 'B.md').write_text('hello')
             window = self.make_window(root)
-            window.open_note('A.md')
+            note = window.open_note('A.md')
             window.toggle_split()
             window.show_graph()
             floating = window.graph_window
@@ -229,7 +230,8 @@ class GraphUITests(unittest.TestCase):
             self.assertIs(window.tabs.get_nth_page(window.tabs.get_current_page()), graph)
             self.assertEqual(window.split_pane.note.path, 'B.md')
             self.assertEqual(window.current().note.path, 'B.md')
-            self.assertFalse(window.note_toolbars.get_visible())
+            self.assertIs(note.toolbar.get_parent(), note)
+            self.assertFalse(note.toolbar.get_mapped())
             graph.canvas.grab_focus()
             window.persist_workspace()
             self.assertEqual(window.workspace_store.load(root)['active'], {'graph': graph.workspace_id})

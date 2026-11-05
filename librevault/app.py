@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import replace
+from datetime import datetime, timezone
 import difflib
 import posixpath
 from pathlib import Path
@@ -51,6 +52,16 @@ from .templates import (
 
 
 CSS = Path(__file__).with_name('style.css').read_bytes()
+
+
+def format_timestamp(value):
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return value
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone().strftime('%Y-%m-%d %H:%M:%S')
 
 
 def file_tree_icon(folder):

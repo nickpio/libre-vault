@@ -93,8 +93,10 @@ except (ImportError, ValueError):
 class WorkspaceCustomizationUITests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = Gtk.Application(application_id='org.librevault.CustomizationTests', flags=Gio.ApplicationFlags.NON_UNIQUE)
-        cls.app.register(None)
+        cls.app = Gtk.Application.get_default()
+        if cls.app is None:
+            cls.app = Gtk.Application(application_id='org.librevault.CustomizationTests', flags=Gio.ApplicationFlags.NON_UNIQUE)
+            cls.app.register(None)
 
     def drain(self):
         for _ in range(1000):
@@ -199,6 +201,7 @@ class WorkspaceCustomizationUITests(unittest.TestCase):
             wait_for_work(window)
             self.addCleanup(window.destroy)
             pane = window.open_note('A.md')
+            self.assertIn(window, self.app.get_windows())
             save_id = shortcut_id('app', next(s for s in APP_SHORTCUTS if s.handler == 'save_current'))
             window.set_hotkey(save_id, '<Control><Alt>s')
             with self.assertRaises(ValueError):
@@ -207,6 +210,7 @@ class WorkspaceCustomizationUITests(unittest.TestCase):
             pane.buffer.insert_at_cursor(' changed')
             self.assertTrue(window.key_press(window, event))
             self.assertFalse(pane.dirty)
+            self.assertEqual((root / 'A.md').read_text(), pane.text())
             self.assertFalse(window.key_press(window, SimpleNamespace(keyval=Gdk.KEY_s, state=Gdk.ModifierType.CONTROL_MASK)))
             bold_id = shortcut_id('editor', next(s for s in EDITOR_SHORTCUTS if s.handler == 'bold'))
             window.set_hotkey(bold_id, '<Control><Alt>b')
