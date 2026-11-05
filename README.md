@@ -194,7 +194,7 @@ Use **Close vault** from the explorer's context menu or the command palette to r
 | Jump to any note | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> and type a path or alias |
 | Run any command | <kbd>Alt</kbd>+<kbd>P</kbd> |
 | Insert a link | Type `[[` for suggestions, or <kbd>Ctrl</kbd>+<kbd>K</kbd> |
-| Follow a link | <kbd>Ctrl</kbd>+click it, or use **Outgoing links** / **Backlinks** |
+| Follow a link | Click rendered links in Live preview or Reading mode; <kbd>Ctrl</kbd>+click exposed Markdown or Source-mode links. You can also use **Outgoing links** / **Backlinks**. |
 | Compare two notes | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> to split, then pick another tab |
 | See the whole vault | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>G</kbd> |
 | Learn every shortcut | Command palette, then **Open keybind cheatsheet** |

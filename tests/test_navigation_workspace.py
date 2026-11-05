@@ -251,6 +251,136 @@ class WorkspaceFlowTests(unittest.TestCase):
                 else:
                     follow.assert_not_called()
 
+    def click_editor_label(self, pane, view, label, modifiers=None):
+        if modifiers is None:
+            modifiers = Gdk.ModifierType.CONTROL_MASK
+        start = pane.text().index(label)
+        iterator = pane.buffer.get_iter_at_offset(start)
+        rectangle = view.get_iter_location(iterator)
+        top, height = view.get_line_yrange(iterator)
+        y = rectangle.y + max(1, rectangle.height // 2) if rectangle.height else top + height // 2
+        # GTK's character rectangle can be shifted by hidden alias prefixes.
+        # Find the visible label through the same hit-testing as the mouse.
+        visible = view.get_visible_rect()
+        hits = []
+        for x in range(visible.x, visible.x + visible.width):
+            found, position = view.get_iter_at_location(x, y)
+            if found and start <= position.get_offset() < start + len(label):
+                hits.append(x)
+        self.assertTrue(hits, f'No visible hit target for {label!r}')
+        x, y = view.buffer_to_window_coords(Gtk.TextWindowType.TEXT, hits[len(hits) // 2], y)
+        for kind in (Gdk.EventType.BUTTON_PRESS, Gdk.EventType.BUTTON_RELEASE):
+            event = Gdk.Event.new(kind)
+            event.window = view.get_window(Gtk.TextWindowType.TEXT)
+            event.send_event = True
+            event.time = Gdk.CURRENT_TIME
+            event.x, event.y = x, y
+            event.button = 1
+            event.state = modifiers
+            event.set_device(view.get_display().get_default_seat().get_pointer())
+            view.event(event)
+            self.settle()
+
+    def test_plain_and_ctrl_click_dispatch_open_note_in_editor_and_split(self):
+        self.window.load_vault(self.root)
+        wait_for_work(self.window)
+        from itertools import product
+        for split, modifiers in product((False, True), (Gdk.ModifierType(0), Gdk.ModifierType.CONTROL_MASK)):
+            for source in ('[[Folder/B|label]]', '[label](Folder/B.md)'):
+                with self.subTest(split=split, modifiers=modifiers, source=source):
+                    pane = self.window.open_note('A.md')
+                    pane.buffer.set_text('Before\n' + source + '\nAfter')
+                    pane.buffer.place_cursor(pane.buffer.get_start_iter())
+                    pane.set_mode('live')
+                    if split:
+                        self.window.open_split(pane)
+                    self.settle()
+                    view = self.window.split_view if split else pane.editor
+                    self.click_editor_label(pane, view, 'label', modifiers)
+                    self.assertEqual(self.window.current().note.path, 'Folder/B.md')
+
+    def test_editor_external_link_dispatch_and_plain_click_editing(self):
+        self.window.load_vault(self.root)
+        wait_for_work(self.window)
+        pane = self.window.open_note('A.md')
+        source = 'Before\n[label](https://example.com/path?a=1&b=2 "title")\nAfter'
+        pane.buffer.set_text(source)
+        pane.buffer.place_cursor(pane.buffer.get_start_iter())
+        pane.set_mode('live')
+        self.settle()
+        with patch('librevault.navigation_ui.Gtk.show_uri_on_window') as launch:
+            self.click_editor_label(pane, pane.editor, 'label', Gdk.ModifierType(0))
+            launch.assert_called_once_with(self.window, 'https://example.com/path?a=1&b=2', Gdk.CURRENT_TIME)
+            self.assertEqual(self.window.current().note.path, 'A.md')
+            pane.buffer.place_cursor(pane.buffer.get_iter_at_offset(source.index('label')))
+            self.settle()
+            for mode in ('live', 'source'):
+                pane.set_mode(mode)
+                self.settle()
+                previous_calls = launch.call_count
+                self.click_editor_label(pane, pane.editor, 'label', Gdk.ModifierType(0))
+                self.assertEqual(launch.call_count, previous_calls)
+                self.click_editor_label(pane, pane.editor, 'label')
+                launch.assert_called_with(self.window, 'https://example.com/path?a=1&b=2', Gdk.CURRENT_TIME)
+            self.assertEqual(launch.call_count, 3)
+        self.assertEqual(pane.text(), source)
+
+    def test_live_link_shift_click_selects_and_blank_space_does_not_open(self):
+        self.window.load_vault(self.root)
+        wait_for_work(self.window)
+        pane = self.window.open_note('A.md')
+        pane.buffer.set_text('Before\n[label](https://example.com)')
+        pane.buffer.place_cursor(pane.buffer.get_start_iter())
+        pane.set_mode('live')
+        self.settle()
+        with patch('librevault.navigation_ui.Gtk.show_uri_on_window') as launch:
+            self.click_editor_label(pane, pane.editor, 'label', Gdk.ModifierType.SHIFT_MASK)
+            self.assertTrue(pane.buffer.get_has_selection())
+            launch.assert_not_called()
+            pane.buffer.place_cursor(pane.buffer.get_start_iter())
+            self.settle()
+            top, height = pane.editor.get_line_yrange(pane.buffer.get_end_iter())
+            event = Gdk.Event.new(Gdk.EventType.BUTTON_PRESS)
+            event.window = pane.editor.get_window(Gtk.TextWindowType.TEXT)
+            event.send_event = True
+            event.time = Gdk.CURRENT_TIME
+            event.button = 1
+            event.state = Gdk.ModifierType(0)
+            event.x, event.y = pane.editor.buffer_to_window_coords(
+                Gtk.TextWindowType.TEXT, pane.editor.get_left_margin() + 5, top + height + 30)
+            event.set_device(pane.editor.get_display().get_default_seat().get_pointer())
+            pane.editor.event(event)
+            launch.assert_not_called()
+
+    def test_reading_links_activate_rendered_destinations(self):
+        import html
+        import re
+
+        self.window.load_vault(self.root)
+        wait_for_work(self.window)
+        pane = self.window.open_note('A.md')
+        pane.buffer.set_text('[[Folder/B|Note]] and [Web](https://example.com/path?a=1&b=2)')
+        pane.set_mode('reading')
+        self.settle()
+
+        def labels(widget):
+            if isinstance(widget, Gtk.Label):
+                yield widget
+            elif isinstance(widget, Gtk.Container):
+                for child in widget.get_children():
+                    yield from labels(child)
+
+        links = [(label, html.unescape(uri)) for label in labels(pane.reading)
+                 for uri in re.findall(r'<a href="([^"<>]+)"', label.get_label())]
+        self.assertEqual(len(links), 2)
+        with patch('librevault.reading.Gio.AppInfo.launch_default_for_uri') as launch:
+            external = next((label, uri) for label, uri in links if uri.startswith('https:'))
+            self.assertTrue(external[0].emit('activate-link', external[1]))
+            launch.assert_called_once_with('https://example.com/path?a=1&b=2', None)
+        internal = next((label, uri) for label, uri in links if uri.startswith('note:'))
+        self.assertTrue(internal[0].emit('activate-link', internal[1]))
+        self.assertEqual(self.window.current().note.path, 'Folder/B.md')
+
     def test_split_renders_task_controls_and_cleans_up_pending_layout(self):
         self.window.load_vault(self.root)
         wait_for_work(self.window)

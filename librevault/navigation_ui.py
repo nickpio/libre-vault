@@ -206,7 +206,7 @@ class EditorNavigation:
         self.link_preview = LinkPreview()
         self.buffer_handlers = [pane.buffer.connect('changed', self.queue_update),
                                 pane.buffer.connect('mark-set', self.queue_update)]
-        self.editor_handlers = [pane.editor.connect('button-release-event', self.clicked),
+        self.editor_handlers = [pane.editor.connect('event', self.pointer_event),
                                 pane.editor.connect('motion-notify-event', self.motion),
                                 pane.editor.connect('leave-notify-event', self.leave)]
         pane.connect('destroy', self.cleanup)
@@ -496,17 +496,39 @@ class EditorNavigation:
                 return target
         return None
 
+    def pointer_event(self, view, event):
+        # Inspect original coordinates before EditorTextView clamps blank
+        # space for GTK's native hit-testing. Blank space is not a link.
+        if event.type == Gdk.EventType.BUTTON_PRESS:
+            return self.clicked(view, event.button)
+        return False
+
     def clicked(self, view, event):
-        if event.button != 1 or not event.state & Gdk.ModifierType.CONTROL_MASK:
+        if event.button != 1:
             return False
         x, y = view.window_to_buffer_coords(Gtk.TextWindowType.WIDGET, int(event.x), int(event.y))
         found, iterator = view.get_iter_at_location(x, y)
         if not found:
             return False
-        target = self.link_at(iterator.get_offset())
+        offset = iterator.get_offset()
+        if not event.state & Gdk.ModifierType.CONTROL_MASK:
+            # Handle rendered links on press, before GTK moves the caret and
+            # reveals their Markdown. Exposed source remains editable, and
+            # Shift-click keeps GTK's selection behavior.
+            if event.state & Gtk.accelerator_get_default_mod_mask():
+                return False
+            if self.pane.mode != 'live' or not any(
+                    span.style == 'link' and span.start <= offset < span.end
+                    and span.start > 0
+                    and self.pane.buffer.get_iter_at_offset(span.start - 1).has_tag(self.pane.hidden)
+                    for span in self.pane.spans):
+                return False
+        target = self.link_at(offset)
         if target is None:
             # External links are not note targets. Open those directly.
             return self._open_external(view, iterator.get_offset())
+        # Destroy the preview before navigation can unmap its parent view.
+        self.leave()
         self.pane.window.follow_link(self.pane.note.path, target)
         return True
 

@@ -3,8 +3,10 @@ import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import GLib, Gtk
 
+from .textview import EditorTextView
 
-class SplitTextView(Gtk.TextView):
+
+class SplitTextView(EditorTextView):
     def __init__(self, pane):
         super().__init__(buffer=pane.buffer)
         self.pane = pane

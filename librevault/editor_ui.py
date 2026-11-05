@@ -25,6 +25,7 @@ from .tables import (
     table_delete_row, table_from_model, table_move_column, table_move_row, table_next_cell,
     table_previous_cell, table_sort_column, table_break_after_row,
 )
+from .textview import EditorTextView
 from .vault import Conflict, VaultError
 from .vim import Session, VimState, dispatch, display_selection, retreat
 from .widgets import scrolled, text_buffer
@@ -88,7 +89,7 @@ class NotePane(EditorRenderMixin, Gtk.Box):
                 foreground='#e4e4e4', pixels_above_lines=20)
         # This tag has highest priority, including inside headings and code.
         self.hidden = self.buffer.create_tag(None, invisible=True)
-        self.editor = Gtk.TextView(buffer=self.buffer)
+        self.editor = EditorTextView(buffer=self.buffer)
         self.editor.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
         self.editor.set_left_margin(40)
         self.editor.set_right_margin(40)

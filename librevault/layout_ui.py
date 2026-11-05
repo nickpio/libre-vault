@@ -21,7 +21,7 @@ class NoteMirror(Gtk.Box):
         self.editor.connect('key-press-event', self.key_press)
         for signal, callback in [('copy-clipboard', pane.copy_selection), ('cut-clipboard', pane.cut_selection),
                                  ('populate-popup', pane.populate_edit_menu), ('paste-clipboard', pane.paste_attachment),
-                                 ('button-release-event', pane.navigation.clicked),
+                                 ('event', pane.navigation.pointer_event),
                                  ('motion-notify-event', pane.navigation.motion), ('leave-notify-event', pane.navigation.leave)]:
             self.editor.connect(signal, callback)
         self.editor.add_events(Gdk.EventMask.POINTER_MOTION_MASK | Gdk.EventMask.LEAVE_NOTIFY_MASK)
