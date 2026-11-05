@@ -318,7 +318,7 @@ class Vault(VaultPaths):
         # replaced the file and the directory sync failed. Saving the same
         # bytes again retries that sync.
         if fingerprint(raw) != note.revision and raw != output:
-            raise Conflict('The file changed outside the app. Save was stopped; your edits are still in the editor. Copy them before reloading.')
+            raise Conflict('The file changed outside the app. Save was stopped; your edits are still in the editor. Compare versions to resolve the conflict.')
 
         def write(handle):
             os.fchmod(handle.fileno(), stat.S_IMODE(path.stat().st_mode))

@@ -25,7 +25,7 @@ from .tables import (
     table_delete_row, table_from_model, table_move_column, table_move_row, table_next_cell,
     table_previous_cell, table_sort_column, table_break_after_row,
 )
-from .vault import VaultError
+from .vault import Conflict, VaultError
 from .vim import Session, VimState, dispatch, display_selection, retreat
 from .widgets import scrolled, text_buffer
 
@@ -36,6 +36,8 @@ class NotePane(EditorRenderMixin, Gtk.Box):
         self.window, self.note = window, note
         self.dirty = False
         self.save_error = None
+        self.save_conflict = False
+        self.resolving_conflict = False
         self.autosave_source = None
         self.format_source = None
         self.formatted_text = None
@@ -284,7 +286,7 @@ class NotePane(EditorRenderMixin, Gtk.Box):
 
     def autosave(self):
         self.autosave_source = None
-        if self.window.confirming_panes:
+        if self.window.confirming_panes or self.resolving_conflict:
             self.autosave_source = GLib.timeout_add_seconds(2, self.autosave)
             return False
         try:
@@ -774,6 +776,7 @@ class NotePane(EditorRenderMixin, Gtk.Box):
                 self.note = self.window.vault.save(self.note, self.text())
             except (VaultError, OSError) as error:
                 self.save_error = str(error)
+                self.save_conflict = isinstance(error, Conflict)
                 self.window.update_save_status()
                 raise
             self.dirty = False

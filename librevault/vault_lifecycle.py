@@ -4,7 +4,7 @@ from gi.repository import GLib, Gtk
 from .monitor import VaultMonitor
 from .navigation import NavigationHistory
 from .recovery import RecoveryStore, VersionHistoryStore
-from .vault import Vault, VaultError
+from .vault import Conflict, Vault, VaultError
 from .worker import Snapshot
 
 
@@ -40,6 +40,15 @@ class VaultLifecycleMixin:
             if result == Gtk.ResponseType.YES:
                 try:
                     pane.save()
+                except Conflict as error:
+                    if hasattr(pane, 'resolving_conflict'):
+                        from .conflicts_ui import compare_conflict
+                        compare_conflict(pane)
+                        if not pane.dirty:
+                            continue
+                    else:
+                        self.error(error)
+                    return False
                 except (VaultError, OSError) as error:
                     self.error(error)
                     return False

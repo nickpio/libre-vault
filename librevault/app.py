@@ -17,7 +17,7 @@ gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk, GdkPixbuf, Gio, GLib, Pango
 
 from .anchors import find_anchor_offset
-from .vault import VaultError, links
+from .vault import Conflict, VaultError, links
 from .mentions import link_mention
 from .monitor import VaultMonitor
 from .editing import TextEdit
@@ -562,6 +562,10 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
         self.work_cancel.set_no_show_all(True)
         self.work_cancel.connect('clicked', lambda *_: self.cancel_work(user=True))
         statusbar.pack_start(self.work_cancel, False, False, 0)
+        self.compare_button = Gtk.Button(label='Compare versions…')
+        self.compare_button.set_no_show_all(True)
+        self.compare_button.connect('clicked', self.compare_current_conflict)
+        statusbar.pack_start(self.compare_button, False, False, 0)
         self.save_status = Gtk.Label(xalign=1)
         self.save_status.set_width_chars(13)
         self.save_status.get_style_context().add_class('status')
@@ -1326,9 +1330,17 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
         if pane:
             try:
                 pane.save()
+            except Conflict:
+                self.compare_current_conflict()
             except (VaultError, OSError):
                 # The save indicator keeps the error visible with retry details.
                 pass
+
+    def compare_current_conflict(self, *_):
+        from .conflicts_ui import compare_conflict
+        pane = self.current()
+        if pane and pane.save_error and pane.save_conflict:
+            compare_conflict(pane)
 
     def toggle_highlight(self, *_):
         pane = self.current()
@@ -1756,6 +1768,7 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
         if self.in_destruction():
             return
         pane = self.current()
+        self.compare_button.set_visible(bool(pane and pane.save_error and pane.save_conflict))
         label = self.save_status
         style = label.get_style_context()
         style.remove_class('save-error')
@@ -1764,7 +1777,8 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
             label.set_tooltip_text(None)
         elif pane.save_error is not None:
             label.set_text('Couldn’t save')
-            label.set_tooltip_text(f'{pane.note.path}: {pane.save_error}\nRetry with Ctrl+S.')
+            hint = 'Compare versions to resolve this conflict, or press Ctrl+S.' if pane.save_conflict else 'Retry with Ctrl+S.'
+            label.set_tooltip_text(f'{pane.note.path}: {pane.save_error}\n{hint}')
             style.add_class('save-error')
         else:
             label.set_text('Saving…' if pane.dirty else 'Saved')

@@ -14,7 +14,8 @@ class CommandPalette(Gtk.EventBox):
         super().__init__()
         self.owner = owner
         self.previous_focus = owner.get_focus()
-        self.set_visible_window(False)
+        self.set_visible_window(True)
+        self.get_style_context().add_class('command-palette-backdrop')
         self.set_hexpand(True)
         self.set_vexpand(True)
         self.card = Gtk.Frame()

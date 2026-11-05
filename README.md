@@ -85,7 +85,7 @@ Libre Vault opens a folder of Markdown files and gives you a fast, keyboard-driv
 - Edit tables in a cell grid with adjustable editing widths, row and column actions, sorting, and 50-row pages. Use Tab or Shift+Tab between cells and Enter for the next row. Apply saves one undoable Markdown edit; Cancel discards changes. Widths last for the editing session.
 - Navigate with a command palette, quick switcher, and keyboard shortcuts.
 - Restore tabs, split panes, and cursor positions for each vault.
-- Autosave with conflict checks and recovery drafts.
+- Autosave with conflict checks and recovery drafts. Use **Compare versions…** after a conflict to inspect the original, editor, and disk text. Keep editing, use the disk version, replace it with your edits, or save a copy under another note path. Replacements still check for newer disk changes.
 - Choose Dark, Light, or Lights Out themes and adjust fonts and layout.
 
 <p align="right"><a href="#top">back to top</a></p>

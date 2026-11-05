@@ -100,11 +100,13 @@ button.sidebar-command {
 }
 button.sidebar-command:hover { background: @hover; border-color: transparent; }
 .sidebar-command-label { color: @muted; font-size: 9pt; }
+.command-palette-backdrop { background: alpha(#000000, 0.24); }
 frame.command-palette {
     background: @canvas;
     border: 1px solid @edge;
     border-radius: 8px;
-    box-shadow: 0 6px 20px alpha(#000000, 0.35);
+    box-shadow: 0 0 24px 2px alpha(@accent, 0.14),
+                0 6px 20px alpha(#000000, 0.35);
 }
 frame.command-palette > border { border: none; }
 .palette-label { color: @muted; font-size: 9pt; margin: 2px 4px 4px; }
