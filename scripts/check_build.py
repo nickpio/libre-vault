@@ -9,7 +9,7 @@ from tempfile import TemporaryDirectory
 
 def main():
     root = Path(__file__).resolve().parents[1]
-    executable = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else root / 'dist' / 'libre-vault'
+    executable = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else root / 'dist' / ('libre-vault.exe' if sys.platform == 'win32' else 'libre-vault')
     with TemporaryDirectory(prefix='librevault-artifact-') as directory:
         copy = Path(directory) / executable.name
         shutil.copy2(executable, copy)

@@ -7,6 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import os
+from .platform_support import set_file_mode
 from pathlib import Path, PurePosixPath
 import re
 import stat
@@ -321,7 +322,7 @@ class Vault(VaultPaths):
             raise Conflict('The file changed outside the app. Save was stopped; your edits are still in the editor. Compare versions to resolve the conflict.')
 
         def write(handle):
-            os.fchmod(handle.fileno(), stat.S_IMODE(path.stat().st_mode))
+            set_file_mode(handle, stat.S_IMODE(path.stat().st_mode))
             handle.write(output)
 
         with synced_temporary(path.parent, write, prefix='.librevault-') as temporary:

@@ -63,7 +63,8 @@ def main(argv=None):
         bootstrap = base / 'bootstrap'
         bootstrap.mkdir()
         (bootstrap / 'sitecustomize.py').write_text(BOOTSTRAP)
-        env = dict(os.environ, XDG_CONFIG_HOME=str(base / 'config'), XDG_STATE_HOME=str(base / 'state'))
+        env = dict(os.environ, XDG_CONFIG_HOME=str(base / 'config'), XDG_STATE_HOME=str(base / 'state'),
+                   XDG_CACHE_HOME=str(base / 'cache'))
         env['PYTHONPATH'] = os.pathsep.join([str(bootstrap), str(ROOT), env.get('PYTHONPATH', '')])
         identity = 'librevault-tests-' + str(os.getpid())
         if args.foreground:
@@ -80,6 +81,15 @@ def main(argv=None):
             print('GUI checks use a private Xvfb display.', flush=True)
             return subprocess.run(['xvfb-run', '-a', '-s', '-screen 0 1600x1000x24', *command],
                                   cwd=ROOT, env=env).returncode
+        if sys.platform in ('win32', 'darwin'):
+            if args.smoke or args.script:
+                parser.error('Native GUI probes require an isolated display, unavailable on this host.')
+            # Do not let GTK select the native desktop when DISPLAY is absent.
+            env['GDK_BACKEND'] = 'x11'
+            env.pop('DISPLAY', None)
+            env.pop('WAYLAND_DISPLAY', None)
+            print('No isolated native display; GUI tests will be skipped.', flush=True)
+            return subprocess.run(command, cwd=ROOT, env=env).returncode
         if not env.get('DISPLAY') and not env.get('WAYLAND_DISPLAY'):
             print('No desktop display; GUI tests will be skipped.', flush=True)
             return subprocess.run(command, cwd=ROOT, env=env).returncode

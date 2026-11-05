@@ -1,0 +1,20 @@
+name: Platform storage checks
+on: [push, pull_request]
+jobs:
+  storage:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install markdown-it-py PyYAML
+      - name: Exercise native locking and recovery without GUI dependencies
+        shell: bash
+        env:
+          PYTHON: python
+        run: ./check.sh discover -s tests -p test_platform_support.py -v

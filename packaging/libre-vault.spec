@@ -1,4 +1,5 @@
 from pathlib import Path
+import sys
 
 root = Path(SPECPATH).parent
 a = Analysis(
@@ -22,4 +23,8 @@ a = Analysis(
 pyz = PYZ(a.pure)
 exe = EXE(pyz, a.scripts, a.binaries, a.datas, [],
           name='libre-vault', debug=False, strip=False, upx=False,
-          console=True)
+          console=sys.platform != 'darwin')
+if sys.platform == 'darwin':
+    app = BUNDLE(exe, name='Libre Vault.app',
+                 bundle_identifier='io.github.nickpio.librevault',
+                 info_plist={'NSHighResolutionCapable': True})

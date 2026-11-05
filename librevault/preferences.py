@@ -2,6 +2,7 @@
 from dataclasses import asdict, dataclass, fields
 import json
 import os
+from .platform_support import app_directory
 from pathlib import Path
 import tempfile
 import unicodedata
@@ -136,8 +137,8 @@ class Preferences:
 
 class PreferencesStore:
     def __init__(self, path=None):
-        config = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config')
-        self.path = Path(path) if path is not None else config / 'libre-vault' / 'settings.json'
+        config = app_directory('config')
+        self.path = Path(path) if path is not None else config / 'settings.json'
 
     def load(self):
         try:

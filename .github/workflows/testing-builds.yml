@@ -1,0 +1,64 @@
+name: Testing builds
+on:
+  push:
+    branches: ['testing-builds/**']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-python-gobject
+            mingw-w64-ucrt-x86_64-gtk3
+            mingw-w64-ucrt-x86_64-python-cairo
+            mingw-w64-ucrt-x86_64-python-markdown-it-py
+            mingw-w64-ucrt-x86_64-python-yaml
+            mingw-w64-ucrt-x86_64-python-matplotlib
+            mingw-w64-ucrt-x86_64-poppler
+            mingw-w64-ucrt-x86_64-adwaita-icon-theme
+            mingw-w64-ucrt-x86_64-pyinstaller
+      - name: Check storage and build
+        shell: msys2 {0}
+        run: |
+          PYTHON=python ./check.sh discover -s tests -p test_platform_support.py -v
+          python scripts/build.py
+      - name: Package
+        shell: pwsh
+        run: Compress-Archive -Path dist/libre-vault.exe -DestinationPath dist/LibreVault-Windows-x64-testing.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LibreVault-Windows-x64-testing
+          path: dist/LibreVault-Windows-x64-testing.zip
+          if-no-files-found: error
+          retention-days: 14
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GTK and build dependencies
+        run: |
+          test "$(uname -m)" = arm64
+          brew install pygobject3 gtk+3 adwaita-icon-theme poppler
+          python_formula=$(brew deps pygobject3 | awk '/^python@/ {print; exit}')
+          python_path="$(brew --prefix "$python_formula")/bin/python${python_formula#python@}"
+          "$python_path" -m venv --system-site-packages .venv-build
+          .venv-build/bin/python -m pip install -r requirements-build.txt
+      - name: Check storage and build
+        run: |
+          PYTHON=.venv-build/bin/python ./check.sh discover -s tests -p test_platform_support.py -v
+          .venv-build/bin/python scripts/build.py
+      - name: Package app with executable permissions
+        run: ditto -c -k --sequesterRsrc --keepParent 'dist/Libre Vault.app' dist/LibreVault-macOS-arm64-testing.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LibreVault-macOS-arm64-testing
+          path: dist/LibreVault-macOS-arm64-testing.zip
+          if-no-files-found: error
+          retention-days: 14

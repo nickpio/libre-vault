@@ -7,6 +7,7 @@ directory update durable. The following directory fsync does.
 """
 from contextlib import contextmanager
 import os
+import sys
 from pathlib import Path
 import tempfile
 
@@ -34,7 +35,13 @@ def replace_file(temporary, target):
 
 
 def sync_directory(directory):
-    """Flush a directory so its entries survive power loss."""
+    """Flush directory entries on POSIX; Windows has no directory fsync.
+
+    Windows still flushes file contents before replacement, but cannot offer
+    the same directory persistence guarantee through Python's OS API.
+    """
+    if sys.platform == 'win32':
+        return
     descriptor = os.open(os.fspath(directory), os.O_RDONLY | os.O_DIRECTORY)
     try:
         os.fsync(descriptor)

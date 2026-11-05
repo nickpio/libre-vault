@@ -3,12 +3,14 @@ import copy
 import hashlib
 import json
 import os
+from .platform_support import set_file_mode
 from pathlib import Path, PurePosixPath
 import re
 import shutil
 import uuid
 from urllib.parse import quote, unquote, urlsplit
 
+from .durable import sync_directory
 from .metadata import frontmatter_range
 
 
@@ -37,24 +39,20 @@ def _prepare_recovery(vault, name, details, originals):
         for path, raw in originals.items():
             filename = hashlib.sha256(path.encode()).hexdigest() + '.bin'
             with (backup / filename).open('xb') as handle:
-                os.fchmod(handle.fileno(), 0o600)
+                set_file_mode(handle, 0o600)
                 handle.write(raw)
                 handle.flush()
                 os.fsync(handle.fileno())
             notes.append({'path': path, 'backup': filename, 'revision': hashlib.sha256(raw).hexdigest()})
         manifest = {**details, 'notes': notes}
         with (backup / 'manifest.tmp').open('x', encoding='utf-8') as handle:
-            os.fchmod(handle.fileno(), 0o600)
+            set_file_mode(handle, 0o600)
             json.dump(manifest, handle, ensure_ascii=False, indent=2)
             handle.flush()
             os.fsync(handle.fileno())
         (backup / 'manifest.tmp').rename(backup / 'manifest.json')
         for directory in (backup, parent, parent.parent):
-            descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
-            try:
-                os.fsync(descriptor)
-            finally:
-                os.close(descriptor)
+            sync_directory(directory)
         return backup
     except Exception:
         shutil.rmtree(backup)

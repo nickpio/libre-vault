@@ -10,6 +10,7 @@ import sys
 
 import yaml
 
+from .platform_support import app_directory
 from .metadata import NoteMetadata
 
 
@@ -53,8 +54,7 @@ class NoteIndex:
     VERSION = 2
 
     def __init__(self, root, cache_dir=None, *, verify=True, cancelled=None):
-        base = Path(cache_dir) if cache_dir is not None else Path(
-            os.environ.get('XDG_CACHE_HOME') or Path.home() / '.cache') / 'libre-vault'
+        base = Path(cache_dir) if cache_dir is not None else app_directory('cache')
         base.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.path = base / (hashlib.sha256(str(root).encode()).hexdigest() + '.sqlite3')
         self.connection = None

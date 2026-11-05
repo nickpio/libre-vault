@@ -5,7 +5,6 @@ under libre-vault/history/<vault-hash>/ with mode 0700.
 """
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-import fcntl
 import hashlib
 import json
 import os
@@ -14,6 +13,7 @@ import queue
 import threading
 import uuid
 
+from .platform_support import app_directory, set_file_mode, lock_session
 from .durable import replace_durably, synced_temporary
 from .vault import Note
 
@@ -44,7 +44,7 @@ class RecoveryStore:
     COALESCE_SECONDS = 0.25
 
     def __init__(self, root, directory=None):
-        base = Path(directory) if directory else Path(os.environ.get('XDG_STATE_HOME') or Path.home() / '.local/state') / 'libre-vault' / 'recovery'
+        base = Path(directory) if directory else app_directory('state') / 'recovery'
         self.directory = base / hashlib.sha256(str(root).encode()).hexdigest()
         self.session = self.directory / uuid.uuid4().hex
         self.lock = None
@@ -62,7 +62,7 @@ class RecoveryStore:
         if self.lock is None:
             self.session.mkdir(mode=0o700, parents=True)
             self.lock = (self.session / 'lock').open('w')
-            fcntl.flock(self.lock, fcntl.LOCK_EX)
+            lock_session(self.lock)
 
     def _write_now(self, note, text):
         self._start()
@@ -189,7 +189,7 @@ class RecoveryStore:
             try:
                 with (session / 'lock').open('a') as lock:
                     try:
-                        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        lock_session(lock, blocking=False)
                     except BlockingIOError:
                         continue
                     for path in sorted(session.glob('*.json')):
@@ -238,8 +238,7 @@ class VersionHistoryStore:
     MAX_VERSIONS = 50
 
     def __init__(self, root, directory=None):
-        base = Path(directory) if directory else Path(
-            os.environ.get('XDG_STATE_HOME') or Path.home() / '.local/state') / 'libre-vault' / 'history'
+        base = Path(directory) if directory else app_directory('state') / 'history'
         self.directory = base / hashlib.sha256(str(root).encode()).hexdigest()
 
     def _file(self, path):
@@ -296,7 +295,7 @@ class VersionHistoryStore:
         target = self._file(path)
 
         def write(handle):
-            os.fchmod(handle.fileno(), 0o600)
+            set_file_mode(handle, 0o600)
             json.dump([asdict(version) for version in versions], handle, ensure_ascii=False)
             handle.write('\n')
 

@@ -1,4 +1,4 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")"
-exec python3 scripts/test_runner.py "$@"
+exec "${PYTHON:-python3}" scripts/test_runner.py "$@"

@@ -1,4 +1,4 @@
-"""Native Linux notebook prototype. SPDX-License-Identifier: MIT"""
+"""Native GTK notebook prototype. SPDX-License-Identifier: MIT"""
 from __future__ import annotations
 
 import argparse

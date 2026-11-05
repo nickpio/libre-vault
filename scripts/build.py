@@ -1,4 +1,4 @@
-"""Build the Linux executable and, optionally, an AppImage."""
+"""Build a native executable and, optionally, an AppImage."""
 import argparse
 import importlib
 import os
@@ -18,8 +18,10 @@ def main(argv=None):
     parser.add_argument('--appimage', action='store_true', help='Also package an AppImage')
     parser.add_argument('--appimagetool', default='appimagetool', help='Path to appimagetool')
     args = parser.parse_args(argv)
-    if sys.platform != 'linux' or sys.version_info < (3, 10):
-        parser.error('Build on Linux with Python 3.10 or newer.')
+    if sys.version_info < (3, 10):
+        parser.error('Build with Python 3.10 or newer.')
+    if args.appimage and sys.platform != 'linux':
+        parser.error('AppImage packaging requires Linux.')
     tool = shutil.which(args.appimagetool) if args.appimage else None
     if args.appimage and not tool:
         parser.error('Install appimagetool or pass --appimagetool /path/to/appimagetool.')
@@ -38,7 +40,7 @@ def main(argv=None):
     subprocess.run([sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean',
                     '--distpath', str(dist), '--workpath', str(build / 'pyinstaller'),
                     str(ROOT / 'packaging' / 'libre-vault.spec')], check=True, cwd=ROOT)
-    executable = dist / 'libre-vault'
+    executable = dist / ('libre-vault.exe' if sys.platform == 'win32' else 'libre-vault')
     # Import bundled modules and CSS without the checkout on Python's path.
     with TemporaryDirectory(prefix='librevault-build-') as directory:
         env = dict(os.environ)

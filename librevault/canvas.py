@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 import copy
 import json
 import os
+from .platform_support import set_file_mode
 from pathlib import PurePosixPath
 import stat
 import tempfile
@@ -263,7 +264,7 @@ def save_canvas(vault, canvas: CanvasFile, document: CanvasDocument | None = Non
     descriptor, temporary = tempfile.mkstemp(prefix='.librevault-', dir=path.parent)
     try:
         with os.fdopen(descriptor, 'wb') as handle:
-            os.fchmod(handle.fileno(), stat.S_IMODE(path.stat().st_mode))
+            set_file_mode(handle, stat.S_IMODE(path.stat().st_mode))
             handle.write(output)
             handle.flush()
             os.fsync(handle.fileno())

@@ -14,12 +14,12 @@
 │    ╚══════╝╚═╝╚═════╝ ╚═╝  ╚═╝╚══════╝    ╚═══╝  ╚═╝  ╚═╝ ╚═════╝ ╚══════╝   ╚═╝       │
 │                                                                                        │
 ├────────────────────────────────────────────────────────────────────────────────────────┤
-│         local markdown vaults   ::   native linux   ::   plain files, forever          │
+│         local markdown vaults   ::   desktop GTK    ::   plain files, forever          │
 │ (o)                                                                                (o) │
 ╰────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-**A free, native Linux editor for local Markdown vaults.**<br>
+**A free GTK editor for local Markdown vaults.**<br>
 Your notes stay ordinary `.md` files in ordinary folders. No accounts, no lock-in, no proprietary formats.
 
 <br>
@@ -91,6 +91,8 @@ Libre Vault opens a folder of Markdown files and gives you a fast, keyboard-driv
 <p align="right"><a href="#top">back to top</a></p>
 
 ## Installation
+
+Linux is the validated desktop platform. Windows and macOS source setup and native build instructions are in [Desktop platforms](docs/platforms.md); native GUI validation on those systems is still pending.
 
 Build a **standalone executable** or an **AppImage** from a git checkout. Prebuilt AppImage releases are not published yet. To work on the application, see [Development](#development) for running directly from a checkout.
 
@@ -576,12 +578,11 @@ cd libre-vault
 ```sh
 ./check.sh                       # full test suite
 ./check.sh --smoke               # GUI smoke check
-./check.sh --foreground          # interactive debugging on your desktop
 ./check.sh --script probe.py     # run a standalone GUI probe in the background
 ```
 
 > [!NOTE]
-> GUI checks never steal your desktop. On **Hyprland**, windows, dialogs, and child-process probes open silently on a temporary `librevault-tests` workspace without taking focus. On other desktops, install **Xvfb** to use a private display. If neither is available, the runner refuses to open GUI windows unless you pass `--foreground`; without any display, GUI tests are skipped.
+> GUI checks never steal your desktop. On **Hyprland**, windows, dialogs, and child-process probes open silently on a temporary `librevault-tests` workspace without taking focus. On other desktops, install **Xvfb** to use a private display. If neither is available, the runner refuses to open GUI windows; without any display, GUI tests are skipped. Windows and macOS runs disable the native GTK backend when no isolated display is available.
 
 Test runs use temporary configuration and recovery directories, so your real settings and last-opened vault are untouched. The GUI test opens a temporary copy of the example vault, follows a link, edits, exercises undo/redo and find/replace, saves, reads the file back, checks external reload and conflict handling, and runs a search. The bundled example vault is never modified.
 
