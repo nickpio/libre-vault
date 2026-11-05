@@ -3,9 +3,14 @@ from dataclasses import replace
 import gi
 
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gdk, Gtk
+from gi.repository import Gdk, GLib, Gtk, Pango
 
-from .preferences import BOUNDS, OPTIONS, STRINGS, Preferences, normalize_string_setting
+from .preferences import (
+    BOUNDS, FONT_PRESETS, FONT_PRESET_IDS, OPTIONS, STRINGS, Preferences, normalize_editor_font,
+    normalize_string_setting,
+)
+
+CHOOSE_FONT = 'choose-font'
 
 
 class SettingsDialog(Gtk.Dialog):
@@ -47,7 +52,8 @@ class SettingsDialog(Gtk.Dialog):
         appearance = self.page('Appearance', 'Make Libre Vault feel like your workspace.')
         self.combo(appearance, 'theme', 'Base theme', 'Choose Dark, Light, or Lights Out with pure-black backgrounds and high-contrast text.')
         self.spin(appearance, 'interface_size', 'Interface font size', 'Size of text in menus and controls.', 'pt')
-        self.combo(appearance, 'editor_font', 'Text font', 'Font family used when writing and reading notes.')
+        self.font_combo(appearance, 'editor_font', 'Text font',
+                        'Font family used when writing and reading notes. Choose Custom… for an installed font.')
         self.spin(appearance, 'editor_size', 'Text font size', 'Size of your note text. Headings scale with it.', 'pt')
         preview = Gtk.Label(label='A space for your thoughts', xalign=0)
         preview.get_style_context().add_class('editor-preview')
@@ -162,6 +168,82 @@ class SettingsDialog(Gtk.Dialog):
         control.connect('changed', lambda *_: self.change(key, control.get_active_id()))
         self.setting_row(page, key, title, description, control)
 
+    def font_combo(self, page, key, title, description):
+        control = Gtk.ComboBoxText()
+        renderer = control.get_cells()[0]
+        renderer.set_property('ellipsize', Pango.EllipsizeMode.END)
+        renderer.set_property('max-width-chars', 32)
+        control.set_cell_data_func(renderer, self.render_font_cell)
+        control.connect('changed', self.on_editor_font)
+        self.setting_row(page, key, title, description, control)
+
+    def render_font_cell(self, _layout, cell, model, iterator, _data=None):
+        # ComboBoxText stores the label in column 0 and the id in column 1.
+        font_id = model.get_value(iterator, 1) or ''
+        cell.set_property('text', model.get_value(iterator, 0) or '')
+        if font_id.startswith('font:'):
+            family, style = font_id[5:], Pango.Style.NORMAL
+        elif font_id == 'serif':
+            family, style = 'Serif', Pango.Style.NORMAL
+        elif font_id == 'monospace':
+            family, style = 'Monospace', Pango.Style.NORMAL
+        elif font_id == CHOOSE_FONT:
+            family, style = 'Sans', Pango.Style.ITALIC
+        else:
+            family, style = 'Sans', Pango.Style.NORMAL
+        cell.set_property('family', family)
+        cell.set_property('style', style)
+        cell.set_property('weight', Pango.Weight.NORMAL)
+
+    def on_editor_font(self, control):
+        if self.updating:
+            return
+        chosen = control.get_active_id()
+        if not chosen:
+            return
+        # Let the combo finish updating before a modal chooser runs its own loop.
+        if chosen == CHOOSE_FONT:
+            GLib.idle_add(self.pick_editor_font)
+            return
+        self.change('editor_font', chosen[5:] if chosen.startswith('font:') else chosen)
+
+    def pick_editor_font(self):
+        if not self.get_visible():
+            return False
+        dialog = Gtk.FontChooserDialog(title='Choose text font', transient_for=self, modal=True)
+        dialog.set_destroy_with_parent(True)
+        dialog.set_level(Gtk.FontChooserLevel.FAMILY)
+        dialog.set_preview_text('A space for your thoughts')
+        current = self.owner.preferences.editor_font
+        if current not in FONT_PRESET_IDS:
+            dialog.set_font(current)
+        try:
+            accepted = dialog.run() == Gtk.ResponseType.OK
+            description = dialog.get_font_desc() if accepted else None
+            family = description.get_family() if description is not None else None
+        finally:
+            dialog.destroy()
+        if family:
+            self.change('editor_font', family)
+        else:
+            self.sync_controls()
+        return False
+
+    def sync_editor_font(self, value):
+        control = self.controls['editor_font']
+        rows = list(FONT_PRESETS)
+        if value not in FONT_PRESET_IDS:
+            rows.append((f'font:{value}', value))
+        rows.append((CHOOSE_FONT, 'Custom…'))
+        existing = [(row[1], row[0]) for row in control.get_model()]
+        if existing != rows:
+            control.remove_all()
+            for row_id, label in rows:
+                control.append(row_id, label)
+        active = value if value in FONT_PRESET_IDS else f'font:{value}'
+        if control.get_active_id() != active:
+            control.set_active_id(active)
+
     def spin(self, page, key, title, description, unit):
         low, high = BOUNDS[key]
         control = Gtk.SpinButton.new_with_range(low, high, 1 if unit == 'pt' else 20)
@@ -186,7 +268,9 @@ class SettingsDialog(Gtk.Dialog):
         try:
             for key, control in self.controls.items():
                 value = getattr(self.owner.preferences, key)
-                if key in OPTIONS:
+                if key == 'editor_font':
+                    self.sync_editor_font(value)
+                elif key in OPTIONS:
                     control.set_active_id(value)
                 elif key in BOUNDS:
                     control.set_value(value)
@@ -208,6 +292,14 @@ class SettingsDialog(Gtk.Dialog):
             if normalized is None:
                 self.error.set_text('Use a vault path without "..", hidden names, or an empty date format.')
                 self.error.show()
+                return
+            value = normalized
+        elif key == 'editor_font':
+            normalized = normalize_editor_font(value)
+            if normalized is None:
+                self.error.set_text('Choose a font family name without symbols.')
+                self.error.show()
+                self.sync_controls()
                 return
             value = normalized
         self.save(replace(self.owner.preferences, **{key: value}))

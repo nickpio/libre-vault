@@ -334,7 +334,7 @@ The gear icon at the bottom-left opens **Settings**, with a category sidebar and
 
 | Category | Options |
 | --- | --- |
-| Appearance | Dark, Light, or Lights Out theme; interface font size; text font family; text size |
+| Appearance | Dark, Light, or Lights Out theme; interface font size; text font family or an installed font; text size |
 | Editor | Readable line length, writing column width, line wrapping, list continuation on Enter, slash commands (`/`), Vim keybindings |
 | Hotkeys | Record, clear, or restore application and editor command shortcuts; conflicts are reported before saving |
 | Vault | Per-vault hidden-file visibility, internal symbolic links, and attachment destination |

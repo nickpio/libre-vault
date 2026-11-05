@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from librevault.preferences import Preferences, PreferencesStore
+from librevault.preferences import Preferences, PreferencesStore, normalize_editor_font
 
 try:
     from librevault.app import Gdk, GLib, Gtk, Window
@@ -154,6 +154,105 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(other.current().editor.get_wrap_mode(), Gtk.WrapMode.NONE)
         self.assertAlmostEqual(other.current().tags['h1'].get_property('size-points'), 25 * 18 / 11, places=2)
         self.assertFalse(other.current().dirty)
+
+    def test_custom_font_choice_applies_to_notes_and_can_be_cancelled(self):
+        families = [family.get_name() for family in self.dialog.get_pango_context().list_families()]
+        family = next(name for name in sorted(families) if normalize_editor_font(name) == name)
+        chooser = Gtk.FontChooserDialog(title='Choose text font', transient_for=self.dialog, modal=True)
+        chooser.set_level(Gtk.FontChooserLevel.FAMILY)
+        chooser.set_font(family)
+        self.assertEqual(chooser.get_font_desc().get_family(), family)
+        chooser.destroy()
+        chosen = {}
+
+        class Description:
+            def get_family(self):
+                return family
+
+        class Chooser:
+            def __init__(self, *args, **kwargs):
+                chosen['dialog'] = self
+
+            def set_destroy_with_parent(self, _value):
+                pass
+
+            def set_level(self, level):
+                chosen['level'] = level
+
+            def set_preview_text(self, text):
+                chosen['preview'] = text
+
+            def set_font(self, font):
+                chosen['font'] = font
+
+            def run(self):
+                return chosen['response']
+
+            def get_font_desc(self):
+                return Description()
+
+            def destroy(self):
+                chosen['destroyed'] = True
+
+        control = self.dialog.controls['editor_font']
+        with patch('librevault.settings.Gtk.FontChooserDialog', Chooser):
+            chosen['response'] = Gtk.ResponseType.CANCEL
+            control.set_active_id('choose-font')
+            self.drain()
+            self.assertTrue(chosen['destroyed'])
+            self.assertEqual(self.window.preferences.editor_font, 'sans')
+            self.assertEqual(control.get_active_id(), 'sans')
+            self.assertFalse(self.preferences_path.exists())
+
+            chosen['destroyed'] = False
+            chosen['response'] = Gtk.ResponseType.OK
+            control.set_active_id('choose-font')
+            self.drain()
+
+        self.assertEqual(chosen['level'], Gtk.FontChooserLevel.FAMILY)
+        self.assertEqual(chosen['preview'], 'A space for your thoughts')
+        self.assertTrue(chosen['destroyed'])
+        self.assertEqual(self.window.preferences.editor_font, family)
+        self.assertEqual(control.get_active_id(), f'font:{family}')
+        self.assertEqual(PreferencesStore(self.preferences_path).load().editor_font, family)
+        self.assertEqual(self.font_family(self.window.current().editor), family)
+        self.assertEqual(self.font_family(self.preview_label()), family)
+        self.dialog.change('editor_font', 'Bad;Font')
+        self.assertEqual(self.window.preferences.editor_font, family)
+        self.assertEqual(control.get_active_id(), f'font:{family}')
+        self.assertIn('font family', self.dialog.error.get_text())
+        self.dialog.save(Preferences())
+        self.assertEqual(self.window.preferences.editor_font, 'sans')
+        self.assertEqual(control.get_active_id(), 'sans')
+        ids = [row[1] for row in control.get_model()]
+        self.assertEqual(ids, ['sans', 'serif', 'monospace', 'choose-font'])
+
+    def font_family(self, widget):
+        description = widget.get_style_context().get_property('font', Gtk.StateFlags.NORMAL)
+        family = description.get_family() or ''
+        return family.split(',')[0]
+
+    def preview_label(self):
+        def walk(widget):
+            classes = widget.get_style_context().list_classes()
+            if 'settings-preview' in classes:
+                return widget
+            if hasattr(widget, 'get_children'):
+                for child in widget.get_children():
+                    found = walk(child)
+                    if found is not None:
+                        return found
+            return None
+        found = walk(self.dialog)
+        self.assertIsNotNone(found)
+        return found
+
+    def drain(self):
+        context = GLib.MainContext.default()
+        for _ in range(1000):
+            if not context.pending():
+                break
+            context.iteration(False)
 
 
 if __name__ == '__main__':

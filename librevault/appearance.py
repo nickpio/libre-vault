@@ -1,6 +1,8 @@
 """Theme colors and typography shared by GTK CSS and Markdown text tags."""
 import re
 
+from .preferences import normalize_editor_font
+
 
 PALETTES = {
     'dark': {
@@ -36,7 +38,18 @@ PALETTES['lights_out'] = {
     'code_keyword': '#d2a8ff', 'code_string': '#9ece6a', 'code_comment': '#9a9a9a',
     'code_number': '#e0af68', 'code_builtin': '#7dcfff',
 }
+
 FONTS = {'sans': '"Inter", "Cantarell", sans-serif', 'serif': 'serif', 'monospace': 'monospace'}
+
+
+def font_family_css(name):
+    """CSS font-family value for a stored editor font, falling back to the sans preset."""
+    preset = FONTS.get(name)
+    if preset is not None:
+        return preset
+    if normalize_editor_font(name) != name:
+        return FONTS['sans']
+    return f'"{name}", sans-serif'
 
 
 def stylesheet(source, preferences):
@@ -44,11 +57,13 @@ def stylesheet(source, preferences):
     colors = PALETTES[preferences.theme]
     source = re.sub(r'@define-color (\w+) [^;]+;',
                     lambda match: f'@define-color {match[1]} {colors[match[1]]};', source)
+    family = font_family_css(preferences.editor_font)
     return source + f'''
 window, dialog {{ font-size: {preferences.interface_size}pt; }}
 textview.live-editor, .editor-preview {{
-    font-family: {FONTS[preferences.editor_font]};
+    font-family: {family};
     font-size: {preferences.editor_size}pt;
 }}
-.list-marker {{ font-size: {preferences.editor_size}pt; }}
+.reading-view {{ font-family: {family}; }}
+.list-marker {{ font-family: {family}; font-size: {preferences.editor_size}pt; }}
 '''

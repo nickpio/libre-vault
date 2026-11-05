@@ -4,12 +4,16 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import unicodedata
 
 
 OPTIONS = {
     'theme': (('dark', 'Dark'), ('light', 'Light'), ('lights_out', 'Lights Out')),
-    'editor_font': (('sans', 'Sans serif'), ('serif', 'Serif'), ('monospace', 'Monospace')),
 }
+FONT_PRESETS = (('sans', 'Sans serif'), ('serif', 'Serif'), ('monospace', 'Monospace'))
+FONT_PRESET_IDS = frozenset(item[0] for item in FONT_PRESETS)
+_FONT_EXTRA = set(' .+_-')
+_FONT_NAME_LIMIT = 120
 BOUNDS = {'interface_size': (8, 18), 'editor_size': (8, 32), 'line_width': (480, 1200)}
 STRINGS = frozenset({
     'templates_folder', 'daily_notes_folder', 'daily_notes_format', 'daily_notes_template',
@@ -25,6 +29,29 @@ def _safe_relative(text):
     if not text or '\\' in text or text.startswith('/') or '//' in text:
         return False
     return all(part and part not in ('.', '..') and not part.startswith('.') for part in text.split('/'))
+
+
+def normalize_editor_font(value):
+    """Return a preset or one family name, or None when it cannot be stored.
+
+    Custom names are quoted into the stylesheet, so quotes, controls, and other
+    characters that could change the CSS are rejected.
+    """
+    if type(value) is not str:
+        return None
+    text = value.strip()
+    if text in FONT_PRESET_IDS:
+        return text
+    if not text or len(text) > _FONT_NAME_LIMIT:
+        return None
+    if not any(unicodedata.category(char).startswith(('L', 'N')) for char in text):
+        return None
+    for char in text:
+        if char in _FONT_EXTRA:
+            continue
+        if not unicodedata.category(char).startswith(('L', 'N')):
+            return None
+    return text
 
 
 def normalize_string_setting(key, value):
@@ -86,7 +113,12 @@ class Preferences:
         for field in fields(cls):
             key = field.name
             value = data.get(key, getattr(defaults, key))
-            if key in OPTIONS:
+            if key == 'editor_font':
+                normalized = normalize_editor_font(value)
+                valid = normalized is not None
+                if valid:
+                    value = normalized
+            elif key in OPTIONS:
                 valid = type(value) is str and value in dict(OPTIONS[key])
             elif key in BOUNDS:
                 low, high = BOUNDS[key]

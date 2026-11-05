@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from librevault.appearance import PALETTES, stylesheet
+from librevault.appearance import PALETTES, font_family_css, stylesheet
 from librevault.preferences import Preferences, PreferencesStore
 
 
@@ -54,11 +54,23 @@ class PreferenceTests(unittest.TestCase):
         with TemporaryDirectory() as directory, patch.dict(os.environ, {'XDG_CONFIG_HOME': directory}):
             self.assertEqual(PreferencesStore().path, Path(directory) / 'libre-vault' / 'settings.json')
 
+    def test_custom_editor_font_is_kept_and_unsafe_names_fall_back(self):
+        custom = replace(Preferences(), editor_font='IBM Plex Sans')
+        self.assertEqual(Preferences.from_dict({'editor_font': '  IBM Plex Sans  '}), custom)
+        self.assertEqual(Preferences.from_dict({'editor_font': '文泉驿等宽正黑'}).editor_font, '文泉驿等宽正黑')
+        self.assertEqual(Preferences.from_dict({'editor_font': '  monospace  '}).editor_font, 'monospace')
+        for bad in ('url(evil)', 'foo;bar', '"Inter"', 'a\nb', 'x' * 121, '---', '../Font', 12, None):
+            self.assertEqual(Preferences.from_dict({'editor_font': bad}).editor_font, 'sans', bad)
+        self.assertEqual(font_family_css('IBM Plex Sans'), '"IBM Plex Sans", sans-serif')
+        self.assertEqual(font_family_css('serif'), 'serif')
+        self.assertEqual(font_family_css('"); color: red'), '"Inter", "Cantarell", sans-serif')
+
     def test_all_themes_define_all_stylesheet_colors(self):
         source = (Path(__file__).resolve().parents[1] / 'librevault' / 'style.css').read_text()
         for theme in PALETTES:
             rendered = stylesheet(source, replace(Preferences(), theme=theme, editor_font='serif', editor_size=16))
             self.assertIn('font-family: serif', rendered)
+            self.assertIn('.reading-view { font-family: serif; }', rendered)
             self.assertIn('font-size: 16pt', rendered)
             self.assertIn(f"@define-color canvas {PALETTES[theme]['canvas']};", rendered)
 
