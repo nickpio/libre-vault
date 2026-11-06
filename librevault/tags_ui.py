@@ -1,39 +1,53 @@
-"""Collapsible global tag tree and vault-wide tag renaming."""
+"""Docked global tag tree and vault-wide tag renaming."""
 from gi.repository import Gtk, Pango
 from .vault import VaultError
 
 
-class TagPane(Gtk.Expander):
+class TagPane(Gtk.Box):
     def __init__(self, owner):
-        super().__init__(label='Tags')
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        self.set_border_width(12)
+        self.get_style_context().add_class('tag-pane')
         self.owner = owner
         self.signature = None
         self.counts = None
         self.store = Gtk.TreeStore(str, str, int)
         self.tree = Gtk.TreeView(model=self.store, headers_visible=False)
-        tag_cell = Gtk.CellRendererText(ellipsize=Pango.EllipsizeMode.END)
+        self.tree.get_accessible().set_name('Vault tags')
+        self.tree.set_tooltip_column(1)
+        tag_cell = Gtk.CellRendererText(ellipsize=Pango.EllipsizeMode.END, xpad=6, ypad=7)
         tag_column = Gtk.TreeViewColumn('Tag', tag_cell, text=0)
         tag_column.set_expand(True)
         tag_column.set_sizing(Gtk.TreeViewColumnSizing.FIXED)
         tag_column.set_fixed_width(96)
         tag_column.set_min_width(48)
-        count_column = Gtk.TreeViewColumn('Notes', Gtk.CellRendererText(), text=2)
-        count_column.set_sizing(Gtk.TreeViewColumnSizing.FIXED)
-        count_column.set_fixed_width(28)
+        count_cell = Gtk.CellRendererText(xalign=1, xpad=6, ypad=7)
+        count_column = Gtk.TreeViewColumn('Notes', count_cell, text=2)
+        count_column.set_sizing(Gtk.TreeViewColumnSizing.AUTOSIZE)
+        count_column.set_min_width(30)
         self.tree.append_column(tag_column)
         self.tree.append_column(count_column)
         self.tree.connect('row-activated', self.activate)
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self.content = Gtk.Stack()
         scroll = Gtk.ScrolledWindow()
-        scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-        scroll.set_max_content_height(220)
-        scroll.set_propagate_natural_height(True)
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scroll.add(self.tree)
-        box.pack_start(scroll, True, True, 0)
-        button = Gtk.Button(label='Rename selected tag…')
-        button.connect('clicked', self.rename)
-        box.pack_start(button, False, False, 0)
-        self.add(box)
+        self.content.add_named(scroll, 'tags')
+        empty = Gtk.Label(label='No tags yet', xalign=0.5)
+        empty.get_style_context().add_class('muted')
+        empty.set_line_wrap(True)
+        self.content.add_named(empty, 'empty')
+        self.content.set_visible_child_name('empty')
+        self.pack_start(self.content, True, True, 0)
+        self.rename_button = Gtk.Button(label='Rename tag…')
+        self.rename_button.set_tooltip_text('Rename the selected tag across the vault')
+        self.rename_button.set_sensitive(False)
+        self.rename_button.connect('clicked', self.rename)
+        self.tree.get_selection().connect('changed', self.selection_changed)
+        self.pack_start(self.rename_button, False, False, 0)
+
+    def selection_changed(self, selection):
+        self.rename_button.set_sensitive(selection.get_selected()[1] is not None)
 
     def refresh(self):
         vault = self.owner.vault
@@ -51,6 +65,7 @@ class TagPane(Gtk.Expander):
         if counts == self.counts:
             return
         self.counts = counts
+        self.content.set_visible_child_name('tags' if counts else 'empty')
         expanded = []
         self.tree.map_expanded_rows(lambda view, path: expanded.append(self.store[path][1]))
         self.store.clear()

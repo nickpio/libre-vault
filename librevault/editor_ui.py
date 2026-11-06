@@ -86,14 +86,14 @@ class NotePane(EditorRenderMixin, Gtk.Box):
         for level, size in enumerate([25, 21, 18, 16, 14, 12], 1):
             self.tags[f'h{level}'] = self.buffer.create_tag(
                 None, size_points=size, weight=Pango.Weight.BOLD,
-                foreground='#e4e4e4', pixels_above_lines=20)
+                foreground='#e4e4e4', pixels_above_lines=10)
         # This tag has highest priority, including inside headings and code.
         self.hidden = self.buffer.create_tag(None, invisible=True)
         self.editor = EditorTextView(buffer=self.buffer)
         self.editor.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
         self.editor.set_left_margin(40)
         self.editor.set_right_margin(40)
-        self.editor.set_top_margin(30)
+        self.editor.set_top_margin(38)
         self.editor.set_bottom_margin(80)
         # GTK 3's hit-testing converts a raw line byte count to a visible
         # index in bottom padding, which aborts when syntax is invisible.
@@ -133,15 +133,20 @@ class NotePane(EditorRenderMixin, Gtk.Box):
         toolbar = self.toolbar = Gtk.Box(spacing=8)
         self.pack_start(toolbar, False, False, 0)
         self.reorder_child(toolbar, 0)
-        toolbar.set_border_width(6)
+        toolbar.get_style_context().add_class('note-toolbar')
         mode = self.mode_selector = Gtk.ComboBoxText()
         for value, title in [('live', 'Live preview'), ('source', 'Source'), ('reading', 'Reading')]:
             mode.append(value, title)
         mode.set_active_id('live')
         mode.connect('changed', lambda field: self.set_mode(field.get_active_id()))
         mode.get_accessible().set_name('Note view mode')
-        toolbar.pack_start(mode, False, False, 0)
+        path_label = self.path_label = Gtk.Label(label=Path(note.path).parent.as_posix() if '/' in note.path else 'Notes', xalign=0)
+        path_label.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+        path_label.get_style_context().add_class('note-path')
+        toolbar.pack_start(path_label, True, True, 0)
+        toolbar.pack_end(mode, False, False, 0)
         attach = Gtk.Button.new_from_icon_name('mail-attachment-symbolic', Gtk.IconSize.BUTTON)
+        attach.get_style_context().add_class('icon-button')
         attach.set_tooltip_text('Insert attachment')
         attach.connect('clicked', lambda *_: self.choose_attachment())
         toolbar.pack_end(attach, False, False, 0)

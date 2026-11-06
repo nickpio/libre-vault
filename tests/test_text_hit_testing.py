@@ -10,6 +10,16 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class TextHitTestingTests(unittest.TestCase):
+    def test_concealed_prefix_keeps_padding_hits_inside_text(self):
+        result = subprocess.run(
+            [sys.executable, str(Path(__file__).resolve()), '--padding-probe'],
+            cwd=ROOT, capture_output=True, text=True, timeout=20)
+        if result.returncode == 77:
+            self.skipTest('GTK 3 and a display are required')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn('Gtk-CRITICAL', result.stderr)
+        self.assertIn('Padding hit-testing passed', result.stdout)
+
     def test_hidden_syntax_survives_hit_testing_and_layout_changes(self):
         result = subprocess.run(
             [sys.executable, str(Path(__file__).resolve()), '--probe'],
@@ -26,6 +36,7 @@ def probe():
     try:
         import gi
         gi.require_version('Gtk', '3.0')
+        gi.require_version('Gdk', '3.0')
         from gi.repository import Gdk, Gio, GLib, Gtk
     except (ImportError, ValueError):
         return 77
@@ -114,7 +125,63 @@ def probe():
     return 0
 
 
+def padding_probe():
+    try:
+        import gi
+        gi.require_version('Gtk', '3.0')
+        gi.require_version('Gdk', '3.0')
+        from gi.repository import Gtk
+    except (ImportError, ValueError):
+        return 77
+    if not Gtk.init_check()[0]:
+        return 77
+
+    sys.path.insert(0, str(ROOT))
+    from librevault.textview import EditorTextView
+
+    editor = EditorTextView(wrap_mode=Gtk.WrapMode.WORD_CHAR,
+                            pixels_below_lines=30)
+    window = Gtk.Window()
+    window.set_default_size(400, 300)
+    window.add(editor)
+    window.show_all()
+    try:
+        for alias in ('Héllo 世界', 'Héllo 世界 ' * 40 + 'end'):
+            prefix = '[[' + 'destination/' * 20 + '|'
+            text = prefix + alias + ']]\nAfter'
+            buffer = editor.get_buffer()
+            buffer.set_text(text)
+            hidden = buffer.create_tag(None, invisible=True)
+            buffer.apply_tag(hidden, buffer.get_start_iter(),
+                             buffer.get_iter_at_offset(len(prefix)))
+            buffer.apply_tag(hidden, buffer.get_iter_at_offset(len(prefix + alias)),
+                             buffer.get_iter_at_offset(len(prefix + alias) + 2))
+            while Gtk.events_pending():
+                Gtk.main_iteration_do(False)
+            last = buffer.get_iter_at_offset(len(prefix + alias) - 1)
+            cursor, _ = editor.get_cursor_locations(last)
+            bottom = cursor.y + cursor.height
+            # A long hidden prefix makes GTK's character rectangle empty.
+            # Paragraph height includes padding and cannot replace it safely.
+            for y in range(bottom + 1, bottom + 20):
+                assert editor._hit_y(y) < bottom, (alias, y, bottom)
+                for x in (0, 100, 400):
+                    found, iterator = editor.get_iter_at_location(x, y)
+                    assert not found and iterator.get_line() == 0
+                    found, iterator, _ = editor.get_iter_at_position(x, y)
+                    assert not found and iterator.get_line() == 0
+            # Visible text must still be hit at its original coordinates.
+            y = cursor.y + cursor.height // 2
+            assert editor._hit_y(y) == y
+        print('Padding hit-testing passed: concealed prefix, Unicode, wrapping')
+    finally:
+        window.destroy()
+    return 0
+
+
 if __name__ == '__main__':
+    if '--padding-probe' in sys.argv:
+        raise SystemExit(padding_probe())
     if '--probe' in sys.argv:
         raise SystemExit(probe())
     unittest.main()

@@ -12,17 +12,15 @@ class EditorTextView(Gtk.TextView):
         end = iterator.copy()
         if not end.ends_line():
             end.forward_to_line_end()
-        # Hidden delimiters have zero-height rectangles. Use the last visible
-        # character, which also refreshes the display after cursor changes.
+        # Use a visible character on the last wrapped row, rather than a
+        # concealed closing delimiter or the following paragraph.
         last = end.copy()
         if last.backward_visible_cursor_position() and last.get_line() == iterator.get_line():
             iterator = last
-        rectangle = self.get_iter_location(iterator)
-        if rectangle.height == 0:
-            # GTK can also return an empty rectangle for visible text after
-            # a long concealed prefix (for example a wiki-link alias).
-            top, height = self.get_line_yrange(iterator)
-            return min(y, top + max(1, height) - 1)
+        # get_iter_location() passes the raw buffer byte index to Pango,
+        # whose layout excludes hidden text. Its rectangle can be empty or
+        # on the wrong wrapped row. Cursor locations use the visible index.
+        rectangle, _ = self.get_cursor_locations(iterator)
         return min(y, rectangle.y + rectangle.height - 1)
 
     def get_iter_at_location(self, x, y):

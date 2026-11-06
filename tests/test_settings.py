@@ -57,6 +57,46 @@ class SettingsTests(unittest.TestCase):
         self.dialog.response(Gtk.ResponseType.CLOSE)
         self.assertIsNone(self.window.settings_dialog)
 
+    def test_gear_clears_stale_hover_after_modal_open_and_close(self):
+        self.dialog.destroy()
+        gear = self.window.settings_button
+        hover = Gtk.StateFlags.PRELIGHT | Gtk.StateFlags.ACTIVE
+        def cross(kind):
+            event = Gdk.Event.new(kind)
+            event.window = gear.get_event_window()
+            event.detail = Gdk.NotifyType.NONLINEAR
+            event.set_device(gear.get_display().get_default_seat().get_pointer())
+            gear.event(event)
+        def drain():
+            context = GLib.MainContext.default()
+            for _ in range(1000):
+                if not context.pending():
+                    return
+                context.iteration(False)
+            self.fail('GTK did not settle')
+        cross(Gdk.EventType.ENTER_NOTIFY)
+        gear.set_state_flags(Gtk.StateFlags.PRELIGHT, False)
+        gear.emit('pressed')
+        gear.emit('released')
+        self.assertTrue(self.window.settings_dialog.get_visible())
+        # The release handler runs after clicked and can restore stale hover.
+        self.assertTrue(gear.get_state_flags() & Gtk.StateFlags.PRELIGHT)
+        drain()
+        self.assertFalse(gear.get_state_flags() & hover)
+        gear.set_state_flags(hover, False)
+        self.window.settings_dialog.response(Gtk.ResponseType.CLOSE)
+        drain()
+        self.assertIsNone(self.window.settings_dialog)
+        self.assertFalse(gear.get_state_flags() & hover)
+        # Subsequent pointer/button processing still highlights normally.
+        cross(Gdk.EventType.ENTER_NOTIFY)
+        gear.emit('pressed')
+        self.assertTrue(gear.get_state_flags() & Gtk.StateFlags.PRELIGHT)
+        cross(Gdk.EventType.LEAVE_NOTIFY)
+        gear.emit('released')
+        self.assertFalse(gear.get_state_flags() & hover)
+        self.assertIsNone(self.window.settings_dialog)
+
     def test_small_editor_styles_and_font_controls_respect_minimum_size(self):
         for field in ('interface_size', 'editor_size'):
             self.assertEqual(self.dialog.controls[field].get_adjustment().get_lower(), 11)
@@ -154,7 +194,7 @@ class SettingsTests(unittest.TestCase):
         reopened.settings_dialog.save(Preferences())
         self.assertEqual(reopened.preferences, Preferences())
         self.assertEqual(PreferencesStore(self.preferences_path).load(), Preferences())
-        self.assertEqual(reopened.settings_dialog.controls['editor_size'].get_value_as_int(), 11)
+        self.assertEqual(reopened.settings_dialog.controls['editor_size'].get_value_as_int(), Preferences().editor_size)
 
     def test_save_failure_reports_error_and_reverts_control(self):
         original = self.window.preferences

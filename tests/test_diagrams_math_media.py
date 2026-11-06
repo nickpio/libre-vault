@@ -268,9 +268,8 @@ class DiagramReadingTests(unittest.TestCase):
         self.assertFalse(any('Could not render' in label for label in labels))
         frames = [widget for widget in widgets if isinstance(widget, Gtk.Frame)]
         for kind in CALLOUT_STYLES:
-            self.assertTrue(any(f'callout-{kind}' in widget.get_style_context().list_classes()
+            self.assertTrue(any(CALLOUT_STYLES[kind] in widget.get_style_context().list_classes()
                                 for widget in frames), kind)
-            self.assertIn(CALLOUT_STYLES[kind][0], labels)
             self.assertIn(f'{kind.title()} title', labels)
         expanders = {widget.get_accessible().get_name(): widget
                      for widget in widgets if isinstance(widget, Gtk.Expander)}

@@ -4,11 +4,11 @@ import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gdk, Gtk
 
-from .shortcuts import APP_SHORTCUTS, EDITOR_SHORTCUTS, KEYBIND_GROUPS, effective_shortcuts
+from .shortcuts import APP_SHORTCUTS, EDITOR_SHORTCUTS, KEYBIND_GROUPS, effective_shortcuts, shortcut_label
 
 
 class CommandPalette(Gtk.EventBox):
-    max_width = 760
+    max_width = 680
 
     def __init__(self, owner):
         super().__init__()
@@ -22,7 +22,7 @@ class CommandPalette(Gtk.EventBox):
         self.card.set_shadow_type(Gtk.ShadowType.NONE)
         self.card.set_halign(Gtk.Align.CENTER)
         self.card.set_valign(Gtk.Align.START)
-        self.card.set_margin_top(32)
+        self.card.set_margin_top(48)
         self.card.get_style_context().add_class('command-palette')
         self.add(self.card)
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
@@ -40,7 +40,7 @@ class CommandPalette(Gtk.EventBox):
         self.results.get_style_context().add_class('command-results')
         self.results_scroll = Gtk.ScrolledWindow()
         self.results_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        self.results_scroll.set_max_content_height(176)
+        self.results_scroll.set_max_content_height(280)
         self.results_scroll.set_propagate_natural_height(True)
         self.results_scroll.add(self.results)
         content.pack_start(self.results_scroll, False, False, 0)
@@ -108,9 +108,6 @@ class CommandPalette(Gtk.EventBox):
             row = Gtk.ListBoxRow()
             row.action, row.title = action, title
             command = Gtk.Box(spacing=10)
-            icon = Gtk.Image.new_from_icon_name('system-run-symbolic', Gtk.IconSize.MENU)
-            icon.get_style_context().add_class('muted')
-            command.pack_start(icon, False, False, 0)
             command.pack_start(Gtk.Label(label=title, xalign=0), True, True, 0)
             row.add(command)
             self.results.add(row)
@@ -229,9 +226,9 @@ class KeybindCheatsheet(Gtk.Dialog):
         self.empty.set_margin_bottom(24)
         self.bindings.set_placeholder(self.empty)
         key_widths = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
-        application = tuple((Gtk.accelerator_get_label(*Gtk.accelerator_parse(shortcut.accelerator)),
+        application = tuple((shortcut_label(shortcut.accelerator),
                              shortcut.description) for shortcut in effective_shortcuts(APP_SHORTCUTS, 'app', owner.hotkeys))
-        editing = tuple((Gtk.accelerator_get_label(*Gtk.accelerator_parse(shortcut.accelerator)),
+        editing = tuple((shortcut_label(shortcut.accelerator),
                          shortcut.description) for shortcut in effective_shortcuts(EDITOR_SHORTCUTS, 'editor', owner.hotkeys))
         self.groups = (('Application', application), ('Editor commands', editing), *KEYBIND_GROUPS)
         self.bindings.set_header_func(self.section_header)
@@ -239,7 +236,8 @@ class KeybindCheatsheet(Gtk.Dialog):
             for keys, description in bindings:
                 row = Gtk.ListBoxRow()
                 row.section = section
-                row.search_text = f'{title} {keys} {description}'.casefold()
+                aliases = keys.replace('Control', 'Ctrl').replace('Option', 'Alt').replace('Command', 'Cmd').replace(' + ', '+')
+                row.search_text = f'{title} {keys} {aliases} {description}'.casefold()
                 row.get_accessible().set_name(f'{title}: {description}, {keys}')
                 line = Gtk.Box(spacing=20)
                 key_label = Gtk.Label(label=keys, xalign=0, yalign=0)

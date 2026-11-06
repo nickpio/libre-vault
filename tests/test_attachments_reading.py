@@ -176,6 +176,34 @@ class ReadingTests(unittest.TestCase):
         self.assertIs(self.window.current(), other)
         self.assertEqual(other.mode_selector.get_active_id(), 'reading')
 
+    def test_live_callout_is_one_card_and_reveals_the_original_source(self):
+        source = '# Note\n\n> [!tip] Remember\n> Keep **the source** intact.\n\nAfter.\n'
+        self.pane.buffer.set_text(source)
+        self.pane.buffer.place_cursor(self.pane.buffer.get_end_iter())
+        self.pane.render()
+        start, end, widget, tag = self.pane.callout_widgets[0]
+        self.assertTrue(widget.get_visible())
+        labels = [item.get_text() for item in self.descendants(widget) if isinstance(item, Gtk.Label)]
+        self.assertIn('Remember', labels)
+        self.assertTrue(any('Keep the source intact.' in text for text in labels))
+        self.pane.buffer.place_cursor(self.pane.buffer.get_iter_at_offset(start + 3))
+        self.pane.render()
+        self.assertFalse(widget.get_visible())
+        self.assertEqual(self.pane.text(), source)
+
+    def test_reading_lists_keep_markers_numbering_and_source(self):
+        source = '3. Third\n   - Nested\n4. Fourth\n\n- Bullet\n'
+        self.pane.buffer.set_text(source)
+        self.pane.set_mode('reading')
+        widgets = list(self.descendants(self.pane.reading.body))
+        labels = [widget.get_text() for widget in widgets if isinstance(widget, Gtk.Label)]
+        for text in ('3.', '4.', 'Third', 'Nested', 'Fourth', 'Bullet'):
+            self.assertIn(text, labels)
+        self.assertEqual(labels.count('•'), 2)
+        self.assertEqual(self.pane.text(), source)
+        self.pane.undo()
+        self.assertNotEqual(self.pane.text(), source)
+
     def test_tables_callouts_footnotes_math_and_note_embeds_render(self):
         (self.root / 'Child.md').write_text('## Embedded heading\n\nEmbedded body.\n![[Note]]')
         self.window.vault.refresh()

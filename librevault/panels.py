@@ -83,9 +83,18 @@ class SlidingPanel(Gtk.Revealer):
         # even when fully open. Let the dock use the available space instead,
         # so entries shrink and scrolled lists scroll on small windows.
         child = self.get_child()
+        if self.get_realized():
+            # The revealer's bin window also retains the natural-width slide
+            # offset. Resize and align it after GTK's default allocation.
+            child.get_parent_window().move_resize(0, 0, allocation.width, allocation.height)
         child_allocation = child.get_allocation()
         if (child_allocation.width != allocation.width
                 or child_allocation.height != allocation.height):
+            # Slide-right revealers right-align an oversized natural child.
+            # Reset that offset when constraining its width, or the leading
+            # edge remains outside the panel after a window resize.
+            child_allocation.x = 0
+            child_allocation.y = 0
             child_allocation.width = allocation.width
             child_allocation.height = allocation.height
             child.size_allocate(child_allocation)
