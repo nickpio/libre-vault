@@ -113,7 +113,7 @@ frame.command-palette > border { border: none; }
 scrolledwindow, viewport { border: none; box-shadow: none; background: transparent; }
 scrolledwindow undershoot, scrolledwindow overshoot { background: none; box-shadow: none; }
 paned > separator { background: transparent; min-width: 1px; min-height: 1px; border: none; }
-.workspace-split > separator { background: transparent; min-width: 5px; }
+.workspace-split > separator { background: @panel; min-width: 5px; }
 notebook, notebook > stack { background: @canvas; border: none; box-shadow: none; }
 notebook > header { border: none; box-shadow: none; background: @panel; border-bottom: 1px solid @edge; padding: 4px 8px 0; }
 notebook > header tabs { border: none; }
