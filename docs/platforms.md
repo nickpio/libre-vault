@@ -45,6 +45,17 @@ If `import gi` fails, check that `python3` is the interpreter used by Homebrew's
 See [PyGObject setup](https://pygobject.gnome.org/getting_started.html).
 The existing application shortcuts use Control, including on macOS.
 
+The main window uses the native macOS title bar and traffic-light window
+controls. Application actions remain in a toolbar immediately below it, without
+duplicate GTK window controls. Linux and Windows keep the GTK header bar.
+
+On macOS, Libre Vault defaults to standard scrollbars instead of GTK's fading
+overlay indicators. This avoids the overlay fade callback path that can emit
+`GTK_IS_WIDGET` / `GDK_IS_WINDOW` critical warnings after a scrollable view is
+rebuilt or closed. Explicit `GTK_OVERLAY_SCROLLING` values are preserved; set
+`GTK_OVERLAY_SCROLLING=1` before launch to opt back into overlay scrollbars.
+Linux and Windows scrollbar defaults are unchanged.
+
 Source startup adds installed Homebrew resource directories to `XDG_DATA_DIRS`
 before loading GTK, preserving existing entries. This lets GTK find icon themes
 and compiled GSettings schemas from both `./run.sh` and `python -m librevault`,

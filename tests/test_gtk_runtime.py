@@ -6,12 +6,69 @@ import subprocess
 import sys
 from tempfile import TemporaryDirectory
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
-from librevault.gtk_runtime import configure_data_dirs, require_gtk_schemas
+from librevault.gtk_runtime import (configure_data_dirs, configure_scrollbars,
+                                   install_window_header, require_gtk_schemas)
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_macos_keeps_native_titlebar_and_moves_actions_into_content(self):
+        window, header, content = Mock(), Mock(), Mock()
+        with patch('sys.platform', 'darwin'):
+            install_window_header(window, header, content)
+        header.set_show_close_button.assert_called_once_with(False)
+        content.pack_start.assert_called_once_with(header, False, False, 0)
+        window.set_titlebar.assert_not_called()
+
+    def test_other_platforms_keep_gtk_titlebar(self):
+        for platform in ('linux', 'win32'):
+            with self.subTest(platform=platform), patch('sys.platform', platform):
+                window, header, content = Mock(), Mock(), Mock()
+                install_window_header(window, header, content)
+                header.set_show_close_button.assert_called_once_with(True)
+                window.set_titlebar.assert_called_once_with(header)
+                content.pack_start.assert_not_called()
+
+    def test_macos_defaults_to_standard_scrollbars_in_source_and_frozen_builds(self):
+        for frozen in (False, True):
+            with self.subTest(frozen=frozen), patch('sys.platform', 'darwin'), \
+                    patch.object(sys, 'frozen', frozen, create=True), \
+                    patch.dict(os.environ, {}, clear=True):
+                configure_scrollbars()
+                self.assertEqual(os.environ['GTK_OVERLAY_SCROLLING'], '0')
+
+    def test_scrollbar_default_preserves_explicit_overrides(self):
+        for value in ('0', '1'):
+            with self.subTest(value=value), patch('sys.platform', 'darwin'), \
+                    patch.dict(os.environ, {'GTK_OVERLAY_SCROLLING': value}, clear=True):
+                configure_scrollbars()
+                configure_scrollbars()
+                self.assertEqual(dict(os.environ), {'GTK_OVERLAY_SCROLLING': value})
+
+    def test_other_platforms_keep_scrollbar_defaults(self):
+        for platform in ('linux', 'win32'):
+            with self.subTest(platform=platform), patch('sys.platform', platform), \
+                    patch.dict(os.environ, {}, clear=True):
+                configure_scrollbars()
+                self.assertNotIn('GTK_OVERLAY_SCROLLING', os.environ)
+
+    def test_package_import_configures_scrollbars_before_gtk(self):
+        code = '''
+import os
+import sys
+sys.platform = 'darwin'
+import librevault
+assert 'gi.repository.Gtk' not in sys.modules
+print(os.environ['GTK_OVERLAY_SCROLLING'])
+'''
+        env = dict(os.environ)
+        env.pop('GTK_OVERLAY_SCROLLING', None)
+        result = subprocess.run([sys.executable, '-c', code], env=env,
+                                text=True, capture_output=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), '0')
+
     def test_macos_preserves_overrides_and_adds_framework_homebrew_prefix(self):
         with TemporaryDirectory() as directory:
             prefix = Path(directory)

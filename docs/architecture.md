@@ -87,6 +87,7 @@ saved = vault.save(note, '# Revised plan\n')
 | `librevault/filetree.py` | Pure folder-first traversal of visible note paths and folders, respecting collapsed folders |
 | `librevault/commands.py` | Searchable command palette overlay and grouped keybind cheatsheet dialog |
 | `librevault/settings.py` | Category-based appearance/editor settings dialog, live controls, and save-error feedback |
+| `librevault/plugins.py` | Opt-in app-local Python plugin loading, window-scoped commands, editor API, and cleanup/error isolation |
 | `librevault/preferences.py` | Preference defaults, configuration validation, and atomic storage outside the vault |
 | `librevault/appearance.py` | Shared dark/light theme colors and generated typography styles |
 | `librevault/panels.py` | Native sidebar reveal transitions synchronized with splitters and saved panel widths |

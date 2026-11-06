@@ -33,7 +33,9 @@ from .commands import CommandPalette, KeybindCheatsheet, NoteNameDialog, Templat
 from .shortcuts import APP_SHORTCUTS, HotkeyStore, effective_shortcuts, validate_hotkey, shortcut_key, shortcut_id
 from .settings import SettingsDialog
 from .preferences import PreferencesStore
+from .plugins import PluginManager
 from .appearance import stylesheet
+from .gtk_runtime import install_window_header
 from .panels import SIDEBAR_DEFAULT_RATIO, SIDEBAR_MAX, SIDEBAR_OPEN_LIMIT, SlidingPanel, sidebar_widths
 from .tabs import WorkspaceTabs
 from .navigation import Location, NavigationHistory
@@ -261,6 +263,7 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
         self.converter_dialog = None
         self.preferences_store = PreferencesStore(preferences_path)
         self.preferences = self.preferences_store.load()
+        self.plugins = PluginManager(self, self.preferences_store.path.parent / 'plugins')
         self.hotkey_store = HotkeyStore(self.preferences_store.path)
         self.hotkeys = self.hotkey_store.load()
         from .vault_options import VaultOptionsStore
@@ -312,8 +315,6 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
         self.apply_preferences()
         Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), self.css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         header = Gtk.HeaderBar()
-        header.set_show_close_button(True)
-        self.set_titlebar(header)
         header.pack_start(self.brand)
         self.location_label = Gtk.Label(label='Local workspace')
         self.location_label.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
@@ -343,6 +344,7 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
         self.add(self.overlay)
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.overlay.add(root)
+        install_window_header(self, header, root)
         self.workspace_stack = Gtk.Stack()
         self.workspace_stack.set_homogeneous(False)
         root.pack_start(self.workspace_stack, True, True, 0)
@@ -356,7 +358,7 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
         title = Gtk.Label(label='Welcome to Libre Vault')
         title.get_style_context().add_class('welcome-title')
         welcome.pack_start(title, False, False, 0)
-        description = Gtk.Label(label='Your notes stay in ordinary Markdown files.\nOpen a vault or an empty folder to begin.')
+        description = Gtk.Label(label='Open a vault or an empty folder to begin.')
         description.set_justify(Gtk.Justification.CENTER)
         description.set_line_wrap(True)
         description.set_max_width_chars(48)
@@ -600,6 +602,7 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
                     self.status.set_text(f'Last vault unavailable · {error}')
             if self.vault is None:
                 self.open_vault_button.grab_focus()
+        self.plugins.set_enabled(self.preferences.python_plugins)
 
     def icon_button(self, icon, tooltip, action):
         button = Gtk.Button.new_from_icon_name(icon, Gtk.IconSize.MENU)
@@ -611,6 +614,7 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
 
     def cleanup(self, *_):
         self.closed = True
+        self.plugins.set_enabled(False)
         self.worker.close()
         self.cancel_file_render()
         for name in ('_sidebar_fit_source', '_sidebar_ratios_source'):
@@ -2128,6 +2132,18 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
             if isinstance(window, Window):
                 window.preferences = preferences
                 window.apply_preferences()
+                window.plugins.set_enabled(preferences.python_plugins)
+                if window.palette is not None:
+                    window.palette.destroy()
+                if window.settings_dialog is not None:
+                    window.settings_dialog.sync_controls()
+
+    def reload_plugins(self, *_):
+        for window in self.get_application().get_windows():
+            if isinstance(window, Window):
+                if window.palette is not None:
+                    window.palette.destroy()
+                window.plugins.reload()
                 if window.settings_dialog is not None:
                     window.settings_dialog.sync_controls()
 

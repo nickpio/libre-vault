@@ -49,7 +49,7 @@ class SettingsDialog(Gtk.Dialog):
         layout.pack_start(navigation, False, False, 0)
         self.stack = Gtk.Stack()
         layout.pack_start(self.stack, True, True, 0)
-        appearance = self.page('Appearance', 'Make Libre Vault feel like your workspace.')
+        appearance = self.page('Appearance')
         self.combo(appearance, 'theme', 'Base theme', 'Choose Dark, Light, or Lights Out with pure-black backgrounds and high-contrast text.')
         self.spin(appearance, 'interface_size', 'Interface font size', 'Size of text in menus and controls.', 'pt')
         self.font_combo(appearance, 'editor_font', 'Text font',
@@ -59,24 +59,41 @@ class SettingsDialog(Gtk.Dialog):
         preview.get_style_context().add_class('editor-preview')
         preview.get_style_context().add_class('settings-preview')
         appearance.pack_start(preview, False, False, 16)
-        editor = self.page('Editor', 'Choose how notes behave while you write.')
+        editor = self.page('Editor')
         self.switch(editor, 'readable_length', 'Readable line length', 'Keep long lines in a centered writing column.')
         self.spin(editor, 'line_width', 'Writing column width', 'Maximum width when readable line length is enabled.', 'px')
         self.switch(editor, 'wrap_lines', 'Wrap long lines', 'Wrap text to the editor width instead of scrolling horizontally.')
         self.switch(editor, 'continue_lists', 'Continue lists on Enter', 'Continue bullets, numbers, and tasks. Enter on an empty item exits the list.')
         self.switch(editor, 'slash_commands', 'Slash commands', 'Type / at the start of a line, or after a space, to insert a heading, list, callout, or other block.')
         self.switch(editor, 'vim_mode', 'Vim keybindings', 'Edit with Normal, Insert, and Visual modes. Escape returns to Normal mode.')
-        notes = self.page('Notes', 'Choose where templates, daily notes, and unique notes are created.')
+        notes = self.page('Notes')
         self.entry(notes, 'templates_folder', 'Templates folder', 'Folder whose notes can be inserted as templates. Leave empty to use the vault root.')
         self.entry(notes, 'daily_notes_folder', 'Daily notes folder', 'Where the daily note for today is created. Leave empty to use the vault root.')
         self.entry(notes, 'daily_notes_format', 'Daily note date format', 'Moment-style tokens such as YYYY, MM, DD, ddd, and dddd. Slashes create folders.')
         self.entry(notes, 'daily_notes_template', 'Daily note template', 'Optional template note, for example Templates/Daily.md. Leave empty for a blank note.')
         self.entry(notes, 'unique_notes_folder', 'Unique notes folder', 'Where Zettelkasten notes are created. Leave empty to use the vault root.')
         self.entry(notes, 'unique_notes_format', 'Unique note format', 'Timestamp prefix, for example YYYYMMDDHHmm.')
+        plugins = self.page('Plugins', 'Run your own trusted Python scripts. This is an experimental API, not Obsidian plugin compatibility.')
+        self.switch(plugins, 'python_plugins', 'Enable trusted Python plugins',
+                    'Disabled by default. Plugins run without a sandbox and can read or change files, access the network, and execute programs with your permissions. Only install code you trust.')
+        location = Gtk.Label(label=f'Plugin folder: {owner.plugins.directory}', xalign=0)
+        location.set_line_wrap(True)
+        location.set_selectable(True)
+        plugins.pack_start(location, False, False, 8)
+        instructions = Gtk.Label(label='Place single .py files in this folder, then reload. All eligible scripts in this folder run when enabled, once per window. Vault folders are never scanned.', xalign=0)
+        instructions.set_line_wrap(True)
+        plugins.pack_start(instructions, False, False, 8)
+        self.plugin_reload = Gtk.Button(label='Reload Python plugins')
+        self.plugin_reload.connect('clicked', owner.reload_plugins)
+        plugins.pack_start(self.plugin_reload, False, False, 8)
+        self.plugin_status = Gtk.Label(xalign=0)
+        self.plugin_status.set_line_wrap(True)
+        self.plugin_status.set_selectable(True)
+        plugins.pack_start(self.plugin_status, False, False, 8)
         from .hotkeys_ui import add_hotkey_settings
         add_hotkey_settings(self)
         if owner.vault is not None:
-            vault_page = self.page('Vault', 'Filesystem and attachment settings for this vault.')
+            vault_page = self.page('Vault')
             self.vault_hidden = Gtk.CheckButton(label='Show hidden notes and folders')
             self.vault_hidden.set_active(owner.vault.options.show_hidden)
             self.vault_links = Gtk.CheckButton(label='Follow symbolic links inside the vault')
@@ -114,7 +131,7 @@ class SettingsDialog(Gtk.Dialog):
         self.show_all()
         self.categories.select_row(self.categories.get_row_at_index(0))
 
-    def page(self, title, description):
+    def page(self, title, description=None):
         row = Gtk.ListBoxRow()
         row.page_name = title
         row.add(Gtk.Label(label=title, xalign=0))
@@ -128,10 +145,11 @@ class SettingsDialog(Gtk.Dialog):
         heading = Gtk.Label(label=title, xalign=0)
         heading.get_style_context().add_class('settings-page-title')
         body.pack_start(heading, False, False, 0)
-        subtitle = Gtk.Label(label=description, xalign=0)
-        subtitle.set_line_wrap(True)
-        subtitle.get_style_context().add_class('settings-subtitle')
-        body.pack_start(subtitle, False, False, 8)
+        if description:
+            subtitle = Gtk.Label(label=description, xalign=0)
+            subtitle.set_line_wrap(True)
+            subtitle.get_style_context().add_class('settings-subtitle')
+            body.pack_start(subtitle, False, False, 8)
         return body
 
     def select_category(self, _, row):
@@ -281,12 +299,29 @@ class SettingsDialog(Gtk.Dialog):
                 else:
                     control.set_active(value)
             self.controls['line_width'].set_sensitive(self.owner.preferences.readable_length)
+            self.plugin_reload.set_sensitive(self.owner.plugins.enabled)
+            loaded = ', '.join(self.owner.plugins.plugins) or 'None'
+            self.plugin_status.set_text('\n'.join([f'Loaded plugins: {loaded}', *self.owner.plugins.errors]))
         finally:
             self.updating = False
 
     def change(self, key, value):
         if self.updating:
             return
+        if key == 'python_plugins' and value and not self.owner.preferences.python_plugins:
+            dialog = Gtk.MessageDialog(transient_for=self, modal=True,
+                                       message_type=Gtk.MessageType.WARNING,
+                                       text='Allow trusted Python plugins to run?')
+            dialog.format_secondary_text('Every eligible script in the plugin folder will run with your permissions, now and on future launches. Plugins are not sandboxed. Only enable this if you trust all scripts in that folder.')
+            dialog.add_buttons('Cancel', Gtk.ResponseType.CANCEL, 'Enable plugins', Gtk.ResponseType.OK)
+            dialog.set_default_response(Gtk.ResponseType.CANCEL)
+            try:
+                accepted = dialog.run() == Gtk.ResponseType.OK
+            finally:
+                dialog.destroy()
+            if not accepted:
+                self.sync_controls()
+                return
         if key in STRINGS:
             normalized = normalize_string_setting(key, value)
             if normalized is None:

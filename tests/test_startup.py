@@ -97,6 +97,19 @@ class WelcomeTests(unittest.TestCase):
         wait_for_work(self.window)
         self.addCleanup(self.window.destroy)
 
+    def test_window_header_uses_platform_decorations(self):
+        header = self.window.location_label.get_ancestor(Gtk.HeaderBar)
+        self.assertIsNotNone(header)
+        if sys.platform == 'darwin':
+            self.assertIsNone(self.window.get_titlebar())
+            self.assertFalse(header.get_show_close_button())
+            root = self.window.workspace_stack.get_parent()
+            self.assertEqual(root.get_children()[0], header)
+        else:
+            self.assertEqual(self.window.get_titlebar(), header)
+            self.assertTrue(header.get_show_close_button())
+        self.assertTrue(self.window.get_decorated())
+
     def test_no_vault_has_welcome_and_no_filesystem_side_effects(self):
         self.assertIsNone(self.window.vault)
         self.assertIsNone(self.window.current())

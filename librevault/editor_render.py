@@ -76,7 +76,7 @@ class EditorRenderMixin:
         self.tags['metadata'].set_property('size-points', max(8, preferences.editor_size - 1))
         for name in ('quote', 'completed', 'metadata'):
             self.tags[name].set_property('foreground', colors['muted'])
-        self.tags['link'].set_property('foreground', colors['soft'])
+        self.tags['link'].set_property('foreground', colors['link'])
         self.tags['highlight'].set_property('background', colors['highlight_bg'])
         self.tags['highlight'].set_property('foreground', colors['highlight_fg'])
         self.tags['comment'].set_property('foreground', colors['muted'])

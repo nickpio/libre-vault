@@ -104,6 +104,7 @@ class Preferences:
     unique_notes_format: str = 'YYYYMMDDHHmm'
     slash_commands: bool = True
     vim_mode: bool = False
+    python_plugins: bool = False
 
     @classmethod
     def from_dict(cls, data):

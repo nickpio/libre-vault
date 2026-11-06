@@ -101,6 +101,9 @@ class CommandPalette(Gtk.EventBox):
                     ('Add next occurrence', note.add_next_occurrence),
                     ('Select all occurrences', note.select_all_occurrences),
                 ])
+        if owner.plugins.enabled:
+            actions.append(('Reload Python plugins', owner.reload_plugins))
+            actions.extend(owner.plugins.command_actions())
         for title, action in actions:
             row = Gtk.ListBoxRow()
             row.action, row.title = action, title

@@ -442,6 +442,7 @@ A separate process streams indexed note text and metadata for search and color m
 
 - [Data and storage](docs/data-and-storage.md): file locations, autosave, and recovery.
 - [Architecture](docs/architecture.md): components, design decisions, and implementation details.
+- [Python plugins](docs/plugins.md): opt-in custom scripts, command API, and a timestamp example.
 - [Compatibility target](docs/compatibility.md): feature coverage and acceptance gates.
 
 <p align="right"><a href="#top">back to top</a></p>
@@ -496,7 +497,8 @@ The full matrix and acceptance gates live in [**docs/compatibility.md**](docs/co
 - **Files.** Hidden notes and internal symbolic links are opt-in per vault. Symbolic-link cycles and targets outside the vault are excluded. `.git`, `.obsidian`, `.trash`, and `.librevault` remain excluded, including through symbolic links. Non-UTF-8 notes are left unchanged and report an error when opened.
 - **Scale.** Filesystem notifications update changed notes and subtrees without periodic full-vault reads, but initial indexing, explicit rescans, and multi-file organization still scan the vault. Large-vault latency has not been optimized.
 - **Moves.** Multi-file moves use revision checks and roll back after ordinary failures, but are not a crash-atomic transaction. Interrupted moves keep original rewritten-note bytes and a manifest under `.trash/.librevault-moves` for manual recovery.
-- **Out of scope.** Third-party plugins, hosted sync, mobile support, and published AppImage releases.
+- **Plugins.** Trusted custom Python scripts can add commands through an experimental, opt-in API. They run without a sandbox; only enable code you trust. See [Python plugins](docs/plugins.md).
+- **Out of scope.** Existing Obsidian plugins, hosted sync, mobile support, and published AppImage releases.
 
 </details>
 

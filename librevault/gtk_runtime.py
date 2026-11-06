@@ -1,7 +1,23 @@
-"""Locate macOS GTK data before GLib caches its resource search paths."""
+"""Configure macOS GTK defaults before loading the UI runtime."""
 import os
 from pathlib import Path
 import sys
+
+
+def install_window_header(window, header, content):
+    """Keep native macOS decorations and place app actions below the title bar."""
+    if sys.platform == 'darwin':
+        header.set_show_close_button(False)
+        content.pack_start(header, False, False, 0)
+    else:
+        header.set_show_close_button(True)
+        window.set_titlebar(header)
+
+
+def configure_scrollbars():
+    """Avoid stale GTK overlay-indicator fade callbacks on macOS."""
+    if sys.platform == 'darwin':
+        os.environ.setdefault('GTK_OVERLAY_SCROLLING', '0')
 
 
 def configure_data_dirs():

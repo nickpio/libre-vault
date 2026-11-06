@@ -13,6 +13,7 @@
 @define-color focus_edge #505050;
 @define-color bright #eeeeee;
 @define-color soft #aaaaaa;
+@define-color link #8cc8ff;
 @define-color code_bg #1b1b1b;
 @define-color selection_bg #3a3a3a;
 @define-color panel_border #ffffff;
@@ -24,6 +25,7 @@ window, dialog {
     font-size: 10pt;
 }
 headerbar {
+    font-size: 11pt;
     background: @canvas;
     border: none;
     box-shadow: none;
@@ -34,7 +36,7 @@ headerbar .title { color: @bright; }
 spinbutton { color: @ink; background: @raised; border: 1px solid @edge; border-radius: 8px; }
 spinbutton entry { color: @ink; background: transparent; }
 .brand { padding: 0 8px; }
-.breadcrumb { color: @soft; font-size: 9pt; }
+.breadcrumb { color: @soft; font-size: 11pt; }
 button {
     background: @button_bg;
     color: @ink;
@@ -76,8 +78,7 @@ entry image { color: @muted; }
 .details-content { padding: 12px; }
 frame > border { border-color: @edge; }
 separator { background: @edge; min-height: 1px; border: none; }
-label link { color: @accent; }
-label link:visited { color: @soft; }
+label link, label link:visited { color: @link; }
 .link-preview-title { font-weight: bold; color: @bright; }
 .link-preview-body { color: @ink; }
 .vault-heading { padding: 0 0 6px; }
@@ -254,7 +255,7 @@ menu.explorer-menu > separator, menu.editor-menu > separator {
     border: none;
     background: @border;
 }
-.statusbar { background: @canvas; border: none; }
+.statusbar { background: @canvas; border: none; font-size: 11pt; }
 .settings-button { margin: 3px 4px 3px 8px; }
 .settings-heading { color: @muted; font-size: 9pt; margin: 0 12px 8px; }
 .settings-dialog { background: @canvas; color: @ink; }
@@ -269,7 +270,7 @@ menu.explorer-menu > separator, menu.editor-menu > separator {
 .settings-dialog switch { background: @selected; border: 1px solid @border; border-radius: 14px; }
 .settings-dialog switch:checked { background: @accent; }
 .settings-dialog switch slider { background: @raised; border: 1px solid @border; border-radius: 14px; min-width: 22px; min-height: 22px; }
-.status { padding: 5px 12px; color: @muted; font-size: 8pt; }
+.status { padding: 5px 12px; color: @muted; font-size: 11pt; }
 .status.save-error { color: @bright; font-weight: bold; }
 .bases-view { background: @canvas; }
 .bases-view treeview { background: @canvas; color: @ink; }

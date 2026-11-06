@@ -52,4 +52,4 @@ The compatibility specification starts with public documentation. These are docu
 
 Opening a vault must preserve its files. Unsupported syntax and properties must survive editing without an automatic format conversion. A cancelled close or failed save must retain the buffer. Rename operations must preserve link meaning and expose recoverable failures. Startup, search, and editing latency need explicit budgets and measurements on representative vaults.
 
-Exact parity requirements remain open for optional core plugins and proprietary services. Plugin execution is explicitly excluded, but data formats produced by commonly used plugins may require preservation fixtures.
+Exact parity requirements remain open for optional core plugins and proprietary services. Existing Obsidian plugin execution is excluded, but data formats produced by commonly used plugins may require preservation fixtures. Libre Vault has a separate, opt-in [Python plugin API](plugins.md) for trusted custom commands.

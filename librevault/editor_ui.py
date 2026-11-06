@@ -66,7 +66,7 @@ class NotePane(EditorRenderMixin, Gtk.Box):
             'em': self.buffer.create_tag(None, style=Pango.Style.ITALIC),
             'code': self.buffer.create_tag(None, family='monospace', background='#1b1b1b', size_points=10),
             'quote': self.buffer.create_tag(None, foreground='#aaaaaa', left_margin=18),
-            'link': self.buffer.create_tag(None, foreground='#cccccc', underline=Pango.Underline.SINGLE),
+            'link': self.buffer.create_tag(None, foreground='#8cc8ff', underline=Pango.Underline.SINGLE),
             'completed': self.buffer.create_tag(None, foreground='#999999', strikethrough=True),
             'metadata': self.buffer.create_tag(None, foreground='#888888', family='monospace', size_points=10),
             'highlight': self.buffer.create_tag(None, background='#5c4b16', foreground='#fff4cc'),

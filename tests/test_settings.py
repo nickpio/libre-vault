@@ -57,6 +57,17 @@ class SettingsTests(unittest.TestCase):
         self.dialog.response(Gtk.ResponseType.CLOSE)
         self.assertIsNone(self.window.settings_dialog)
 
+    def test_page_headers_only_keep_actionable_descriptions(self):
+        for title in ('Appearance', 'Editor', 'Notes', 'Vault', 'Plugins', 'Hotkeys'):
+            with self.subTest(page=title):
+                scroll = self.dialog.stack.get_child_by_name(title)
+                body = scroll.get_child().get_child()
+                children = body.get_children()
+                self.assertEqual(children[0].get_text(), title)
+                subtitles = [child for child in children
+                             if child.get_style_context().has_class('settings-subtitle')]
+                self.assertEqual(len(subtitles), int(title in ('Plugins', 'Hotkeys')))
+
     def test_appearance_applies_to_existing_and_new_notes_without_editing_source(self):
         pane = self.window.current()
         before = pane.text()
