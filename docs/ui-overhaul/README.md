@@ -18,7 +18,7 @@ New workspaces default to 12pt note text in a 680px writing column; stored prefe
 
 ## Validation
 
-The latest full validation ran 528 tests through the private Broadway display: 518 passed, one skipped for unavailable language fonts, and nine failed or errored. Eight failures/errors also occur in the unchanged base suite: three filesystem-monitor checks, trusted-plugin opt-in cancel, the launcher interpreter/dependency check, the narrow table dialog, case-sensitive attachment resolution on this case-insensitive filesystem, and the custom-font chooser. The ninth is an intermittent GTK hit-testing abort, reproduced with the same GTK byte-index error in one of five targeted runs on both the base and overhaul. The base additionally fails two compact-panel checks that this overhaul fixes.
+The final full validation ran 528 tests through the private Broadway display: 520 passed, one skipped for unavailable language fonts, and seven failed or errored. All seven also occur on the unchanged base: two filesystem-monitor checks, trusted-plugin opt-in cancel, the launcher interpreter/dependency check, the narrow table dialog, case-sensitive attachment resolution on this case-insensitive filesystem, and the custom-font chooser. Across earlier runs, a third filesystem-monitor failure and an intermittent GTK hit-testing abort also reproduced on the unchanged base. The hit-testing abort produced the same GTK byte-index error in one of five targeted runs on both the base and overhaul; it passed the final suite. The base additionally fails two compact-panel checks that this overhaul fixes.
 
 The 36 focused live-preview, reading-renderer, and hit-testing checks pass, as does the GUI smoke test. A regression verifies embedded callout notes survive repeated edits while preserving the document's preview budget. Native macOS and Linux X11 presentation still need platform validation; these captures validate actual GTK layout and painting on the headless Broadway backend.
 
@@ -28,8 +28,8 @@ Rounds: 2 completed; round 3 reviews the simplified callout header on the curren
 
 | Delegate | Round 1 | Round 2 | Round 3 |
 | --- | --- | --- | --- |
-| GPT Sol | 8.2/10 | 9.0/10 | pending |
-| Gemini 4 Argon | 8.1/10 | 9.3/10 | pending |
+| GPT Sol | 8.2/10 | 9.0/10 | 9.1/10 |
+| Gemini 4 Argon | 8.1/10 | 9.3/10 | 9.4/10 |
 | Grok 4.7 | 7.5/10 | 8.6/10 | pending |
 
 Round 1 feedback led to the compact details selector, clearer typography and text measure, consistent callouts, more useful command results, and preservation of custom fonts and dock controls. In round 2, GPT and Gemini approved the visuals; Grok flagged the callout glyph and arrow alignment. The glyph is removed, title padding is balanced, and the open arrow appears only on hover. GPT also found a callout embed budget bug, which is fixed and passed its focused recheck at 9.0/10.
