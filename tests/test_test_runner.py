@@ -1,6 +1,9 @@
 """Background test routing must never silently fall back to the active desktop."""
 import os
 from pathlib import Path
+import subprocess
+import sys
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -9,6 +12,22 @@ from scripts import test_runner
 
 
 class TestRunnerTests(unittest.TestCase):
+    def test_bootstrap_preserves_existing_sitecustomize(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            bootstrap, original = root / 'bootstrap', root / 'original'
+            bootstrap.mkdir()
+            original.mkdir()
+            (bootstrap / 'sitecustomize.py').write_text(test_runner.BOOTSTRAP)
+            (original / 'sitecustomize.py').write_text("import os\nos.environ['LV_SITE_TEST'] = 'loaded'\n")
+            env = dict(os.environ, PYTHONPATH=os.pathsep.join([str(bootstrap), str(original)]))
+            env.pop('LIBREVAULT_TEST_CLASS', None)
+            result = subprocess.run([sys.executable, '-c',
+                                     "import os; print(os.environ.get('LV_SITE_TEST'))"],
+                                    env=env, capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), 'loaded')
+
     def test_hyprland_routes_case_insensitive_test_identity_and_cleans_up(self):
         calls = []
         def run(command, **kwargs):
@@ -50,7 +69,8 @@ class TestRunnerTests(unittest.TestCase):
             self.assertNotIn('WAYLAND_DISPLAY', run.call_args.kwargs['env'])
 
     def test_unsupported_desktop_requires_explicit_foreground(self):
-        with patch.dict(os.environ, {'DISPLAY': ':0'}, clear=True), \
+        with patch.object(test_runner.sys, 'platform', 'linux'), \
+                patch.dict(os.environ, {'DISPLAY': ':0'}, clear=True), \
                 patch.object(test_runner.shutil, 'which', return_value=None), \
                 patch.object(test_runner.subprocess, 'run', return_value=SimpleNamespace(returncode=0)) as run:
             with self.assertRaises(SystemExit) as error:

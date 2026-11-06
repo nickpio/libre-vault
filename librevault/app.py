@@ -2694,6 +2694,11 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description='Open a local Markdown vault in Libre Vault.')
     parser.add_argument('vault', nargs='?', help='Path to a vault folder')
     args = parser.parse_args(argv)
+    from .gtk_runtime import require_gtk_schemas
+    try:
+        require_gtk_schemas()
+    except RuntimeError as error:
+        parser.exit(1, f'Libre Vault: {error}\n')
     app = Gtk.Application(application_id='org.librevault.Prototype', flags=Gio.ApplicationFlags.HANDLES_OPEN)
     app.connect('activate', lambda app: Window(app).present())
     def open_folders(app, files, count, hint):

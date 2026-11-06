@@ -27,7 +27,7 @@ introspection bindings in the same environment.
 Install [Homebrew](https://brew.sh/), then install GTK 3 and PyGObject:
 
 ```sh
-brew install pygobject3 gtk+3 adwaita-icon-theme
+brew install pygobject3 gtk+3 adwaita-icon-theme hicolor-icon-theme
 ```
 
 Use the Homebrew Python version that `pygobject3` depends on. Create a virtual
@@ -44,6 +44,19 @@ If `import gi` fails, check that `python3` is the interpreter used by Homebrew's
 `pygobject3`, rather than an Apple, pyenv, or unrelated Python installation.
 See [PyGObject setup](https://pygobject.gnome.org/getting_started.html).
 The existing application shortcuts use Control, including on macOS.
+
+Source startup adds installed Homebrew resource directories to `XDG_DATA_DIRS`
+before loading GTK, preserving existing entries. This lets GTK find icon themes
+and compiled GSettings schemas from both `./run.sh` and `python -m librevault`,
+including virtual environments. Frozen builds keep their bundled resource paths.
+If startup reports missing GTK schemas, repair the Homebrew runtime data:
+
+```sh
+brew reinstall gtk+3 adwaita-icon-theme hicolor-icon-theme
+glib-compile-schemas "$(brew --prefix)/share/glib-2.0/schemas"
+```
+
+Restart the application after repairing resources; GLib caches its search paths.
 
 ## Storage and durability
 

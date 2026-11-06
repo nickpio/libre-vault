@@ -39,7 +39,7 @@ class LauncherTests(unittest.TestCase):
             for args in ([], ['vault with spaces']):
                 subprocess.run([str(ROOT / 'run.sh'), *args], cwd=caller, env=env, check=True)
                 data = json.loads(capture.read_text())
-                self.assertEqual(data['cwd'], str(caller))
+                self.assertEqual(Path(data['cwd']).resolve(), caller.resolve())
                 self.assertEqual(data['args'], ['-m', 'librevault', *args])
                 self.assertEqual(data['path'].split(os.pathsep)[0], str(ROOT))
 

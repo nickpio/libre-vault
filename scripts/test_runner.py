@@ -13,6 +13,16 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKSPACE = 'librevault-tests'
 DEFAULT_TESTS = ['discover', '-s', 'tests', '-p', 'test_*.py', '-v']
 BOOTSTRAP = '''import os
+import sys
+from pathlib import Path
+from importlib.machinery import PathFinder
+# Preserve the interpreter's sitecustomize (Homebrew adds its packages there).
+paths = [p for p in sys.path if Path(p).resolve() != Path(__file__).resolve().parent]
+original = PathFinder.find_spec('sitecustomize', paths)
+if original is not None and original.loader is not None:
+    code = original.loader.get_code('sitecustomize')
+    if code is not None:
+        exec(code, dict(__name__='sitecustomize', __file__=original.origin))
 if os.environ.get('LIBREVAULT_TEST_CLASS'):
     import gi
     gi.require_version('Gtk', '3.0')
