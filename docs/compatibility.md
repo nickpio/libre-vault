@@ -42,11 +42,7 @@ The compatibility specification starts with public documentation. These are docu
 
 ## Milestones
 
-1. **Runnable storage prototype.** Open an example vault, edit notes, navigate links, search, and verify changes on disk. This is the current deliverable.
-2. **Compatibility evidence.** Create small fixtures covering syntax, filename collisions, case sensitivity, Unicode, links, embeds, and external changes. Run the same actions in a pinned Obsidian version and this app. Record differences and keep the fixture results machine-readable.
-3. **Daily editing.** Choose the final editor after testing live-preview interactions. Add link completion, attachments, structured properties, recovery history, rename with link updates, folders, and incremental indexing.
-4. **Core feature parity.** Implement the remaining target features with fixture-based acceptance checks, including graph, canvas, templates, daily notes, and full search behavior.
-5. **Linux release.** Package the app, inventory dependency licenses, document reproducible builds, measure large-vault behavior, and exercise recovery across interruptions and competing editors.
+See the [roadmap](roadmap.md) for implemented foundations and remaining compatibility and release work.
 
 ## First-version acceptance gates
 
