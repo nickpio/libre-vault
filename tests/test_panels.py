@@ -126,6 +126,35 @@ class PanelTests(unittest.TestCase):
         self.wait(300)
         self.assert_sidebar_contents_fit()
 
+    def test_outline_inset_keeps_panel_background_when_scrollbar_appears(self):
+        pane = self.window.current()
+        pane.buffer.set_text('\n\n'.join(f'# Heading {index}' for index in range(12)))
+        self.window.update_context()
+        self.wait(150)
+        scroll = self.window.details_scroll
+        viewport = scroll.get_child()
+        found, color = self.window.context.get_style_context().lookup_color('panel')
+        self.assertTrue(found)
+        expected = tuple(round(channel * 255) for channel in (color.red, color.green, color.blue))
+
+        for height, scrollable in ((900, False), (480, True), (900, False)):
+            with self.subTest(height=height):
+                self.window.resize(1000, height)
+                self.wait(200)
+                adjustment = scroll.get_vadjustment()
+                self.assertEqual(adjustment.get_upper() > adjustment.get_page_size(), scrollable)
+                adjustment.set_value(0)
+                self.wait(50)
+                # Capture the native viewport, including the 12px inset that
+                # used to turn black when its contents needed scrolling.
+                width, height = viewport.get_allocated_width(), viewport.get_allocated_height()
+                pixels = Gdk.pixbuf_get_from_window(viewport.get_window(), 0, 0, width, height)
+                self.assertIsNotNone(pixels)
+                data = pixels.get_pixels()
+                for x, y in ((6, 6), (6, height // 2)):
+                    offset = y * pixels.get_rowstride() + x * pixels.get_n_channels()
+                    self.assertEqual(tuple(data[offset:offset + 3]), expected)
+
     def test_file_tree_scrolls_to_last_note_in_a_short_window(self):
         from librevault.bookmarks import Bookmark
         root = self.window.vault.root

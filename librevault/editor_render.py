@@ -432,8 +432,8 @@ class EditorRenderMixin:
             label.get_style_context().add_class('live-table-heading')
             self.wrap_table_label(label)
             grid.table_columns[column].append(label)
-            grid.attach(label, column, 0, 1, 1)
-        for row_index, row in enumerate(shown, 1):
+            grid.attach(label, column, 1, 1, 1)
+        for row_index, row in enumerate(shown, 2):
             for column, cell in enumerate(row):
                 alignment = table.alignments[column] if column < len(table.alignments) else 'left'
                 label = Gtk.Label(label=self.cell_label(cell), xalign=self.cell_xalign(alignment))
@@ -443,10 +443,12 @@ class EditorRenderMixin:
         if len(table.rows) > len(shown):
             more = Gtk.Label(label=f'{len(table.rows) - len(shown)} more rows', xalign=0)
             more.get_style_context().add_class('muted')
-            grid.attach(more, 0, len(shown) + 1, max(len(table.headers), 1), 1)
+            grid.attach(more, 0, len(shown) + 2, max(len(table.headers), 1), 1)
         edit = Gtk.Button(label='Edit table…')
+        edit.set_halign(Gtk.Align.END)
+        edit.get_style_context().add_class('live-table-edit')
         edit.connect('clicked', lambda _: self.edit_preview_table(table.start))
-        grid.attach(edit, 0, len(shown) + 2, max(len(table.headers), 1), 1)
+        grid.attach(edit, 0, 0, max(len(table.headers), 1), 1)
         self.size_table_preview(grid)
         return grid
 

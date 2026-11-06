@@ -72,6 +72,8 @@ entry {
 entry:focus { border-color: @focus_edge; }
 entry image { color: @muted; }
 .sidebar { background: @panel; }
+/* Paint the inset too: GtkContainer border spacing can expose black when scrolled. */
+.details-content { padding: 12px; }
 frame > border { border-color: @edge; }
 separator { background: @edge; min-height: 1px; border: none; }
 label link { color: @accent; }
@@ -283,6 +285,7 @@ scrollbar slider { background: @border; min-width: 5px; min-height: 5px; border:
 scrollbar slider:hover { background: @focus_edge; }
 .live-table { background: @raised; border: 1px solid @edge; border-radius: 8px; padding: 8px 10px; }
 .live-table-heading { font-weight: bold; color: @bright; }
+button.live-table-edit { padding: 2px 6px; min-width: 0; min-height: 0; font-size: 9pt; }
 .live-embed { background: @raised; border-radius: 8px; }
 .live-embed-title { font-weight: bold; color: @bright; }
 .math-preview { color: @bright; }

@@ -505,8 +505,8 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
         self.editor_split = self.workspace_layout
         center.pack1(self.workspace_layout, True, False)
         self.context = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
-        self.context.set_border_width(12)
         self.context.get_style_context().add_class('sidebar')
+        self.context.get_style_context().add_class('details-content')
         self.details_scroll = scrolled(self.context)
         self.details_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         self.details_view = 'outline'
