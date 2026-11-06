@@ -7,6 +7,7 @@ from pathlib import PurePosixPath
 
 from gi.repository import Gdk, GLib, Gtk, Pango
 
+from .appearance import font_size_pixels
 from .graph import graph_worker
 from .metadata import query_terms
 
@@ -339,7 +340,7 @@ class GraphView(Gtk.Box):
                         cr.line_to(tip_x, tip_y)
             cr.stroke()
         labels = 0
-        cr.set_font_size(12)
+        cr.set_font_size(font_size_pixels(self))
         for i, (x, y) in enumerate(points):
             if not (-60 < x < width+60 and -20 < y < height+20):
                 continue

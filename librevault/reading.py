@@ -17,6 +17,7 @@ from .appearance import PALETTES
 from .formatting import enable_safe_html, obsidian_comment_ranges
 from .math_render import render_math_png
 from .mermaid import render_mermaid
+from .preferences import MIN_FONT_SIZE
 from .navigation_ui import LinkPreview, note_link_from_uri
 from .syntax import code_markup
 from .vault import VaultError, fingerprint, wiki_rule
@@ -672,7 +673,7 @@ class ReadingView(Gtk.ScrolledWindow):
                 opening.append(value)
                 closing.append(tag)
             elif kind == 'html_close':
-                tag = 'span' if token.tag in ('mark', 'kbd') else token.tag
+                tag = 'span' if token.tag in ('mark', 'kbd', 'sub', 'sup') else token.tag
                 if closing and closing[-1] == tag:
                     pieces.append('</' + closing.pop() + '>')
                     opening.pop()
@@ -745,22 +746,27 @@ class ReadingView(Gtk.ScrolledWindow):
             if self.pane.window.preferences.theme == 'light':
                 return '<span background="#ffe08a" foreground="#1a1400">', 'span'
             return f'<span background="#6b5420" foreground="{colors["bright"]}">', 'span'
+        if tag in ('sub', 'sup'):
+            size = round(max(MIN_FONT_SIZE, self.pane.window.preferences.editor_size * 0.8) * Pango.SCALE)
+            rise = -3500 if tag == 'sub' else 5000
+            return f'<span rise="{rise}" size="{size}">', 'span'
         if tag == 'kbd':
             return (f'<span font_family="monospace" background="{colors["code_bg"]}" '
                     f'foreground="{colors["ink"]}">', 'span')
         return f'<{tag}>', tag
 
     def _append_footnote(self, pieces, pending, context, key):
+        superscript, _ = self._html_markup('sup')
         if context is None:
-            pieces.append('<sup>[' + GLib.markup_escape_text(key) + ']</sup>')
+            pieces.append(superscript + '[' + GLib.markup_escape_text(key) + ']</span>')
             return
         if key not in context['definitions']:
             context['definitions'][key] = 'Missing footnote.'
             context['order'].append(key)
         definition = context['definitions'][key]
         href = 'footnote:' + quote(context['prefix'] + ':' + key, safe='')
-        pieces.append('<a href="' + GLib.markup_escape_text(href) + '"><sup>['
-                      + GLib.markup_escape_text(key) + ']</sup></a>')
+        pieces.append('<a href="' + GLib.markup_escape_text(href) + '">' + superscript + '['
+                      + GLib.markup_escape_text(key) + ']</span></a>')
         pending.append((key, definition))
 
     def _add_inline_footnote(self, context, text):

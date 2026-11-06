@@ -18,11 +18,14 @@
 @define-color selection_bg #3a3a3a;
 @define-color panel_border #ffffff;
 
+/* Keep theme-provided small labels from shrinking below the app font size. */
+* { font-size: inherit; }
+
 window, dialog {
     background: @canvas;
     color: @ink;
     font-family: "Inter", "Cantarell", sans-serif;
-    font-size: 10pt;
+    font-size: 11pt;
 }
 headerbar {
     font-size: 11pt;
@@ -82,19 +85,19 @@ label link, label link:visited { color: @link; }
 .link-preview-title { font-weight: bold; color: @bright; }
 .link-preview-body { color: @ink; }
 .vault-heading { padding: 0 0 6px; }
-.vault-title { color: @bright; font-size: 9pt; font-weight: bold; padding-left: 5px; }
-.caption { color: @muted; font-size: 9pt; font-weight: normal; padding: 20px 8px 8px; }
+.vault-title { color: @bright; font-size: 11pt; font-weight: bold; padding-left: 5px; }
+.caption { color: @muted; font-size: 11pt; font-weight: normal; padding: 20px 8px 8px; }
 list, list row { background: transparent; color: @ink; }
 .note-list row { border-radius: 8px; margin: 2px 0; padding: 9px 10px; }
 .note-list row.tree-row { margin: 0; padding: 5px 6px; border-radius: 5px; }
 .tree-folder { font-weight: bold; color: @bright; }
 list row:hover { background: @hover; }
 list row:selected { background: @selected; color: @bright; }
-.note-folder { color: @muted; font-size: 8pt; }
+.note-folder { color: @muted; font-size: 11pt; }
 .muted { color: @muted; }
 .welcome-title { color: @bright; font-size: 22pt; font-weight: bold; }
 .welcome-open { padding: 10px 24px; }
-.welcome-hint { color: @muted; font-size: 9pt; }
+.welcome-hint { color: @muted; font-size: 11pt; }
 button.sidebar-command {
     background: transparent;
     border: 1px solid transparent;
@@ -102,7 +105,7 @@ button.sidebar-command {
     padding: 8px;
 }
 button.sidebar-command:hover { background: @hover; border-color: transparent; }
-.sidebar-command-label { color: @muted; font-size: 9pt; }
+.sidebar-command-label { color: @muted; font-size: 11pt; }
 .command-palette-backdrop { background: alpha(#000000, 0.24); }
 frame.command-palette {
     background: @canvas;
@@ -112,16 +115,16 @@ frame.command-palette {
                 0 6px 20px alpha(#000000, 0.35);
 }
 frame.command-palette > border { border: none; }
-.palette-label { color: @muted; font-size: 9pt; margin: 2px 4px 4px; }
+.palette-label { color: @muted; font-size: 11pt; margin: 2px 4px 4px; }
 .command-results row { border-radius: 6px; padding: 8px 10px; }
 .command-results row:selected { background: @selected; }
-.palette-hint { color: @muted; font-size: 8pt; margin: 6px 4px 2px; }
-.keybind-heading { color: @muted; font-size: 9pt; padding: 16px 10px 8px; }
+.palette-hint { color: @muted; font-size: 11pt; margin: 6px 4px 2px; }
+.keybind-heading { color: @muted; font-size: 11pt; padding: 16px 10px 8px; }
 .keybind-cheatsheet, .keybind-content { background: @canvas; color: @ink; }
 .keybind-keys {
     color: @soft;
     font-family: monospace;
-    font-size: 9pt;
+    font-size: 11pt;
     background: @hover;
     border: 1px solid @edge;
     border-radius: 4px;
@@ -165,7 +168,7 @@ textview, textview text { background: @canvas; color: @ink; caret-color: @accent
     padding: 8px 10px;
 }
 .reading-code-header { padding-bottom: 4px; }
-.reading-code-badge { color: @soft; font-family: monospace; font-size: 9pt; }
+.reading-code-badge { color: @soft; font-family: monospace; font-size: 11pt; }
 .reading-code-body { font-family: monospace; }
 .callout { background: @raised; border: 1px solid @edge; border-left-width: 4px; border-radius: 8px; }
 .callout-note { border-left-color: #6f8fbf; }
@@ -207,9 +210,9 @@ checkbutton.task-checkbox check:checked { background: @accent; border-color: @ac
 checkbutton.task-checkbox:hover check { border-color: @bright; }
 checkbutton.task-checkbox:focus { outline: 1px solid @soft; outline-offset: 2px; }
 textview text selection { background: @selection_bg; color: @bright; }
-button.details-view-button { padding: 3px 8px; min-width: 0; font-size: 9pt; }
+button.details-view-button { padding: 3px 8px; min-width: 0; font-size: 11pt; }
 button.details-view-button:checked { background: @selection_bg; color: @bright; border-color: @focus_edge; }
-.context-link { background: transparent; border-color: transparent; padding: 8px; border-radius: 8px; font-size: 9pt; }
+.context-link { background: transparent; border-color: transparent; padding: 8px; border-radius: 8px; font-size: 11pt; }
 .context-link:hover { background: @hover; border-color: transparent; }
 button.outline-heading {
     color: @ink;
@@ -222,9 +225,9 @@ button.outline-heading {
 }
 button.outline-heading.outline-root { color: @bright; font-weight: bold; }
 button.outline-heading.current-heading { background: @selected; border-left-color: @accent; }
-.outline-empty { color: @muted; font-size: 9pt; padding: 6px 8px; }
+.outline-empty { color: @muted; font-size: 11pt; padding: 6px 8px; }
 .find-bar { background: @panel; border-bottom: 1px solid @edge; padding: 8px; }
-.find-bar .muted { font-size: 9pt; }
+.find-bar .muted { font-size: 11pt; }
 .find-bar button.match-case { padding: 4px 7px; }
 .find-bar button.match-case:checked { background: @selected; border-color: @accent; }
 window.popup { background: transparent; }
@@ -234,7 +237,7 @@ menu, popover {
     border: 1px solid @border;
     border-radius: 12px;
     padding: 5px;
-    font-size: 10pt;
+    font-size: 11pt;
 }
 menu menuitem { background: transparent; color: @ink; }
 menu menuitem:hover { background: @hover; color: @bright; }
@@ -257,13 +260,13 @@ menu.explorer-menu > separator, menu.editor-menu > separator {
 }
 .statusbar { background: @canvas; border: none; font-size: 11pt; }
 .settings-button { margin: 3px 4px 3px 8px; }
-.settings-heading { color: @muted; font-size: 9pt; margin: 0 12px 8px; }
+.settings-heading { color: @muted; font-size: 11pt; margin: 0 12px 8px; }
 .settings-dialog { background: @canvas; color: @ink; }
 .settings-navigation { background: @panel; border-right: 1px solid @edge; }
 .settings-categories row { padding: 9px 12px; margin: 2px 0; border-radius: 6px; }
 .settings-reset { margin-top: 20px; padding: 8px 10px; }
 .settings-page-title { font-size: 18pt; font-weight: bold; color: @bright; }
-.settings-subtitle, .settings-description { color: @muted; font-size: 9pt; }
+.settings-subtitle, .settings-description { color: @muted; font-size: 11pt; }
 .setting-row { padding: 15px 0; border-bottom: 1px solid @edge; }
 .settings-preview { background: @raised; border: 1px solid @edge; border-radius: 8px; padding: 20px; }
 .settings-error { color: @ink; padding: 8px 16px; }
@@ -279,14 +282,14 @@ menu.explorer-menu > separator, menu.editor-menu > separator {
 .slides-bar { background: @panel; border-top: 1px solid @edge; }
 .slides-counter { color: @soft; font-size: 11pt; }
 .bookmark-list row { border-radius: 6px; margin: 1px 0; padding: 4px 8px; }
-.bookmark-empty { color: @muted; font-size: 9pt; padding: 0 8px 8px; }
+.bookmark-empty { color: @muted; font-size: 11pt; padding: 0 8px 8px; }
 button.icon-button.bookmarked { color: @bright; }
 scrollbar { background: transparent; border: none; }
 scrollbar slider { background: @border; min-width: 5px; min-height: 5px; border: 2px solid transparent; border-radius: 8px; }
 scrollbar slider:hover { background: @focus_edge; }
 .live-table { background: @raised; border: 1px solid @edge; border-radius: 8px; padding: 8px 10px; }
 .live-table-heading { font-weight: bold; color: @bright; }
-button.live-table-edit { padding: 2px 6px; min-width: 0; min-height: 0; font-size: 9pt; }
+button.live-table-edit { padding: 2px 6px; min-width: 0; min-height: 0; font-size: 11pt; }
 .live-embed { background: @raised; border-radius: 8px; }
 .live-embed-title { font-weight: bold; color: @bright; }
 .math-preview { color: @bright; }

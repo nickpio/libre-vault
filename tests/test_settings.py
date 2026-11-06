@@ -57,6 +57,17 @@ class SettingsTests(unittest.TestCase):
         self.dialog.response(Gtk.ResponseType.CLOSE)
         self.assertIsNone(self.window.settings_dialog)
 
+    def test_small_editor_styles_and_font_controls_respect_minimum_size(self):
+        for field in ('interface_size', 'editor_size'):
+            self.assertEqual(self.dialog.controls[field].get_adjustment().get_lower(), 11)
+        pane = self.window.current()
+        for size in (11, 16):
+            self.dialog.controls['editor_size'].set_value(size)
+            for name in ('code', 'metadata', 'table', 'subscript', 'superscript'):
+                with self.subTest(size=size, tag=name):
+                    self.assertGreaterEqual(pane.tags[name].get_property('size-points'), 11)
+                    self.assertEqual(pane.tags[name].get_property('scale'), 1)
+
     def test_page_headers_only_keep_actionable_descriptions(self):
         for title in ('Appearance', 'Editor', 'Notes', 'Vault', 'Plugins', 'Hotkeys'):
             with self.subTest(page=title):

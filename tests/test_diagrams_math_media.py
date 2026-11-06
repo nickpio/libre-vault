@@ -295,7 +295,8 @@ class DiagramReadingTests(unittest.TestCase):
         rich = next(widget for widget in widgets
                     if isinstance(widget, Gtk.Label) and 'under' in widget.get_text())
         markup = rich.get_label()
-        self.assertIn('<sub>', markup)
+        self.assertIn('rise="-3500"', markup)
+        self.assertIn(f'size="{11 * 1024}"', markup)
         self.assertIn('<u>', markup)
         self.assertIn('background=', markup)
         self.assertIn('monospace', markup)

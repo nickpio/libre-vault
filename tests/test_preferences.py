@@ -1,16 +1,39 @@
 """Preference parsing and atomic storage require no GTK or note vault."""
 from dataclasses import replace
 import os
+import re
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
-from librevault.appearance import PALETTES, font_family_css, stylesheet
-from librevault.preferences import Preferences, PreferencesStore
+from librevault.appearance import PALETTES, font_family_css, font_size_pixels, stylesheet
+from librevault.preferences import BOUNDS, MIN_FONT_SIZE, Preferences, PreferencesStore
 
 
 class PreferenceTests(unittest.TestCase):
+    def test_font_sizes_have_an_eleven_point_minimum(self):
+        self.assertGreaterEqual(Preferences().interface_size, 11)
+        self.assertGreaterEqual(Preferences().editor_size, 11)
+        for field in ('interface_size', 'editor_size'):
+            self.assertEqual(BOUNDS[field][0], 11)
+            for old_size in (8, 9, 10):
+                with self.subTest(field=field, old_size=old_size):
+                    self.assertEqual(getattr(Preferences.from_dict({field: old_size}), field), 11)
+            self.assertEqual(getattr(Preferences.from_dict({field: 16}), field), 16)
+        source = (Path(__file__).resolve().parents[1] / 'librevault' / 'style.css').read_text()
+        rendered = stylesheet(source, replace(Preferences(), interface_size=8, editor_size=8))
+        sizes = re.findall(r'font-size:\s*([\d.]+)pt', rendered)
+        self.assertTrue(sizes)
+        self.assertTrue(all(float(size) >= MIN_FONT_SIZE for size in sizes))
+
+    def test_cairo_font_sizes_respect_the_minimum_at_screen_resolution(self):
+        widget = Mock()
+        for dpi in (-1, 72, 96, 144):
+            with self.subTest(dpi=dpi):
+                widget.get_screen.return_value.get_resolution.return_value = dpi
+                self.assertAlmostEqual(font_size_pixels(widget, 8), 11 * (dpi if dpi > 0 else 96) / 72)
+
     def test_missing_configuration_uses_defaults_without_creating_files(self):
         with TemporaryDirectory() as directory:
             store = PreferencesStore(Path(directory) / 'config' / 'settings.json')

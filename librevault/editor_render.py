@@ -9,6 +9,7 @@ from .attachments import local_path
 from .folding import compute_regions
 from .formatting import markdown_layout
 from .mermaid import render_mermaid
+from .preferences import MIN_FONT_SIZE
 from .reading import pixbuf_bytes, scaled_pixbuf
 from .syntax import TOKEN_STYLES
 from .vault import VaultError
@@ -72,8 +73,8 @@ class EditorRenderMixin:
         preferences = self.window.preferences
         colors = PALETTES[preferences.theme]
         self.tags['code'].set_property('background', colors['code_bg'])
-        self.tags['code'].set_property('size-points', max(8, preferences.editor_size - 1))
-        self.tags['metadata'].set_property('size-points', max(8, preferences.editor_size - 1))
+        self.tags['code'].set_property('size-points', max(MIN_FONT_SIZE, preferences.editor_size - 1))
+        self.tags['metadata'].set_property('size-points', max(MIN_FONT_SIZE, preferences.editor_size - 1))
         for name in ('quote', 'completed', 'metadata'):
             self.tags[name].set_property('foreground', colors['muted'])
         self.tags['link'].set_property('foreground', colors['link'])
@@ -91,10 +92,12 @@ class EditorRenderMixin:
         self.tags['kbd'].set_property('background', colors['code_bg'])
         self.tags['kbd'].set_property('foreground', colors['ink'])
         self.tags['callout'].set_property('foreground', colors['bright'])
-        self.tags['table'].set_property('size-points', max(8, preferences.editor_size - 1))
+        self.tags['table'].set_property('size-points', max(MIN_FONT_SIZE, preferences.editor_size - 1))
         self.tags['math'].set_property('foreground', colors['bright'])
+        for name in ('subscript', 'superscript'):
+            self.tags[name].set_property('size-points', max(MIN_FONT_SIZE, preferences.editor_size * 0.8))
         for level, size in enumerate((25, 21, 18, 16, 14, 12), 1):
-            self.tags[f'h{level}'].set_property('size-points', size * preferences.editor_size / 11)
+            self.tags[f'h{level}'].set_property('size-points', size * max(MIN_FONT_SIZE, preferences.editor_size) / 11)
             self.tags[f'h{level}'].set_property('foreground', colors['bright'])
         self.editor.set_wrap_mode(Gtk.WrapMode.WORD_CHAR if preferences.wrap_lines else Gtk.WrapMode.NONE)
         self.size_editor(self.editor, self.editor.get_allocation())

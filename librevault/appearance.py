@@ -1,7 +1,7 @@
 """Theme colors and typography shared by GTK CSS and Markdown text tags."""
 import re
 
-from .preferences import normalize_editor_font
+from .preferences import MIN_FONT_SIZE, normalize_editor_font
 
 
 PALETTES = {
@@ -93,11 +93,17 @@ def stylesheet(source, preferences):
                     lambda match: f'@define-color {match[1]} {colors[match[1]]};', source)
     family = font_family_css(preferences.editor_font)
     return source + f'''
-window, dialog {{ font-size: {preferences.interface_size}pt; }}
+window, dialog {{ font-size: {max(MIN_FONT_SIZE, preferences.interface_size)}pt; }}
 textview.live-editor, .editor-preview {{
     font-family: {family};
-    font-size: {preferences.editor_size}pt;
+    font-size: {max(MIN_FONT_SIZE, preferences.editor_size)}pt;
 }}
 .reading-view {{ font-family: {family}; }}
-.list-marker {{ font-family: {family}; font-size: {preferences.editor_size}pt; }}
+.list-marker {{ font-family: {family}; font-size: {max(MIN_FONT_SIZE, preferences.editor_size)}pt; }}
 '''
+
+
+def font_size_pixels(widget, points=MIN_FONT_SIZE):
+    """Convert the minimum readable point size for Cairo's pixel-based text."""
+    dpi = widget.get_screen().get_resolution()
+    return max(MIN_FONT_SIZE, points) * (dpi if dpi > 0 else 96) / 72

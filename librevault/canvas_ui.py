@@ -7,6 +7,7 @@ import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gdk, GLib, Gtk, Pango
 
+from .appearance import font_size_pixels
 from .canvas import (
     SIDES, CanvasFile, add_edge, add_node, move_node, remove_edge, remove_node, resize_node, update_edge, update_node,
 )
@@ -728,7 +729,7 @@ class CanvasView(Gtk.Box):
             if edge.label:
                 mid = points[len(points) // 2]
                 cr.set_source_rgba(*ink, 0.9)
-                cr.set_font_size(12)
+                cr.set_font_size(font_size_pixels(self))
                 cr.move_to(mid[0] + 6, mid[1] - 6)
                 cr.show_text(edge.label[:80])
         if self.drag and self.drag['kind'] == 'connect':
@@ -795,8 +796,9 @@ class CanvasView(Gtk.Box):
         cr.save()
         cr.rectangle(x, y, max(1, width), max(1, height))
         cr.clip()
-        cr.set_font_size(13)
-        line_height = 17
+        font_size = font_size_pixels(self)
+        cr.set_font_size(font_size)
+        line_height = max(17, font_size * 1.3)
         lines = []
         for paragraph in str(text).split('\n') or ['']:
             current = ''
@@ -811,7 +813,7 @@ class CanvasView(Gtk.Box):
                     current = trial
             lines.append(current)
         for index, line in enumerate(lines):
-            baseline = y + 14 + index * line_height
+            baseline = y + font_size + index * line_height
             if baseline > y + height:
                 break
             cr.move_to(x, baseline)

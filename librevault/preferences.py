@@ -15,7 +15,8 @@ FONT_PRESETS = (('sans', 'Sans serif'), ('serif', 'Serif'), ('monospace', 'Monos
 FONT_PRESET_IDS = frozenset(item[0] for item in FONT_PRESETS)
 _FONT_EXTRA = set(' .+_-')
 _FONT_NAME_LIMIT = 120
-BOUNDS = {'interface_size': (8, 18), 'editor_size': (8, 32), 'line_width': (480, 1200)}
+MIN_FONT_SIZE = 11
+BOUNDS = {'interface_size': (MIN_FONT_SIZE, 18), 'editor_size': (MIN_FONT_SIZE, 32), 'line_width': (480, 1200)}
 STRINGS = frozenset({
     'templates_folder', 'daily_notes_folder', 'daily_notes_format', 'daily_notes_template',
     'unique_notes_folder', 'unique_notes_format',
@@ -89,9 +90,9 @@ def normalize_string_setting(key, value):
 @dataclass(frozen=True)
 class Preferences:
     theme: str = 'dark'
-    interface_size: int = 10
+    interface_size: int = MIN_FONT_SIZE
     editor_font: str = 'sans'
-    editor_size: int = 11
+    editor_size: int = MIN_FONT_SIZE
     readable_length: bool = True
     line_width: int = 780
     wrap_lines: bool = True
