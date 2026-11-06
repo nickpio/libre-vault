@@ -24,13 +24,13 @@ The 36 focused live-preview, reading-renderer, and hit-testing checks pass, as d
 
 ## Council review
 
-Rounds: 2 completed; round 3 reviews the simplified callout header on the current eight captures.
+Rounds: 3. All three reviewers rated the same final eight captures at least 9/10, explicitly confirmed satisfaction, and reported no material blockers. The reviewed implementation and images are at `1e7ec03`; subsequent commits update this review record only.
 
 | Delegate | Round 1 | Round 2 | Round 3 |
 | --- | --- | --- | --- |
 | GPT Sol | 8.2/10 | 9.0/10 | 9.1/10 |
 | Gemini 4 Argon | 8.1/10 | 9.3/10 | 9.4/10 |
-| Grok 4.7 | 7.5/10 | 8.6/10 | pending |
+| Grok 4.7 | 7.5/10 | 8.6/10 | 9.1/10 |
 
 Round 1 feedback led to the compact details selector, clearer typography and text measure, consistent callouts, more useful command results, and preservation of custom fonts and dock controls. In round 2, GPT and Gemini approved the visuals; Grok flagged the callout glyph and arrow alignment. The glyph is removed, title padding is balanced, and the open arrow appears only on hover. GPT also found a callout embed budget bug, which is fixed and passed its focused recheck at 9.0/10.
 
