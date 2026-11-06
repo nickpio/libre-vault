@@ -2342,9 +2342,21 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
         if self.settings_dialog is None:
             self.settings_dialog = SettingsDialog(self)
             self.settings_dialog.set_destroy_with_parent(True)
-            self.settings_dialog.connect('destroy', lambda *_: setattr(self, 'settings_dialog', None))
+            self.settings_dialog.connect('destroy', self.settings_closed)
         else:
             self.settings_dialog.present()
+        # Modal grabs can swallow the gear's leave event. Defer until after
+        # GtkButton's release handler, which would otherwise restore PRELIGHT.
+        GLib.idle_add(self.clear_settings_button_state)
+
+    def settings_closed(self, *_):
+        self.settings_dialog = None
+        GLib.idle_add(self.clear_settings_button_state)
+
+    def clear_settings_button_state(self):
+        if not self.closed:
+            self.settings_button.unset_state_flags(Gtk.StateFlags.PRELIGHT | Gtk.StateFlags.ACTIVE)
+        return False
 
     def show_command_palette(self):
         if self.palette is None:
