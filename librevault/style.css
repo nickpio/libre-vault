@@ -138,6 +138,7 @@ notebook.sidebar-dock > header tab {
     border-radius: 0;
     padding: 6px 10px;
     margin: 0;
+    border: none;
     border-bottom: 2px solid transparent;
 }
 notebook.sidebar-dock > header tab:checked { font-weight: bold; background: transparent; color: @accent; border-bottom-color: @accent; }
