@@ -9,7 +9,7 @@ from librevault.formatting import markdown_layout
 
 try:
     from librevault.app import GLib, Gtk, Window
-    from gi.repository import Gio
+    from gi.repository import Gio, Pango
     GTK_AVAILABLE = Gtk.init_check()[0]
 except (ImportError, ValueError):
     GTK_AVAILABLE = False
@@ -235,7 +235,7 @@ class WindowImprovementTests(unittest.TestCase):
         # Avoid a save prompt if a future test adds a vault switch.
         pane.dirty = False
 
-    def test_outline_hierarchy_wraps_long_titles_and_tracks_cursor_without_rebuild(self):
+    def test_outline_hierarchy_ellipsizes_long_titles_and_tracks_cursor_without_rebuild(self):
         pane = self.window.current()
         long_title = 'A detailed heading that should remain fully readable in a narrow outline'
         text = ('Preface\n\n# Overview\n\nBody\n\n## First section\n\n### ' + long_title
@@ -246,7 +246,8 @@ class WindowImprovementTests(unittest.TestCase):
         self.assertEqual([button.get_margin_start() for _, button in rows], [0, 12, 24, 12, 24])
         long_button = rows[2][1]
         self.assertEqual(long_button.get_label(), long_title)
-        self.assertTrue(long_button.get_child().get_line_wrap())
+        self.assertFalse(long_button.get_child().get_line_wrap())
+        self.assertEqual(long_button.get_child().get_ellipsize(), Pango.EllipsizeMode.END)
         self.assertEqual(long_button.get_tooltip_text(), long_title)
         self.assertTrue(rows[0][1].get_style_context().has_class('outline-root'))
         with patch.object(self.window, 'update_context', wraps=self.window.update_context) as update:
