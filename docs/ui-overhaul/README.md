@@ -40,6 +40,12 @@ Shortcut labels now spell out Command, Option, Control, and Shift on macOS inste
 
 The follow-up passes 33 shortcut and panel tests through the isolated Broadway runner, including macOS modifier names in all three shortcut surfaces, other-platform formatting, search, and compact sidebar layout. An isolated GTK capture also verifies the rendered labels. The council gallery below records the screenshots reviewed before this follow-up.
 
+## Tags panel follow-up
+
+The Tags dock now uses the full available height with consistent outer padding, comfortable row spacing, aligned counts, and sidebar colors in all three themes. The old duplicate expander and 220px tree cap are removed. Long tags ellipsize with full-name tooltips; the rename action stays at the bottom and requires a selection. Empty vaults show “No tags yet.”
+
+All 19 targeted property/tag, panel, and dock-restoration tests pass through the private Broadway runner. Captures verify populated and empty panels, all three themes, and compact layout.
+
 ## Gallery
 
 ![Light workspace](workspace-light.png)

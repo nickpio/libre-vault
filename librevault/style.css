@@ -142,6 +142,14 @@ notebook.sidebar-dock > header tab {
     border-bottom: 2px solid transparent;
 }
 notebook.sidebar-dock > header tab:checked { font-weight: bold; background: transparent; color: @accent; border-bottom-color: @accent; }
+.tag-pane, .tag-pane scrolledwindow, .tag-pane viewport, .tag-pane treeview {
+    background: @panel;
+    color: @ink;
+}
+.tag-pane treeview:selected, .tag-pane treeview:selected:focus {
+    background: @selected;
+    color: @accent;
+}
 textview, textview text { background: @canvas; color: @ink; caret-color: @accent; border: none; box-shadow: none; }
 .reading-view, .reading-view viewport { background: @canvas; color: @ink; }
 .reading-table { padding: 8px 0; }

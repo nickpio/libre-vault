@@ -481,7 +481,6 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
             dock.get_style_context().add_class('sidebar-dock')
             dock.set_group_name('librevault-panels-' + str(id(self)))
         sidebar.remove(self.tag_pane)
-        self.tag_pane.set_expanded(True)
         for dock, child, title in [(self.left_dock, sidebar, 'Files'), (self.left_dock, self.tag_pane, 'Tags')]:
             child.dock_id = title.lower()
             dock.append_page(child, Gtk.Label(label=title))
