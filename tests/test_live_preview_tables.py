@@ -417,23 +417,45 @@ class LivePreviewTableGuiTests(unittest.TestCase):
         self.assertFalse(self.pane.buffer.get_iter_at_offset(note[0]).has_tag(self.pane.hidden))
         self.assertEqual(self.pane.text(), text)
 
-    def test_callout_widget_reveals_the_header_on_its_block(self):
+    def test_callout_card_reveals_its_original_header_and_body_for_editing(self):
         text = 'Intro\n> [!NOTE] Title\n> body\n'
         self.show(text, 0)
         self.assertEqual(len(self.pane.callout_widgets), 1)
         start, _end, widget, _tag = self.pane.callout_widgets[0]
         self.assertTrue(widget.get_visible())
-        self.assertIn('callout-note', widget.get_style_context().list_classes())
-        shown = [label.get_text() for label in self.labels(widget)]
-        self.assertIn('NOTE', shown)
+        card = widget.get_children()[0]
+        self.assertIn('callout-note', card.get_style_context().list_classes())
+        shown = [label.get_text().strip() for label in self.labels(widget)]
         self.assertIn('Title', shown)
+        self.assertIn('body', shown)
         self.assertTrue(self.pane.buffer.get_iter_at_offset(start).has_tag(self.pane.hidden))
         body = text.index('body')
+        self.assertTrue(self.pane.buffer.get_iter_at_offset(body).has_tag(self.pane.hidden))
+        self.show(text, body)
+        self.assertFalse(widget.get_visible())
         self.assertFalse(self.pane.buffer.get_iter_at_offset(body).has_tag(self.pane.hidden))
         self.show(text, text.index('[!NOTE]'))
         self.assertFalse(widget.get_visible())
         self.assertFalse(self.pane.buffer.get_iter_at_offset(start).has_tag(self.pane.hidden))
         self.assertIn('[!NOTE]', self.pane.text())
+
+    def test_callout_embed_budget_resets_after_each_edit(self):
+        for edit in range(self.pane.reading.MAX_EMBEDS + 2):
+            self.show(f'Edit {edit}\n> [!NOTE] Reference\n> ![[Child]]\n', 0)
+            widget = self.pane.callout_widgets[0][2]
+            shown = [label.get_text().strip() for label in self.labels(widget)]
+            self.assertIn('Saved excerpt line', shown)
+            self.assertFalse(any('Preview limit reached' in text for text in shown))
+            self.assertEqual(self.pane.reading.embed_count, 1)
+        # Keep the limit for an individual document, across multiple callouts.
+        text = 'Intro\n' + '\n'.join(
+            f'> [!NOTE] Reference {index}\n> ![[Child]]\n'
+            for index in range(self.pane.reading.MAX_EMBEDS + 1))
+        self.show(text, 0)
+        shown = [label.get_text() for entry in self.pane.callout_widgets
+                 for label in self.labels(entry[2])]
+        self.assertEqual(sum('Preview limit reached' in text for text in shown), 1)
+        self.assertEqual(self.pane.reading.embed_count, self.pane.reading.MAX_EMBEDS)
 
     def test_inline_math_hides_delimiters_and_display_math_uses_a_widget(self):
         inline = 'Energy $x^2$ grows'

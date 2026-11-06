@@ -335,6 +335,9 @@ class EditorRenderMixin:
             # invisible characters do not include paragraph spacing in GTK.
             widget.source_anchor = text.rfind('\n', table.start, table.end)
             self.table_widgets.append((table.start, table.end, widget, tag))
+        # Share the safety budget across this rebuild, never across edits.
+        self.reading.embed_count = self.reading.embed_bytes = 0
+        self.reading.embed_limit_shown = False
         for callout in layout.callouts:
             _anchor, widget, tag = self.attach_preview(self.callout_preview(callout), callout.start)
             widget.source_anchor = max(callout.start, text.rfind('\n', callout.start, callout.end))

@@ -145,7 +145,7 @@ class ExplorerMenuTests(unittest.TestCase):
                           'Projects/Existing.md'])
         margins = [self.row(path).get_child().get_margin_start() for path in (
             'Projects/', 'Projects/Research/', 'Projects/Research/Ideas.md')]
-        self.assertEqual(margins, [0, 18, 36])
+        self.assertEqual(margins, [0, 12, 24])
         self.window.files.emit('row-activated', self.row('Projects/'))
         wait_for_work(self.window)
         self.assertEqual([row.path for row in self.window.files.get_children()], ['Projects/'])
