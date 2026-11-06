@@ -4,7 +4,7 @@ import re
 
 from gi.repository import GdkPixbuf, GLib, Gtk, Pango
 
-from .appearance import PALETTES
+from .appearance import PALETTES, TITLE_FONTS
 from .attachments import local_path
 from .folding import compute_regions
 from .formatting import markdown_layout
@@ -96,9 +96,10 @@ class EditorRenderMixin:
         self.tags['math'].set_property('foreground', colors['bright'])
         for name in ('subscript', 'superscript'):
             self.tags[name].set_property('size-points', max(MIN_FONT_SIZE, preferences.editor_size * 0.8))
-        for level, size in enumerate((25, 21, 18, 16, 14, 12), 1):
+        for level, size in enumerate((25, 18, 16, 14, 12, 11), 1):
             self.tags[f'h{level}'].set_property('size-points', size * max(MIN_FONT_SIZE, preferences.editor_size) / 11)
             self.tags[f'h{level}'].set_property('foreground', colors['bright'])
+        self.tags['h1'].set_property('family', ', '.join(TITLE_FONTS) if preferences.editor_font == 'sans' else None)
         self.editor.set_wrap_mode(Gtk.WrapMode.WORD_CHAR if preferences.wrap_lines else Gtk.WrapMode.NONE)
         self.size_editor(self.editor, self.editor.get_allocation())
         self.update_list_margins()
@@ -125,6 +126,8 @@ class EditorRenderMixin:
         for _start, _end, widget, tag in self.table_widgets:
             self.size_table_preview(widget)
             tag.set_property('pixels-above-lines', widget.get_preferred_height().natural_height + 8)
+        for _start, _end, widget, tag in self.callout_widgets:
+            self.size_callout_preview(widget, tag)
         self.queue_positions()
 
     def render(self):
@@ -334,6 +337,7 @@ class EditorRenderMixin:
             self.table_widgets.append((table.start, table.end, widget, tag))
         for callout in layout.callouts:
             _anchor, widget, tag = self.attach_preview(self.callout_preview(callout), callout.start)
+            widget.source_anchor = max(callout.start, text.rfind('\n', callout.start, callout.end))
             self.callout_widgets.append((callout.start, callout.end, widget, tag))
 
     def math_uses_widget(self, text, item):
@@ -489,18 +493,29 @@ class EditorRenderMixin:
         label.set_selectable(True)
 
     def callout_preview(self, callout):
-        box = Gtk.Box(spacing=8)
-        box.get_style_context().add_class('callout')
-        box.get_style_context().add_class('callout-' + callout.kind.lower())
-        kind = Gtk.Label(label=callout.kind.upper())
-        kind.get_style_context().add_class('callout-kind')
-        box.pack_start(kind, False, False, 0)
-        if callout.title:
-            title = Gtk.Label(label=callout.title, xalign=0)
-            title.get_style_context().add_class('callout-title')
-            box.pack_start(title, False, False, 0)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.get_style_context().add_class('editor-preview')
+        self.reading.blocks(box, self.formatted_text[callout.start:callout.end],
+                            self.note.path, {self.note.path})
+        def prepare(widget):
+            if isinstance(widget, Gtk.Label) and widget.get_line_wrap():
+                widget.set_max_width_chars(1)
+                widget.set_hexpand(True)
+            if isinstance(widget, Gtk.Container):
+                for child in widget.get_children():
+                    prepare(child)
+        prepare(box)
         box.set_tooltip_text('Place the cursor in the callout to edit it')
         return box
+
+    def size_callout_preview(self, widget, tag):
+        width = max(120, self.editor.get_allocated_width() - 2 * self.editor.get_left_margin())
+        if widget.get_size_request().width != width:
+            widget.set_size_request(width, -1)
+        height = widget.get_preferred_height_for_width(width).natural_height
+        widget.preview_height = height
+        widget.preview_x = self.editor.get_left_margin()
+        tag.set_property('pixels-above-lines', height + 8)
 
     def cell_label(self, text):
         return re.sub(r'\\([\\|])', r'\1', text)
@@ -571,7 +586,14 @@ class EditorRenderMixin:
             revealed = line_hits(text, start, end, cursor) or selection_overlaps(selected, start, end)
             widget.set_visible(not revealed)
             if not revealed:
-                self.conceal_block(start, end, tag, first_line_only=True)
+                self.size_callout_preview(widget, tag)
+                anchor = widget.source_anchor
+                self.buffer.apply_tag(self.hidden, self.buffer.get_iter_at_offset(start),
+                                      self.buffer.get_iter_at_offset(anchor))
+                self.buffer.apply_tag(self.hidden, self.buffer.get_iter_at_offset(anchor + 1),
+                                      self.buffer.get_iter_at_offset(end))
+                self.buffer.apply_tag(tag, self.buffer.get_iter_at_offset(start),
+                                      self.buffer.get_iter_at_offset(anchor + 1))
         widget_starts = {start for start, _end, _widget, _tag in self.math_widgets}
         for item in self.math_spans:
             opener = 2 if text.startswith('$$', item.start) else 1
@@ -678,8 +700,8 @@ class EditorRenderMixin:
             position = self.buffer.get_iter_at_offset(getattr(widget, 'source_anchor', start))
             rect = self.editor.get_iter_location(position)
             x, y = self.editor.buffer_to_window_coords(Gtk.TextWindowType.WIDGET, rect.x, rect.y)
-            height = widget.get_preferred_height().natural_height
-            self.editor.move_child(widget, x, y - height - 4)
+            height = getattr(widget, 'preview_height', widget.get_preferred_height().natural_height)
+            self.editor.move_child(widget, getattr(widget, 'preview_x', x), y - height - 4)
         for button in self.fold_widgets:
             if not button.get_visible():
                 continue
@@ -740,6 +762,8 @@ class EditorRenderMixin:
                 button.set_relief(Gtk.ReliefStyle.NONE)
                 button.set_can_focus(False)
                 button.get_style_context().add_class('fold-chevron')
+                if folded:
+                    button.get_style_context().add_class('folded')
                 button.fold_anchor = region.anchor
                 button.set_tooltip_text('Unfold section' if folded else 'Fold section')
                 button.get_accessible().set_name(button.get_tooltip_text())

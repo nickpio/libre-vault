@@ -6,28 +6,26 @@ from .preferences import MIN_FONT_SIZE, normalize_editor_font
 
 PALETTES = {
     'dark': {
-        'canvas': '#0c0c0c', 'panel': '#0c0c0c', 'hover': '#181818', 'selected': '#202020',
-        'ink': '#d5d5d5', 'muted': '#999999', 'edge': '#252525', 'accent': '#cccccc',
-        'raised': '#161616', 'button_bg': '#1a1a1a', 'border': '#333333',
-        'focus_edge': '#505050', 'bright': '#eeeeee', 'soft': '#aaaaaa', 'link': '#8cc8ff',
-        'code_bg': '#1b1b1b', 'selection_bg': '#3a3a3a', 'panel_border': '#ffffff',
+        'canvas': '#222725', 'panel': '#1a1f1d', 'hover': '#2b332f', 'selected': '#33483e',
+        'ink': '#d7dfda', 'muted': '#9eafa5', 'edge': '#343e38', 'accent': '#a8d5bb',
+        'raised': '#29312c', 'button_bg': '#2b352e', 'border': '#435047',
+        'focus_edge': '#8ab69a', 'bright': '#f1f4ed', 'soft': '#b5c5ba', 'link': '#a8d5bb',
+        'code_bg': '#1b211e', 'selection_bg': '#3f5d4c', 'panel_border': '#a8c8b4',
         'highlight_bg': '#5c4b16', 'highlight_fg': '#fff4cc',
-        'code_keyword': '#d2a8ff', 'code_string': '#9ece6a', 'code_comment': '#8b8b8b',
-        'code_number': '#e0af68', 'code_builtin': '#7dcfff',
+        'code_keyword': '#d2a8ff', 'code_string': '#b5cf96', 'code_comment': '#9eafa5',
+        'code_number': '#e0b77d', 'code_builtin': '#92cbd0',
+    },
+    'light': {
+        'canvas': '#fcfbf7', 'panel': '#f0f1ea', 'hover': '#e5e9df', 'selected': '#dce9dc',
+        'ink': '#35443b', 'muted': '#617066', 'edge': '#dce2d6', 'accent': '#32634b',
+        'raised': '#f1f3eb', 'button_bg': '#e9ede3', 'border': '#c5d0c1',
+        'focus_edge': '#63896d', 'bright': '#24382b', 'soft': '#526859', 'link': '#32634b',
+        'code_bg': '#edf0e7', 'selection_bg': '#c9decd', 'panel_border': '#365e45',
+        'highlight_bg': '#ffe58a', 'highlight_fg': '#241c04',
+        'code_keyword': '#754599', 'code_string': '#30734e', 'code_comment': '#68776c',
+        'code_number': '#925b17', 'code_builtin': '#206b7c',
     },
 }
-# Preserve the dark theme's contrast and surface hierarchy in light mode.
-PALETTES['light'] = {
-    name: f'#{0xFFFFFF - int(color[1:], 16):06x}'
-    for name, color in PALETTES['dark'].items()
-}
-# Inversion does not keep yellow highlights or syntax colors readable.
-PALETTES['light'].update({
-    'link': '#0057b8',
-    'highlight_bg': '#ffe58a', 'highlight_fg': '#241c04',
-    'code_keyword': '#6f42c1', 'code_string': '#18794e', 'code_comment': '#6e6e6e',
-    'code_number': '#a15c07', 'code_builtin': '#0b6e99',
-})
 PALETTES['lights_out'] = {
     'canvas': '#000000', 'panel': '#000000', 'raised': '#000000',
     'button_bg': '#000000', 'code_bg': '#000000',
@@ -67,6 +65,8 @@ _SCRIPT_SERIF = (
 )
 
 
+TITLE_FONTS = ('Georgia', *_SCRIPT_SERIF)
+
 def _quoted_families(names):
     unique = []
     for name in names:
@@ -92,13 +92,16 @@ def stylesheet(source, preferences):
     source = re.sub(r'@define-color (\w+) [^;]+;',
                     lambda match: f'@define-color {match[1]} {colors[match[1]]};', source)
     family = font_family_css(preferences.editor_font)
+    title_family = _quoted_families(TITLE_FONTS) if preferences.editor_font == 'sans' else family
     return source + f'''
 window, dialog {{ font-size: {max(MIN_FONT_SIZE, preferences.interface_size)}pt; }}
 textview.live-editor, .editor-preview {{
     font-family: {family};
     font-size: {max(MIN_FONT_SIZE, preferences.editor_size)}pt;
 }}
-.reading-view {{ font-family: {family}; }}
+.reading-view {{ font-family: {family}; font-size: {max(MIN_FONT_SIZE, preferences.editor_size)}pt; }}
+.reading-view .reading-title {{ font-family: {title_family}; }}
+.welcome-title {{ font-family: {_quoted_families(TITLE_FONTS)}; }}
 .list-marker {{ font-family: {family}; font-size: {max(MIN_FONT_SIZE, preferences.editor_size)}pt; }}
 '''
 

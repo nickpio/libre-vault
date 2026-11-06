@@ -355,10 +355,13 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
         icon = Gtk.Image.new_from_icon_name('folder-documents-symbolic', Gtk.IconSize.DIALOG)
         icon.get_style_context().add_class('muted')
         welcome.pack_start(icon, False, False, 0)
-        title = Gtk.Label(label='Welcome to Libre Vault')
+        eyebrow = Gtk.Label(label='LIBRE VAULT')
+        eyebrow.get_style_context().add_class('welcome-eyebrow')
+        welcome.pack_start(eyebrow, False, False, 4)
+        title = Gtk.Label(label='A little space to think.')
         title.get_style_context().add_class('welcome-title')
         welcome.pack_start(title, False, False, 0)
-        description = Gtk.Label(label='Open a vault or an empty folder to begin.')
+        description = Gtk.Label(label='Your thoughts, connected. Your files, always yours.\nOpen a folder and make yourself at home.')
         description.set_justify(Gtk.Justification.CENTER)
         description.set_line_wrap(True)
         description.set_max_width_chars(48)
@@ -378,7 +381,7 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
         self.workspace_stack.add_named(layout, 'workspace')
         sidebar = self.sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         sidebar.get_style_context().add_class('sidebar')
-        sidebar.set_border_width(14)
+        sidebar.set_border_width(12)
         vault_heading = Gtk.Box(spacing=4)
         vault_heading.get_style_context().add_class('vault-heading')
         self.vault_label = Gtk.Label(label='No vault open', xalign=0)
@@ -410,7 +413,7 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
         self.bookmarks_scroll = Gtk.ScrolledWindow()
         self.bookmarks_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         self.bookmarks_scroll.set_propagate_natural_height(True)
-        self.bookmarks_scroll.set_max_content_height(160)
+        self.bookmarks_scroll.set_max_content_height(112)
         self.bookmarks_scroll.set_no_show_all(True)
         self.bookmarks_scroll.add(self.bookmark_list)
         sidebar.pack_start(self.bookmarks_scroll, False, False, 0)
@@ -453,14 +456,14 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
         sidebar.pack_start(self.more_files, False, False, 0)
         hint = self.keybind_hint = Gtk.Button()
         hint.get_style_context().add_class('sidebar-command')
-        hint.set_margin_top(12)
+        hint.set_margin_top(0)
         hint.get_accessible().set_name('Open keybind cheatsheet')
         hint.connect('clicked', lambda *_: self.show_keybinds())
         hint_content = Gtk.Box(spacing=8)
         icon = Gtk.Image.new_from_icon_name('input-keyboard-symbolic', Gtk.IconSize.MENU)
         icon.get_style_context().add_class('muted')
         hint_content.pack_start(icon, False, False, 0)
-        label = Gtk.Label(label='Keyboard shortcuts', xalign=0)
+        label = Gtk.Label(label='Shortcuts', xalign=0)
         label.set_ellipsize(Pango.EllipsizeMode.END)
         label.get_style_context().add_class('sidebar-command-label')
         hint_content.pack_start(label, True, True, 0)
@@ -533,7 +536,18 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
             self.details_buttons[name] = button
             selector.add(button)
             button.connect('toggled', self.select_details_view, name)
+        self.details_selector = selector
+        self.details_combo = Gtk.ComboBoxText()
+        for name in ('outline', 'links', 'properties'):
+            self.details_combo.append(name, name.capitalize())
+        self.details_combo.set_active_id(self.details_view)
+        self.details_combo.get_accessible().set_name('Note details view')
+        self.details_combo.get_style_context().add_class('details-combo')
+        self.details_combo.set_no_show_all(True)
+        self.details_combo.connect('changed', lambda field: self.details_buttons[field.get_active_id()].set_active(True))
+        details.pack_start(self.details_combo, False, False, 0)
         details.pack_start(selector, False, False, 0)
+        details.connect('size-allocate', self.size_details_selector)
         details.pack_start(self.details_scroll, True, True, 0)
         details.dock_id = 'details'
         self.right_dock.append_page(details, Gtk.Label(label='Details'))
@@ -897,10 +911,10 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
                 row.path = path
                 row.search_result = searching
                 row.search_signature = results.get(path) if searching else None
-                content = Gtk.Box(spacing=6)
+                content = Gtk.Box(spacing=4)
                 is_folder = path.endswith('/')
                 if not searching:
-                    content.set_margin_start(path.rstrip('/').count('/') * 18)
+                    content.set_margin_start(path.rstrip('/').count('/') * 12)
                     row.get_style_context().add_class('tree-row')
                     if is_folder:
                         row.expanded = path[:-1] not in self.collapsed_folders
@@ -910,7 +924,7 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
                             f"{Path(path).name}, folder, {'expanded' if row.expanded else 'collapsed'}")
                     else:
                         indicator = Gtk.Box()
-                    indicator.set_size_request(16, -1)
+                    indicator.set_size_request(12, -1)
                     content.pack_start(indicator, False, False, 0)
                 if path.lower().endswith('.canvas') and not is_folder:
                     icon = Gtk.Image.new_from_icon_name('x-office-drawing-symbolic', Gtk.IconSize.MENU)
@@ -1799,10 +1813,18 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
         else:
             label.set_text('')
 
+    def size_details_selector(self, _, allocation):
+        required = sum(button.get_preferred_width().natural_width for button in self.details_buttons.values()) + 46
+        compact = allocation.width < required
+        self.details_selector.set_visible(not compact)
+        self.details_combo.set_visible(compact)
+
     def select_details_view(self, button, name):
         if not button.get_active() or self.details_view == name:
             return
         self.details_view = name
+        if self.details_combo.get_active_id() != name:
+            self.details_combo.set_active_id(name)
         self.details_scroll.get_vadjustment().set_value(0)
         self.update_context()
         self.persist_workspace()
@@ -1849,12 +1871,13 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
         self.location_label.set_text(f'{self.vault.root.name}  /  {pane.note.path}')
         self.location_label.set_tooltip_text(str(self.vault.root / pane.note.path))
         pane.sync_bookmark_button()
+        pane.path_label.set_text(Path(pane.note.path).parent.as_posix() if '/' in pane.note.path else 'Notes')
+        pane.path_label.set_tooltip_text(pane.note.path)
         for row in self.files.get_children():
             if row.path == pane.note.path:
                 self.files.select_row(row)
                 break
         if self.details_view == 'outline':
-            self.section('Outline')
             if pane.text() != pane.formatted_text:
                 pane.render()
             ancestors = []
@@ -1876,9 +1899,9 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
                     button.get_style_context().add_class('outline-root')
                     button.set_margin_top(4)
                 label = button.get_child()
-                label.set_ellipsize(Pango.EllipsizeMode.NONE)
-                label.set_line_wrap(True)
-                label.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
+                label.set_ellipsize(Pango.EllipsizeMode.END)
+                label.set_line_wrap(False)
+                button.set_tooltip_text(heading.label)
                 label.set_max_width_chars(24)
                 button.get_accessible().set_name(f'Heading {heading.level}: {heading.label}')
                 self.outline_rows.append((offset, button))
@@ -2063,7 +2086,7 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
         self.css_provider.load_from_data(stylesheet(CSS.decode('utf-8'), self.preferences).encode('utf-8'))
         logo_theme = 'light' if self.preferences.theme == 'light' else 'dark'
         logo_path = Path(__file__).with_name('assets') / f'logo-{logo_theme}.png'
-        self.brand.set_from_pixbuf(GdkPixbuf.Pixbuf.new_from_file_at_scale(str(logo_path), 40, 40, True))
+        self.brand.set_from_pixbuf(GdkPixbuf.Pixbuf.new_from_file_at_scale(str(logo_path), 28, 28, True))
         for pane in self.panes.values():
             pane.apply_preferences()
         self.reload_shown_fonts()

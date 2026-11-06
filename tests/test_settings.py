@@ -154,7 +154,7 @@ class SettingsTests(unittest.TestCase):
         reopened.settings_dialog.save(Preferences())
         self.assertEqual(reopened.preferences, Preferences())
         self.assertEqual(PreferencesStore(self.preferences_path).load(), Preferences())
-        self.assertEqual(reopened.settings_dialog.controls['editor_size'].get_value_as_int(), 11)
+        self.assertEqual(reopened.settings_dialog.controls['editor_size'].get_value_as_int(), Preferences().editor_size)
 
     def test_save_failure_reports_error_and_reverts_control(self):
         original = self.window.preferences

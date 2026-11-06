@@ -8,7 +8,7 @@ from .shortcuts import APP_SHORTCUTS, EDITOR_SHORTCUTS, KEYBIND_GROUPS, effectiv
 
 
 class CommandPalette(Gtk.EventBox):
-    max_width = 760
+    max_width = 680
 
     def __init__(self, owner):
         super().__init__()
@@ -22,7 +22,7 @@ class CommandPalette(Gtk.EventBox):
         self.card.set_shadow_type(Gtk.ShadowType.NONE)
         self.card.set_halign(Gtk.Align.CENTER)
         self.card.set_valign(Gtk.Align.START)
-        self.card.set_margin_top(32)
+        self.card.set_margin_top(48)
         self.card.get_style_context().add_class('command-palette')
         self.add(self.card)
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
@@ -40,7 +40,7 @@ class CommandPalette(Gtk.EventBox):
         self.results.get_style_context().add_class('command-results')
         self.results_scroll = Gtk.ScrolledWindow()
         self.results_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        self.results_scroll.set_max_content_height(176)
+        self.results_scroll.set_max_content_height(280)
         self.results_scroll.set_propagate_natural_height(True)
         self.results_scroll.add(self.results)
         content.pack_start(self.results_scroll, False, False, 0)
@@ -108,9 +108,6 @@ class CommandPalette(Gtk.EventBox):
             row = Gtk.ListBoxRow()
             row.action, row.title = action, title
             command = Gtk.Box(spacing=10)
-            icon = Gtk.Image.new_from_icon_name('system-run-symbolic', Gtk.IconSize.MENU)
-            icon.get_style_context().add_class('muted')
-            command.pack_start(icon, False, False, 0)
             command.pack_start(Gtk.Label(label=title, xalign=0), True, True, 0)
             row.add(command)
             self.results.add(row)

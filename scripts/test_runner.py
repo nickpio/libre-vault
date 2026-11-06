@@ -4,8 +4,10 @@ from contextlib import contextmanager
 import os
 from pathlib import Path
 import shutil
+import socket
 import subprocess
 import sys
+import time
 from tempfile import TemporaryDirectory
 
 
@@ -65,6 +67,7 @@ def main(argv=None):
     target = parser.add_mutually_exclusive_group()
     target.add_argument('--smoke', action='store_true', help='Run the GUI smoke test')
     target.add_argument('--script', help='Run a Python GUI probe instead of the test suite')
+    parser.add_argument('--broadway', action='store_true', help='Use a private headless GTK Broadway display')
     parser.add_argument('--foreground', action='store_true', help='Allow test windows on the current desktop')
     args, remaining = parser.parse_known_args(argv)
     command = command_for(args, remaining)
@@ -77,6 +80,36 @@ def main(argv=None):
                    XDG_CACHE_HOME=str(base / 'cache'))
         env['PYTHONPATH'] = os.pathsep.join([str(bootstrap), str(ROOT), env.get('PYTHONPATH', '')])
         identity = 'librevault-tests-' + str(os.getpid())
+        if args.broadway:
+            daemon = shutil.which('broadwayd')
+            if not daemon:
+                parser.error('--broadway requires a GTK build with broadwayd')
+            runtime = base / 'runtime'
+            runtime.mkdir(mode=0o700)
+            with socket.socket() as reservation:
+                reservation.bind(('127.0.0.1', 0))
+                port = reservation.getsockname()[1]
+            address = f':tcp{port - 9090}'
+            env.update(GDK_BACKEND='broadway', BROADWAY_DISPLAY=address, XDG_RUNTIME_DIR=str(runtime))
+            env.pop('DISPLAY', None)
+            env.pop('WAYLAND_DISPLAY', None)
+            with subprocess.Popen([daemon, '--unixsocket', str(base / 'http.socket'), address], env=env,
+                                  stdout=subprocess.DEVNULL) as display:
+                try:
+                    deadline = time.monotonic() + 10
+                    while True:
+                        if display.poll() is not None or time.monotonic() >= deadline:
+                            raise RuntimeError('Private Broadway display did not start')
+                        try:
+                            with socket.create_connection(('127.0.0.1', port), timeout=0.1):
+                                break
+                        except OSError:
+                            time.sleep(0.02)
+                    print('GUI checks use a private headless Broadway display.', flush=True)
+                    return subprocess.run(command, cwd=ROOT, env=env).returncode
+                finally:
+                    display.terminate()
+                    display.wait(timeout=5)
         if args.foreground:
             return subprocess.run(command, cwd=ROOT, env=env).returncode
         if env.get('HYPRLAND_INSTANCE_SIGNATURE') and env.get('DISPLAY') and shutil.which('hyprctl'):

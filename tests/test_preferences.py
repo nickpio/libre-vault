@@ -27,6 +27,24 @@ class PreferenceTests(unittest.TestCase):
         self.assertTrue(sizes)
         self.assertTrue(all(float(size) >= MIN_FONT_SIZE for size in sizes))
 
+    def test_theme_text_and_active_states_have_readable_contrast(self):
+        def luminance(color):
+            channels = [int(color[index:index + 2], 16) / 255 for index in (1, 3, 5)]
+            linear = [value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4
+                      for value in channels]
+            return sum(value * weight for value, weight in zip(linear, (0.2126, 0.7152, 0.0722)))
+        for theme, colors in PALETTES.items():
+            for foreground, background in (('ink', 'canvas'), ('muted', 'panel'),
+                                           ('soft', 'panel'), ('accent', 'selected')):
+                with self.subTest(theme=theme, foreground=foreground, background=background):
+                    low, high = sorted((luminance(colors[foreground]), luminance(colors[background])))
+                    self.assertGreaterEqual((high + 0.05) / (low + 0.05), 4.5)
+
+    def test_reading_titles_respect_custom_editor_fonts(self):
+        source = (Path(__file__).resolve().parents[1] / 'librevault' / 'style.css').read_text()
+        custom = stylesheet(source, replace(Preferences(), editor_font='monospace'))
+        self.assertIn('.reading-view .reading-title { font-family: monospace; }', custom)
+
     def test_cairo_font_sizes_respect_the_minimum_at_screen_resolution(self):
         widget = Mock()
         for dpi in (-1, 72, 96, 144):

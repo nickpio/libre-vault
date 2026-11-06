@@ -92,9 +92,9 @@ class Preferences:
     theme: str = 'dark'
     interface_size: int = MIN_FONT_SIZE
     editor_font: str = 'sans'
-    editor_size: int = MIN_FONT_SIZE
+    editor_size: int = 12
     readable_length: bool = True
-    line_width: int = 780
+    line_width: int = 680
     wrap_lines: bool = True
     continue_lists: bool = True
     templates_folder: str = 'Templates'
@@ -125,6 +125,8 @@ class Preferences:
                 valid = type(value) is str and value in dict(OPTIONS[key])
             elif key in BOUNDS:
                 low, high = BOUNDS[key]
+                if key in ('interface_size', 'editor_size') and type(value) is int and 0 < value < low:
+                    value = low
                 valid = type(value) is int and low <= value <= high
             elif key in STRINGS:
                 normalized = normalize_string_setting(key, value)

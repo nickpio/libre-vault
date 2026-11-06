@@ -53,7 +53,7 @@ class SettingsDialog(Gtk.Dialog):
         self.combo(appearance, 'theme', 'Base theme', 'Choose Dark, Light, or Lights Out with pure-black backgrounds and high-contrast text.')
         self.spin(appearance, 'interface_size', 'Interface font size', 'Size of text in menus and controls.', 'pt')
         self.font_combo(appearance, 'editor_font', 'Text font',
-                        'Font family used when writing and reading notes. Choose Custom… for an installed font.')
+                        'Font family used when writing and reading notes. Choose Custom to select an installed font.')
         self.spin(appearance, 'editor_size', 'Text font size', 'Size of your note text. Headings scale with it.', 'pt')
         preview = Gtk.Label(label='A space for your thoughts', xalign=0)
         preview.get_style_context().add_class('editor-preview')

@@ -98,6 +98,7 @@ class PanelTests(unittest.TestCase):
             child = panel.get_child()
             self.assertAlmostEqual(child.get_allocated_width(), panel.get_allocated_width(), delta=1)
             self.assertAlmostEqual(child.get_allocated_height(), panel.get_allocated_height(), delta=1)
+            self.assertEqual(child.translate_coordinates(panel, 0, 0), (0, 0))
         # The search field and shortcut button must stay inside the file dock.
         for widget in (self.window.search_entry, self.window.file_views, self.window.keybind_hint):
             x, y = widget.translate_coordinates(self.window.left_dock, 0, 0)
@@ -105,6 +106,22 @@ class PanelTests(unittest.TestCase):
             self.assertGreaterEqual(y, 0)
             self.assertLessEqual(x + widget.get_allocated_width(), self.window.left_dock.get_allocated_width())
             self.assertLessEqual(y + widget.get_allocated_height(), self.window.left_dock.get_allocated_height())
+
+    def test_details_selector_stays_usable_when_compact_and_keeps_its_state(self):
+        self.window.resize(1000, 760)
+        self.wait(180)
+        self.assertTrue(self.window.details_combo.get_visible())
+        self.assertFalse(self.window.details_selector.get_visible())
+        self.window.details_combo.set_active_id('properties')
+        self.assertEqual(self.window.details_view, 'properties')
+        self.assertTrue(self.window.details_buttons['properties'].get_active())
+        self.window.resize(1440, 900)
+        self.wait(180)
+        self.assertFalse(self.window.details_combo.get_visible())
+        self.assertTrue(self.window.details_selector.get_visible())
+        self.window.details_buttons['links'].set_active(True)
+        self.assertEqual(self.window.details_combo.get_active_id(), 'links')
+        self.assertTrue(self.window.right_dock.get_show_tabs())
 
     def test_sidebar_contents_follow_small_window_allocations(self):
         # Shrink after a large allocation to catch revealers retaining their

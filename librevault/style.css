@@ -1,45 +1,39 @@
-/* Default GTK 3 theme: a continuous black workspace with soft controls. */
-@define-color canvas #0c0c0c;
-@define-color panel #0c0c0c;
-@define-color hover #181818;
-@define-color selected #202020;
-@define-color ink #d5d5d5;
-@define-color muted #999999;
-@define-color edge #252525;
-@define-color accent #cccccc;
-@define-color raised #161616;
-@define-color button_bg #1a1a1a;
-@define-color border #333333;
-@define-color focus_edge #505050;
-@define-color bright #eeeeee;
-@define-color soft #aaaaaa;
-@define-color link #8cc8ff;
-@define-color code_bg #1b1b1b;
-@define-color selection_bg #3a3a3a;
-@define-color panel_border #ffffff;
-
+/* A quiet writing surface, framed by sage navigation and warm typography. */
+@define-color canvas #222725;
+@define-color panel #1a1f1d;
+@define-color hover #2b332f;
+@define-color selected #33483e;
+@define-color ink #d7dfda;
+@define-color muted #9eafa5;
+@define-color edge #343e38;
+@define-color accent #a8d5bb;
+@define-color raised #29312c;
+@define-color button_bg #2b352e;
+@define-color border #435047;
+@define-color focus_edge #8ab69a;
+@define-color bright #f1f4ed;
+@define-color soft #b5c5ba;
+@define-color link #a8d5bb;
+@define-color code_bg #1b211e;
+@define-color selection_bg #3f5d4c;
+@define-color panel_border #a8c8b4;
 /* Keep theme-provided small labels from shrinking below the app font size. */
 * { font-size: inherit; }
-
-window, dialog {
-    background: @canvas;
-    color: @ink;
-    font-family: "Inter", "Cantarell", sans-serif;
-    font-size: 11pt;
-}
+window, dialog { background: @canvas; color: @ink; font-family: "Inter", "Cantarell", sans-serif; font-size: 11pt; }
 headerbar {
     font-size: 11pt;
-    background: @canvas;
     border: none;
     box-shadow: none;
-    padding: 6px 12px;
     min-height: 32px;
+    background: @panel;
+    padding: 4px 14px;
+    border-bottom: 1px solid @edge;
 }
 headerbar .title { color: @bright; }
 spinbutton { color: @ink; background: @raised; border: 1px solid @edge; border-radius: 8px; }
 spinbutton entry { color: @ink; background: transparent; }
-.brand { padding: 0 8px; }
-.breadcrumb { color: @soft; font-size: 11pt; }
+.brand { padding: 0 10px 0 0; }
+.breadcrumb { font-size: 11pt; color: @muted; }
 button {
     background: @button_bg;
     color: @ink;
@@ -49,19 +43,13 @@ button {
     box-shadow: none;
     text-shadow: none;
     transition: background 120ms ease;
+    background-image: none;
 }
 button:hover { background: @hover; border-color: @focus_edge; }
 button:active { background: @border; }
 button:disabled { color: @muted; background: @raised; }
 button:focus { outline-color: @accent; outline-offset: -2px; }
-button.icon-button, headerbar button.titlebutton {
-    background: transparent;
-    border-color: transparent;
-    color: @soft;
-    padding: 4px;
-    min-height: 22px;
-    min-width: 22px;
-}
+button.icon-button, headerbar button.titlebutton { background: transparent; border-color: transparent; color: @soft; padding: 4px; min-height: 22px; min-width: 22px; }
 button.icon-button:hover, headerbar button.titlebutton:hover { background: @selected; color: @bright; }
 button.icon-button:checked { background: @hover; color: @accent; }
 entry {
@@ -78,57 +66,46 @@ entry:focus { border-color: @focus_edge; }
 entry image { color: @muted; }
 .sidebar { background: @panel; }
 /* Paint the inset too: GtkContainer border spacing can expose black when scrolled. */
-.details-content { padding: 12px; }
+.details-content { padding: 4px 16px 16px; }
 frame > border { border-color: @edge; }
 separator { background: @edge; min-height: 1px; border: none; }
 label link, label link:visited { color: @link; }
 .link-preview-title { font-weight: bold; color: @bright; }
 .link-preview-body { color: @ink; }
-.vault-heading { padding: 0 0 6px; }
-.vault-title { color: @bright; font-size: 11pt; font-weight: bold; padding-left: 5px; }
-.caption { color: @muted; font-size: 11pt; font-weight: normal; padding: 20px 8px 8px; }
+.vault-heading { padding: 4px 0 8px; }
+.vault-title { color: @bright; font-size: 11pt; padding-left: 5px; font-weight: 600; }
+.caption { font-size: 11pt; font-weight: 600; color: @soft; padding: 12px 8px 7px; }
 list, list row { background: transparent; color: @ink; }
 .note-list row { border-radius: 8px; margin: 2px 0; padding: 9px 10px; }
-.note-list row.tree-row { margin: 0; padding: 5px 6px; border-radius: 5px; }
-.tree-folder { font-weight: bold; color: @bright; }
+.note-list row.tree-row { padding: 7px 8px; margin: 1px 0; border-radius: 6px; }
+.tree-folder { color: @soft; font-weight: 600; }
 list row:hover { background: @hover; }
 list row:selected { background: @selected; color: @bright; }
 .note-folder { color: @muted; font-size: 11pt; }
 .muted { color: @muted; }
-.welcome-title { color: @bright; font-size: 22pt; font-weight: bold; }
-.welcome-open { padding: 10px 24px; }
-.welcome-hint { color: @muted; font-size: 11pt; }
-button.sidebar-command {
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: 8px;
-    padding: 8px;
-}
+.welcome-title { color: @bright; font-family: Georgia, serif; font-size: 34pt; font-weight: normal; }
+.welcome-open { background: @accent; color: @canvas; border-color: @accent; border-radius: 8px; padding: 12px 26px; font-weight: 600; }
+.welcome-hint { color: @muted; font-size: 11pt; padding-top: 8px; }
+button.sidebar-command { background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 8px; }
 button.sidebar-command:hover { background: @hover; border-color: transparent; }
 .sidebar-command-label { color: @muted; font-size: 11pt; }
 .command-palette-backdrop { background: alpha(#000000, 0.24); }
-frame.command-palette {
-    background: @canvas;
-    border: 1px solid @edge;
-    border-radius: 8px;
-    box-shadow: 0 0 24px 2px alpha(@accent, 0.14),
-                0 6px 20px alpha(#000000, 0.35);
-}
+frame.command-palette { border: 1px solid @edge; border-radius: 12px; background: @canvas; box-shadow: 0 12px 32px alpha(#000000, 0.18); }
 frame.command-palette > border { border: none; }
-.palette-label { color: @muted; font-size: 11pt; margin: 2px 4px 4px; }
-.command-results row { border-radius: 6px; padding: 8px 10px; }
-.command-results row:selected { background: @selected; }
-.palette-hint { color: @muted; font-size: 11pt; margin: 6px 4px 2px; }
+.palette-label { font-size: 11pt; margin: 2px 4px 4px; color: @soft; font-weight: 600; padding: 2px 4px; }
+.command-results row { border-radius: 6px; padding: 9px 12px; }
+.command-results row:selected { background: @selected; color: @accent; }
+.palette-hint { color: @muted; font-size: 11pt; margin: 6px 4px 2px; border-top: 1px solid @edge; padding: 8px 4px 2px; padding-bottom: 8px; }
 .keybind-heading { color: @muted; font-size: 11pt; padding: 16px 10px 8px; }
 .keybind-cheatsheet, .keybind-content { background: @canvas; color: @ink; }
 .keybind-keys {
-    color: @soft;
     font-family: monospace;
     font-size: 11pt;
-    background: @hover;
     border: 1px solid @edge;
     border-radius: 4px;
-    padding: 3px 6px;
+    padding: 2px 5px;
+    background: transparent;
+    color: @muted;
 }
 .keybind-list row { border-radius: 6px; margin: 1px 0; padding: 8px 10px; border: 1px solid transparent; }
 .keybind-list row:selected { background: @selected; border-color: @border; }
@@ -136,41 +113,43 @@ frame.command-palette > border { border: none; }
 scrolledwindow, viewport { border: none; box-shadow: none; background: transparent; }
 scrolledwindow undershoot, scrolledwindow overshoot { background: none; box-shadow: none; }
 paned > separator { background: transparent; min-width: 1px; min-height: 1px; border: none; }
-.workspace-split > separator {
-    background: transparent;
-    min-width: 5px;
-}
+.workspace-split > separator { background: transparent; min-width: 5px; }
 notebook, notebook > stack { background: @canvas; border: none; box-shadow: none; }
-notebook > header { background: @canvas; border: none; padding: 4px 10px; box-shadow: none; }
+notebook > header { border: none; box-shadow: none; background: @panel; border-bottom: 1px solid @edge; padding: 4px 8px 0; }
 notebook > header tabs { border: none; }
 notebook > header tab {
     background: transparent;
     color: @muted;
-    border: none;
-    border-radius: 8px;
-    padding: 7px 16px;
-    margin: 2px 3px;
     box-shadow: none;
+    border-radius: 7px 7px 0 0;
+    padding: 9px 12px;
+    margin: 0 2px;
+    border: 1px solid transparent;
+    border-bottom: none;
 }
 notebook > header tab:hover { background: @hover; color: @ink; }
-notebook > header tab:checked { background: @selected; color: @bright; box-shadow: none; }
-notebook.sidebar-dock > header { padding-top: 2px; padding-bottom: 2px; }
-notebook.sidebar-dock > header tab { padding-top: 3px; padding-bottom: 3px; margin-top: 1px; margin-bottom: 1px; }
-notebook.sidebar-dock > header tab:checked { background: @selection_bg; color: @bright; font-weight: bold; }
+notebook > header tab:checked { box-shadow: none; background: @canvas; color: @bright; border-color: @edge; }
+notebook.sidebar-dock > header { padding-top: 2px; padding-bottom: 2px; border-bottom: 1px solid @edge; padding: 4px 12px 0; }
+notebook.sidebar-dock > header tab {
+    padding-top: 3px;
+    padding-bottom: 3px;
+    margin-top: 1px;
+    margin-bottom: 1px;
+    border-radius: 0;
+    padding: 6px 10px;
+    margin: 0;
+    border-bottom: 2px solid transparent;
+}
+notebook.sidebar-dock > header tab:checked { font-weight: bold; background: transparent; color: @accent; border-bottom-color: @accent; }
 textview, textview text { background: @canvas; color: @ink; caret-color: @accent; border: none; box-shadow: none; }
 .reading-view, .reading-view viewport { background: @canvas; color: @ink; }
 .reading-table { padding: 8px 0; }
 .reading-table-heading { font-weight: bold; border-bottom: 1px solid @edge; padding-bottom: 6px; }
-.reading-code {
-    background: @code_bg;
-    border: 1px solid @edge;
-    border-radius: 8px;
-    padding: 8px 10px;
-}
+.reading-code { background: @code_bg; border: 1px solid @edge; border-radius: 8px; padding: 8px 10px; }
 .reading-code-header { padding-bottom: 4px; }
 .reading-code-badge { color: @soft; font-family: monospace; font-size: 11pt; }
 .reading-code-body { font-family: monospace; }
-.callout { background: @raised; border: 1px solid @edge; border-left-width: 4px; border-radius: 8px; }
+.callout { border: 1px solid @edge; border-left-width: 4px; background: @raised; border-radius: 8px; padding: 12px 14px; }
 .callout-note { border-left-color: #6f8fbf; }
 .callout-info { border-left-color: #5aa7c2; }
 .callout-tip { border-left-color: #7d9a62; }
@@ -198,6 +177,7 @@ button.fold-chevron {
     min-width: 16px;
     color: @muted;
     font-size: 12pt;
+    opacity: 0;
 }
 button.fold-chevron:hover,
 button.fold-chevron:active { background: transparent; border: none; box-shadow: none; color: @bright; }
@@ -205,62 +185,58 @@ label.extra-cursor { color: @accent; font-size: 12pt; }
 label.vim-status { color: @accent; font-weight: bold; padding: 0 12px; }
 .slash-popover { background: @panel; }
 checkbutton.task-checkbox { padding: 0; margin: 0; min-width: 18px; min-height: 18px; }
-checkbutton.task-checkbox check { min-width: 14px; min-height: 14px; border: 1px solid @muted; border-radius: 4px; background: @raised; box-shadow: none; color: @canvas; }
+checkbutton.task-checkbox check {
+    min-width: 14px;
+    min-height: 14px;
+    border: 1px solid @muted;
+    border-radius: 4px;
+    background: @raised;
+    box-shadow: none;
+    color: @canvas;
+}
 checkbutton.task-checkbox check:checked { background: @accent; border-color: @accent; }
 checkbutton.task-checkbox:hover check { border-color: @bright; }
 checkbutton.task-checkbox:focus { outline: 1px solid @soft; outline-offset: 2px; }
 textview text selection { background: @selection_bg; color: @bright; }
-button.details-view-button { padding: 3px 8px; min-width: 0; font-size: 11pt; }
-button.details-view-button:checked { background: @selection_bg; color: @bright; border-color: @focus_edge; }
-.context-link { background: transparent; border-color: transparent; padding: 8px; border-radius: 8px; font-size: 11pt; }
+button.details-view-button {
+    min-width: 0;
+    font-size: 11pt;
+    background: transparent;
+    border-color: transparent;
+    color: @muted;
+    padding: 6px 7px;
+    border-radius: 6px;
+}
+button.details-view-button:checked { background: @selected; border-color: transparent; color: @accent; }
+.context-link { background: transparent; border-color: transparent; padding: 8px; border-radius: 8px; font-size: 11pt; color: @muted; }
 .context-link:hover { background: @hover; border-color: transparent; }
 button.outline-heading {
     color: @ink;
     font-size: inherit;
     font-weight: normal;
-    padding: 6px 8px;
     border-width: 0 0 0 2px;
     border-color: transparent;
     border-radius: 4px;
+    padding: 5px 8px;
 }
 button.outline-heading.outline-root { color: @bright; font-weight: bold; }
-button.outline-heading.current-heading { background: @selected; border-left-color: @accent; }
+button.outline-heading.current-heading { border-left-color: @accent; background: @selected; color: @accent; }
 .outline-empty { color: @muted; font-size: 11pt; padding: 6px 8px; }
 .find-bar { background: @panel; border-bottom: 1px solid @edge; padding: 8px; }
 .find-bar .muted { font-size: 11pt; }
 .find-bar button.match-case { padding: 4px 7px; }
 .find-bar button.match-case:checked { background: @selected; border-color: @accent; }
 window.popup { background: transparent; }
-menu, popover {
-    background: @raised;
-    color: @ink;
-    border: 1px solid @border;
-    border-radius: 12px;
-    padding: 5px;
-    font-size: 11pt;
-}
+menu, popover { background: @raised; color: @ink; border: 1px solid @border; border-radius: 12px; padding: 5px; font-size: 11pt; }
 menu menuitem { background: transparent; color: @ink; }
 menu menuitem:hover { background: @hover; color: @bright; }
 menu menuitem:disabled { color: @muted; }
-menu.explorer-menu > menuitem, menu.editor-menu > menuitem {
-    min-width: 150px;
-    min-height: 18px;
-    margin: 0;
-    padding: 5px 10px;
-    border: none;
-    border-radius: 4px;
-}
+menu.explorer-menu > menuitem, menu.editor-menu > menuitem { min-width: 150px; min-height: 18px; margin: 0; padding: 5px 10px; border: none; border-radius: 4px; }
 menu.explorer-menu > menuitem:hover, menu.editor-menu > menuitem:hover { background: @hover; }
-menu.explorer-menu > separator, menu.editor-menu > separator {
-    min-height: 1px;
-    margin: 5px 4px;
-    padding: 0;
-    border: none;
-    background: @border;
-}
-.statusbar { background: @canvas; border: none; font-size: 11pt; }
+menu.explorer-menu > separator, menu.editor-menu > separator { min-height: 1px; margin: 5px 4px; padding: 0; border: none; background: @border; }
+.statusbar { border: none; font-size: 11pt; background: @panel; border-top: 1px solid @edge; padding: 0 4px; }
 .settings-button { margin: 3px 4px 3px 8px; }
-.settings-heading { color: @muted; font-size: 11pt; margin: 0 12px 8px; }
+.settings-heading { color: @muted; font-size: 11pt; margin: 0 12px 8px; margin-left: 12px; }
 .settings-dialog { background: @canvas; color: @ink; }
 .settings-navigation { background: @panel; border-right: 1px solid @edge; }
 .settings-categories row { padding: 9px 12px; margin: 2px 0; border-radius: 6px; }
@@ -268,12 +244,12 @@ menu.explorer-menu > separator, menu.editor-menu > separator {
 .settings-page-title { font-size: 18pt; font-weight: bold; color: @bright; }
 .settings-subtitle, .settings-description { color: @muted; font-size: 11pt; }
 .setting-row { padding: 15px 0; border-bottom: 1px solid @edge; }
-.settings-preview { background: @raised; border: 1px solid @edge; border-radius: 8px; padding: 20px; }
+.settings-preview { background: @canvas; border: 1px solid @edge; border-radius: 8px; padding: 20px; }
 .settings-error { color: @ink; padding: 8px 16px; }
 .settings-dialog switch { background: @selected; border: 1px solid @border; border-radius: 14px; }
 .settings-dialog switch:checked { background: @accent; }
 .settings-dialog switch slider { background: @raised; border: 1px solid @border; border-radius: 14px; min-width: 22px; min-height: 22px; }
-.status { padding: 5px 12px; color: @muted; font-size: 11pt; }
+.status { color: @muted; font-size: 11pt; padding: 5px 9px; }
 .status.save-error { color: @bright; font-weight: bold; }
 .bases-view { background: @canvas; }
 .bases-view treeview { background: @canvas; color: @ink; }
@@ -281,8 +257,8 @@ menu.explorer-menu > separator, menu.editor-menu > separator {
 .slides-window, .slides-window .reading-view { background: @canvas; }
 .slides-bar { background: @panel; border-top: 1px solid @edge; }
 .slides-counter { color: @soft; font-size: 11pt; }
-.bookmark-list row { border-radius: 6px; margin: 1px 0; padding: 4px 8px; }
-.bookmark-empty { color: @muted; font-size: 11pt; padding: 0 8px 8px; }
+.bookmark-list row { border-radius: 6px; margin: 1px 0; padding: 7px 8px; }
+.bookmark-empty { color: @muted; font-size: 11pt; padding: 0 8px 8px; padding-bottom: 0; }
 button.icon-button.bookmarked { color: @bright; }
 scrollbar { background: transparent; border: none; }
 scrollbar slider { background: @border; min-width: 5px; min-height: 5px; border: 2px solid transparent; border-radius: 8px; }
@@ -293,22 +269,41 @@ button.live-table-edit { padding: 2px 6px; min-width: 0; min-height: 0; font-siz
 .live-embed { background: @raised; border-radius: 8px; }
 .live-embed-title { font-weight: bold; color: @bright; }
 .math-preview { color: @bright; }
-.callout { background: @raised; border-radius: 8px; padding: 6px 10px; }
 .callout-kind, .callout-title { font-weight: bold; color: @bright; }
-
 /* The table editor uses a continuous cell grid, with controls above it. */
 .table-editor-summary { color: @soft; padding: 4px 0; }
 .table-editor-grid { background: @edge; }
-.table-editor-grid entry.table-editor-cell {
-    border-radius: 0; border: 1px solid @edge; margin: 0;
-    padding: 8px 10px; background: @canvas; box-shadow: none;
-}
+.table-editor-grid entry.table-editor-cell { border-radius: 0; border: 1px solid @edge; margin: 0; padding: 8px 10px; background: @canvas; box-shadow: none; }
 .table-editor-grid entry.table-editor-stripe { background: @raised; }
 .table-editor-grid entry.table-editor-header { background: @raised; color: @bright; font-weight: bold; }
-.table-editor-grid entry.table-editor-selected {
-    border-color: @accent; background: @selected; box-shadow: inset 0 0 0 1px @accent;
-}
+.table-editor-grid entry.table-editor-selected { border-color: @accent; background: @selected; box-shadow: inset 0 0 0 1px @accent; }
 .table-editor-axis { background: @raised; color: @muted; padding: 8px; min-width: 36px; }
 .table-editor-column { border-radius: 0; background: @raised; color: @soft; }
-
 .table-editor-axis-selected { background: @selected; color: @bright; font-weight: bold; }
+/* Workspace chrome and document controls. */
+button.icon-button { border-radius: 6px; padding: 5px; }
+.sidebar-dock, notebook.sidebar-dock > stack, notebook.sidebar-dock > header { background: @panel; }
+.sidebar entry { background: alpha(@canvas, 0.65); border: 1px solid @edge; border-radius: 7px; padding: 7px 10px; }
+.sidebar entry:focus { border-color: @focus_edge; }
+.note-list row:selected { background: @selected; color: @accent; }
+.sidebar-command { border-top: 1px solid @edge; }
+.note-toolbar { border-bottom: 1px solid alpha(@edge, 0.65); padding: 8px 14px; }
+.note-toolbar combobox button { background: transparent; border-color: transparent; color: @muted; padding: 4px 8px; }
+.note-path { color: @muted; padding-left: 4px; }
+.welcome-eyebrow { color: @accent; font-weight: 600; }
+.welcome-open:hover { background: @soft; }
+.command-palette entry { border: 1px solid @edge; background: @canvas; padding: 10px; }
+.reading-view label { color: @ink; }
+.reading-view .reading-heading { color: @bright; padding: 14px 0 6px; }
+.reading-view .reading-title { padding-top: 8px; }
+.reading-list-item > border { border: none; }
+.reading-list-item { background: transparent; }
+.vault-heading button.icon-button { padding: 3px; }
+.details-combo { margin: 8px 12px 4px; }
+.details-combo button { background: @selected; border-color: transparent; color: @accent; }
+.command-results { padding-right: 8px; }
+.callout expander > title { padding: 2px 0 6px; }
+.editor-preview .callout expander { background: @raised; }
+.editor-preview .callout label { background: transparent; }
+
+button.fold-chevron:hover, button.fold-chevron.folded { opacity: 1; }

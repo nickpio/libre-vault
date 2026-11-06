@@ -463,10 +463,16 @@ class ReadingView(Gtk.ScrolledWindow):
         self.get_style_context().add_class('reading-view')
         self.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         self.body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        self.body.set_border_width(32)
-        self.add(self.body)
+        self.body.set_border_width(0)
+        self.body.set_margin_top(32)
+        self.body.set_margin_bottom(48)
+        column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        column.pack_start(self.body, False, False, 0)
+        self.add(column)
         self.source = None
         self.references = set()
+        self.embed_count = self.embed_bytes = 0
+        self.embed_limit_shown = False
         self.dependency_state = None
         self.link_preview = LinkPreview()
         self.add_events(Gdk.EventMask.LEAVE_NOTIFY_MASK)
@@ -474,6 +480,30 @@ class ReadingView(Gtk.ScrolledWindow):
         self.link_targets = {}
         self._footnote_context = []
         self.connect('destroy', lambda *_: self.clear())
+        self.measure_source = None
+        self.connect('size-allocate', self.queue_measure)
+        self.connect('destroy', self.cancel_measure)
+
+    def cancel_measure(self, *_):
+        if self.measure_source is not None:
+            GLib.source_remove(self.measure_source)
+            self.measure_source = None
+
+    def queue_measure(self, *_):
+        if self.measure_source is None:
+            self.measure_source = GLib.idle_add(self.measure_body)
+
+    def measure_body(self):
+        self.measure_source = None
+        self.size_body(self, self.get_allocation())
+        return False
+
+    def size_body(self, _, allocation):
+        preferences = self.pane.window.preferences
+        margin = max(32, (allocation.width - preferences.line_width) // 2) if preferences.readable_length else 32
+        if self.body.get_margin_start() != margin:
+            self.body.set_margin_start(margin)
+            self.body.set_margin_end(margin)
 
     def dependencies(self):
         """Compare rendered inputs without rebuilding stable GTK widgets."""
@@ -519,6 +549,7 @@ class ReadingView(Gtk.ScrolledWindow):
             return
         self.link_preview.hide()
         self.source = source
+        self.size_body(self, self.get_allocation())
         self.references.clear()
         self.link_targets.clear()
         for child in self.body.get_children():
@@ -883,7 +914,7 @@ class ReadingView(Gtk.ScrolledWindow):
         kind = CALLOUT_ALIASES.get(raw.lower(), raw.lower())
         icon, css = CALLOUT_STYLES.get(kind, ('•', 'callout-generic'))
         title = matched.group(3).strip() or raw.title()
-        header = Gtk.Box(spacing=8)
+        header = Gtk.Box(spacing=10)
         icon_label = Gtk.Label(label=icon)
         icon_label.get_style_context().add_class('callout-icon')
         icon_label.get_accessible().set_name(f'{kind} callout')
@@ -948,9 +979,15 @@ class ReadingView(Gtk.ScrolledWindow):
         metas = [None]
         grid, row, column, cell = None, -1, -1, None
         heading = None
+        list_numbers = []
         for index, token in enumerate(tokens):
             kind = token.type
-            if kind == 'table_open':
+            if kind in ('bullet_list_open', 'ordered_list_open'):
+                list_numbers.append(int(token.attrGet('start') or 1) if kind == 'ordered_list_open' else None)
+            elif kind in ('bullet_list_close', 'ordered_list_close'):
+                if list_numbers:
+                    list_numbers.pop()
+            elif kind == 'table_open':
                 grid = Gtk.Grid(column_spacing=18, row_spacing=8)
                 grid.get_style_context().add_class('reading-table')
                 parent.pack_start(grid, False, False, 0)
@@ -973,8 +1010,22 @@ class ReadingView(Gtk.ScrolledWindow):
                     metas[-1]['callout'] = 'done'
                 frame = Gtk.Frame()
                 box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-                box.set_border_width(10)
-                frame.add(box)
+                box.set_border_width(12 if kind == 'blockquote_open' else 0)
+                if kind == 'list_item_open':
+                    frame.get_style_context().add_class('reading-list-item')
+                    row_box = Gtk.Box(spacing=10)
+                    row_box.set_margin_start(14)
+                    number = list_numbers[-1] if list_numbers else None
+                    marker = Gtk.Label(label=f'{number}.' if number is not None else '•', xalign=0)
+                    marker.set_valign(Gtk.Align.START)
+                    marker.get_style_context().add_class('muted')
+                    row_box.pack_start(marker, False, False, 0)
+                    row_box.pack_start(box, True, True, 0)
+                    frame.add(row_box)
+                    if number is not None:
+                        list_numbers[-1] += 1
+                else:
+                    frame.add(box)
                 containers[-1].pack_start(frame, False, False, 0)
                 containers.append(box)
                 if kind == 'blockquote_open':
@@ -999,9 +1050,14 @@ class ReadingView(Gtk.ScrolledWindow):
                     for child in destination.get_children():
                         if child not in previous and isinstance(child, Gtk.Label):
                             attributes = Pango.AttrList()
-                            attributes.insert(Pango.attr_size_new((25 - heading * 2) * 1024))
+                            size = (25, 18, 16, 14, 12, 11)[heading - 1]
+                            size *= max(MIN_FONT_SIZE, self.pane.window.preferences.editor_size) / 11
+                            attributes.insert(Pango.attr_size_new(round(size * 1024)))
                             attributes.insert(Pango.attr_weight_new(Pango.Weight.BOLD))
                             child.set_attributes(attributes)
+                            child.get_style_context().add_class('reading-heading')
+                            if heading == 1:
+                                child.get_style_context().add_class('reading-title')
                 else:
                     meta = metas[-1]
                     if meta and meta.get('callout') == 'pending':

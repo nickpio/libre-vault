@@ -12,6 +12,32 @@ from scripts import test_runner
 
 
 class TestRunnerTests(unittest.TestCase):
+    def test_broadway_is_private_and_always_stopped_after_a_failed_check(self):
+        display = unittest.mock.MagicMock()
+        display.__enter__.return_value = display
+        display.poll.return_value = None
+        with patch.object(test_runner.shutil, 'which', return_value='/headless/broadwayd'), \
+                patch.object(test_runner.subprocess, 'Popen', return_value=display) as launch, \
+                patch.object(test_runner.socket, 'create_connection'), \
+                patch.object(test_runner.subprocess, 'run', return_value=SimpleNamespace(returncode=7)) as run:
+            self.assertEqual(test_runner.main(['--broadway', '--smoke']), 7)
+        command = launch.call_args.args[0]
+        self.assertEqual(command[1], '--unixsocket')
+        env = run.call_args.kwargs['env']
+        self.assertEqual(env['GDK_BACKEND'], 'broadway')
+        self.assertTrue(env['BROADWAY_DISPLAY'].startswith(':tcp'))
+        self.assertNotIn('DISPLAY', env)
+        self.assertNotIn('WAYLAND_DISPLAY', env)
+        display.terminate.assert_called_once()
+        display.wait.assert_called_once()
+
+    def test_broadway_missing_daemon_does_not_launch_tests(self):
+        with patch.object(test_runner.shutil, 'which', return_value=None), \
+                patch.object(test_runner.subprocess, 'run') as run:
+            with self.assertRaises(SystemExit):
+                test_runner.main(['--broadway'])
+            run.assert_not_called()
+
     def test_bootstrap_preserves_existing_sitecustomize(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
