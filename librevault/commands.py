@@ -4,7 +4,7 @@ import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gdk, Gtk
 
-from .shortcuts import APP_SHORTCUTS, EDITOR_SHORTCUTS, KEYBIND_GROUPS, effective_shortcuts
+from .shortcuts import APP_SHORTCUTS, EDITOR_SHORTCUTS, KEYBIND_GROUPS, effective_shortcuts, shortcut_label
 
 
 class CommandPalette(Gtk.EventBox):
@@ -226,9 +226,9 @@ class KeybindCheatsheet(Gtk.Dialog):
         self.empty.set_margin_bottom(24)
         self.bindings.set_placeholder(self.empty)
         key_widths = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
-        application = tuple((Gtk.accelerator_get_label(*Gtk.accelerator_parse(shortcut.accelerator)),
+        application = tuple((shortcut_label(shortcut.accelerator),
                              shortcut.description) for shortcut in effective_shortcuts(APP_SHORTCUTS, 'app', owner.hotkeys))
-        editing = tuple((Gtk.accelerator_get_label(*Gtk.accelerator_parse(shortcut.accelerator)),
+        editing = tuple((shortcut_label(shortcut.accelerator),
                          shortcut.description) for shortcut in effective_shortcuts(EDITOR_SHORTCUTS, 'editor', owner.hotkeys))
         self.groups = (('Application', application), ('Editor commands', editing), *KEYBIND_GROUPS)
         self.bindings.set_header_func(self.section_header)
@@ -236,7 +236,8 @@ class KeybindCheatsheet(Gtk.Dialog):
             for keys, description in bindings:
                 row = Gtk.ListBoxRow()
                 row.section = section
-                row.search_text = f'{title} {keys} {description}'.casefold()
+                aliases = keys.replace('Control', 'Ctrl').replace('Option', 'Alt').replace('Command', 'Cmd').replace(' + ', '+')
+                row.search_text = f'{title} {keys} {aliases} {description}'.casefold()
                 row.get_accessible().set_name(f'{title}: {description}, {keys}')
                 line = Gtk.Box(spacing=20)
                 key_label = Gtk.Label(label=keys, xalign=0, yalign=0)

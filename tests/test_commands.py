@@ -5,7 +5,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from librevault.shortcuts import APP_SHORTCUTS, shortcut_id
+from librevault.shortcuts import APP_SHORTCUTS, shortcut_id, shortcut_label
 
 try:
     from librevault.app import Gdk, GLib, Gtk, Window
@@ -65,7 +65,7 @@ class CommandTests(unittest.TestCase):
         shortcut = next(item for item in APP_SHORTCUTS if item.handler == 'show_keybinds')
         self.assertEqual(shortcut.accelerator, '<Alt>k')
         self.assertEqual(self.window.keybind_hint_keys.get_text(),
-                         Gtk.accelerator_get_label(*Gtk.accelerator_parse(shortcut.accelerator)))
+                         shortcut_label(shortcut.accelerator))
         self.assertTrue(self.window.key_press(self.window, self.event(Gdk.KEY_k, Gdk.ModifierType.MOD1_MASK)))
         self.assertTrue(self.window.cheatsheet.get_visible())
         self.window.cheatsheet.destroy()
@@ -75,9 +75,45 @@ class CommandTests(unittest.TestCase):
         with patch.object(self.window.hotkey_store, 'save'):
             self.window.set_hotkey(shortcut_id('app', shortcut), '<Control><Alt>k')
         self.assertEqual(self.window.keybind_hint_keys.get_text(),
-                         Gtk.accelerator_get_label(*Gtk.accelerator_parse('<Control><Alt>k')))
+                         shortcut_label('<Control><Alt>k'))
         self.assertTrue(self.window.key_press(self.window, self.event(
             Gdk.KEY_k, Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.MOD1_MASK)))
+
+    def test_macos_modifier_names_are_readable_in_all_shortcut_surfaces(self):
+        shortcut = next(item for item in APP_SHORTCUTS if item.handler == 'show_keybinds')
+        self.window.hotkeys[shortcut_id('app', shortcut)] = '<Meta><Alt>k'
+        with patch('librevault.shortcuts.sys.platform', 'darwin'):
+            self.assertEqual(shortcut_label('<Meta><Alt>k'), 'Option + Command + K')
+            self.assertEqual(shortcut_label('<Control><Shift>Return'), 'Shift + Control + ' + Gtk.accelerator_get_label(Gdk.KEY_Return, 0))
+            self.assertEqual(shortcut_label(''), 'Unbound')
+            self.window.update_keybind_hint()
+            self.assertEqual(self.window.keybind_hint_keys.get_text(), 'Option + Command + K')
+            self.window.show_keybinds()
+            self.assertIn(('Option + Command + K', 'Open keybind cheatsheet'),
+                          self.window.cheatsheet.groups[0][1])
+            self.window.cheatsheet.search.set_text('option command')
+            self.drain_events()
+            self.assertFalse(self.window.cheatsheet.empty.get_visible())
+            self.window.cheatsheet.destroy()
+            self.window.show_settings()
+            entries = []
+            def collect(widget):
+                if isinstance(widget, Gtk.Entry) and hasattr(widget, 'binding'):
+                    entries.append(widget)
+                if isinstance(widget, Gtk.Container):
+                    for child in widget.get_children():
+                        collect(child)
+            collect(self.window.settings_dialog)
+            field = next(entry for entry in entries if entry.binding == '<Meta><Alt>k')
+            self.assertEqual(field.get_text(), 'Option + Command + K')
+            self.window.settings_dialog.destroy()
+
+    def test_other_platforms_keep_gtk_shortcut_labels(self):
+        for platform in ('linux', 'win32'):
+            with self.subTest(platform=platform), patch('librevault.shortcuts.sys.platform', platform):
+                accelerator = '<Control><Alt>k'
+                self.assertEqual(shortcut_label(accelerator),
+                                 Gtk.accelerator_get_label(*Gtk.accelerator_parse(accelerator)))
 
     def test_alt_p_search_enter_opens_cheatsheet_without_editing_note(self):
         pane = self.window.current()
@@ -229,7 +265,7 @@ class CommandTests(unittest.TestCase):
         self.assertIs(sheet.get_focus(), sheet.search)
         sheet.search.set_text('SAVE active')
         self.assertEqual(len(sheet.visible_rows()), 1)
-        self.assertIn('Ctrl+S', sheet.visible_rows()[0].get_accessible().get_name())
+        self.assertIn(shortcut_label('<Control>s'), sheet.visible_rows()[0].get_accessible().get_name())
         sheet.search.set_text('Ctrl+O')
         matches = [row.get_accessible().get_name() for row in sheet.visible_rows()]
         self.assertEqual(len(matches), 2)

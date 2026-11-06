@@ -1,5 +1,6 @@
 """Application shortcuts and the editor's supported GTK keyboard controls."""
 from dataclasses import dataclass
+import sys
 
 
 @dataclass(frozen=True)
@@ -136,6 +137,30 @@ KEYBIND_GROUPS = (
         ('Shift+F10 / Menu', "Open the focused control's context menu"),
     )),
 )
+
+
+def shortcut_label(accelerator):
+    """Use readable modifier names instead of tiny macOS keyboard symbols."""
+    from gi.repository import Gdk, Gtk
+    if not accelerator:
+        return 'Unbound'
+    key, modifiers = Gtk.accelerator_parse(accelerator)
+    if sys.platform != 'darwin':
+        return Gtk.accelerator_get_label(key, modifiers)
+    names = (
+        (Gdk.ModifierType.SHIFT_MASK, 'Shift'),
+        (Gdk.ModifierType.CONTROL_MASK, 'Control'),
+        (Gdk.ModifierType.MOD1_MASK, 'Option'),
+        (Gdk.ModifierType.SUPER_MASK, 'Super'),
+        (Gdk.ModifierType.HYPER_MASK, 'Hyper'),
+        (Gdk.ModifierType.META_MASK, 'Command'),
+        (Gdk.ModifierType.MOD2_MASK, 'Mod2'),
+        (Gdk.ModifierType.MOD3_MASK, 'Mod3'),
+        (Gdk.ModifierType.MOD4_MASK, 'Mod4'),
+        (Gdk.ModifierType.MOD5_MASK, 'Mod5'),
+    )
+    return ' + '.join([name for mask, name in names if modifiers & mask]
+                      + [Gtk.accelerator_get_label(key, 0)])
 
 
 def shortcut_key(keyval):

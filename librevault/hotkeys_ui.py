@@ -1,6 +1,6 @@
 """Shortcut recording and conflict feedback for Settings."""
 from gi.repository import Gdk, Gtk
-from .shortcuts import APP_SHORTCUTS, EDITOR_SHORTCUTS, shortcut_id, shortcut_key
+from .shortcuts import APP_SHORTCUTS, EDITOR_SHORTCUTS, shortcut_id, shortcut_key, shortcut_label
 
 
 def add_hotkey_settings(dialog):
@@ -18,7 +18,7 @@ def add_hotkey_settings(dialog):
             entry = Gtk.Entry(editable=False, width_chars=20)
             entry.binding = dialog.owner.hotkeys.get(identifier, shortcut.accelerator)
             def display(field):
-                field.set_text(Gtk.accelerator_get_label(*Gtk.accelerator_parse(field.binding)) if field.binding else 'Unbound')
+                field.set_text(shortcut_label(field.binding))
             display(entry)
             def capture(field, event):
                 if event.keyval in (Gdk.KEY_Tab, Gdk.KEY_ISO_Left_Tab, Gdk.KEY_Escape):

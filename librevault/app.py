@@ -30,7 +30,7 @@ from .slides import SlidesWindow
 from .filetree import tree_paths
 from .metadata import note_metadata, property_text, with_properties
 from .commands import CommandPalette, KeybindCheatsheet, NoteNameDialog, TemplatePicker, UniqueNoteDialog
-from .shortcuts import APP_SHORTCUTS, HotkeyStore, effective_shortcuts, validate_hotkey, shortcut_key, shortcut_id
+from .shortcuts import APP_SHORTCUTS, HotkeyStore, effective_shortcuts, validate_hotkey, shortcut_key, shortcut_id, shortcut_label
 from .settings import SettingsDialog
 from .preferences import PreferencesStore
 from .plugins import PluginManager
@@ -469,6 +469,8 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
         hint_content.pack_start(label, True, True, 0)
         keys = self.keybind_hint_keys = Gtk.Label()
         keys.get_style_context().add_class('keybind-keys')
+        keys.set_ellipsize(Pango.EllipsizeMode.END)
+        keys.set_max_width_chars(12)
         hint_content.pack_end(keys, False, False, 0)
         hint.add(hint_content)
         self.update_keybind_hint()
@@ -2115,8 +2117,10 @@ class Window(VaultLifecycleMixin, WorkspaceStateMixin, Gtk.ApplicationWindow):
     def update_keybind_hint(self):
         shortcut = next(item for item in APP_SHORTCUTS if item.handler == 'show_keybinds')
         accelerator = self.hotkeys.get(shortcut_id('app', shortcut), shortcut.accelerator)
-        label = Gtk.accelerator_get_label(*Gtk.accelerator_parse(accelerator)) if accelerator else 'Unbound'
+        label = shortcut_label(accelerator)
         self.keybind_hint_keys.set_text(label)
+        self.keybind_hint_keys.set_tooltip_text(label)
+        self.keybind_hint_keys.get_accessible().set_name(label)
         self.keybind_hint.set_tooltip_text(f'Open keybind cheatsheet · {label}')
 
     def set_hotkey(self, identifier, accelerator):

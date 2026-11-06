@@ -99,13 +99,13 @@ frame.command-palette > border { border: none; }
 .keybind-heading { color: @muted; font-size: 11pt; padding: 16px 10px 8px; }
 .keybind-cheatsheet, .keybind-content { background: @canvas; color: @ink; }
 .keybind-keys {
-    font-family: monospace;
     font-size: 11pt;
     border: 1px solid @edge;
     border-radius: 4px;
     padding: 2px 5px;
-    background: transparent;
-    color: @muted;
+    background: @raised;
+    color: @ink;
+    font-weight: 600;
 }
 .keybind-list row { border-radius: 6px; margin: 1px 0; padding: 8px 10px; border: 1px solid transparent; }
 .keybind-list row:selected { background: @selected; border-color: @border; }
