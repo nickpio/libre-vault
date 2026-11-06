@@ -302,7 +302,9 @@ button.icon-button { border-radius: 6px; padding: 5px; }
 .details-combo { margin: 8px 12px 4px; }
 .details-combo button { background: @selected; border-color: transparent; color: @accent; }
 .command-results { padding-right: 8px; }
-.callout expander > title { padding: 2px 0 6px; }
+.callout expander > title { padding: 2px 0; }
+.callout expander > title > arrow:checked { color: transparent; -gtk-icon-shadow: none; }
+.callout expander:hover > title > arrow { color: @soft; }
 .editor-preview .callout expander { background: @raised; }
 .editor-preview .callout label { background: transparent; }
 

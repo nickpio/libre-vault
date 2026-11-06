@@ -94,15 +94,8 @@ enable_safe_html(MARKDOWN)
 
 CALLOUT_RE = re.compile(r'^\[!([^\]\n]+)\]([+-])?[ \t]*(.*)$')
 CALLOUT_STYLES = {
-    'note': ('📝', 'callout-note'),
-    'info': ('ℹ', 'callout-info'),
-    'tip': ('✦', 'callout-tip'),
-    'warning': ('⚠', 'callout-warning'),
-    'danger': ('⛔', 'callout-danger'),
-    'example': ('✎', 'callout-example'),
-    'quote': ('❝', 'callout-quote'),
-    'todo': ('☑', 'callout-todo'),
-    'bug': ('🐞', 'callout-bug'),
+    kind: f'callout-{kind}'
+    for kind in ('note', 'info', 'tip', 'warning', 'danger', 'example', 'quote', 'todo', 'bug')
 }
 CALLOUT_ALIASES = {
     'hint': 'tip', 'important': 'tip',
@@ -912,23 +905,18 @@ class ReadingView(Gtk.ScrolledWindow):
     def _install_callout(self, frame, box, matched):
         raw = matched.group(1).strip()
         kind = CALLOUT_ALIASES.get(raw.lower(), raw.lower())
-        icon, css = CALLOUT_STYLES.get(kind, ('•', 'callout-generic'))
+        css = CALLOUT_STYLES.get(kind, 'callout-generic')
         title = matched.group(3).strip() or raw.title()
-        header = Gtk.Box(spacing=10)
-        icon_label = Gtk.Label(label=icon)
-        icon_label.get_style_context().add_class('callout-icon')
-        icon_label.get_accessible().set_name(f'{kind} callout')
         title_label = Gtk.Label(label=title, xalign=0)
         title_label.get_style_context().add_class('callout-title')
         attributes = Pango.AttrList()
         attributes.insert(Pango.attr_weight_new(Pango.Weight.BOLD))
         title_label.set_attributes(attributes)
-        header.pack_start(icon_label, False, False, 0)
-        header.pack_start(title_label, False, False, 0)
         expander = Gtk.Expander()
         expander.set_expanded(matched.group(2) != '-')
-        expander.set_label_widget(header)
+        expander.set_label_widget(title_label)
         expander.get_accessible().set_name(title)
+        expander.get_accessible().set_description(f'{kind} callout')
         style = frame.get_style_context()
         style.add_class('callout')
         style.add_class(css)
