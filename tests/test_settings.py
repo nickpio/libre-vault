@@ -219,12 +219,30 @@ class SettingsTests(unittest.TestCase):
 
     def test_custom_font_choice_applies_to_notes_and_can_be_cancelled(self):
         families = [family.get_name() for family in self.dialog.get_pango_context().list_families()]
-        family = next(name for name in sorted(families) if normalize_editor_font(name) == name)
-        chooser = Gtk.FontChooserDialog(title='Choose text font', transient_for=self.dialog, modal=True)
-        chooser.set_level(Gtk.FontChooserLevel.FAMILY)
-        chooser.set_font(family)
-        self.assertEqual(chooser.get_font_desc().get_family(), family)
-        chooser.destroy()
+        # Pango lists families the font chooser will not select. Hidden names such
+        # as ".AppleSystemUIFont" pass the storage rules and then get_font_desc()
+        # is None. Use the first stored name the chooser actually returns.
+        family = None
+        chooser = None
+        try:
+            for name in sorted(families):
+                if normalize_editor_font(name) != name:
+                    continue
+                candidate = Gtk.FontChooserDialog(title='Choose text font', transient_for=self.dialog, modal=True)
+                candidate.set_level(Gtk.FontChooserLevel.FAMILY)
+                candidate.set_font(name)
+                description = candidate.get_font_desc()
+                selected = None if description is None else description.get_family()
+                if selected == name:
+                    family = name
+                    chooser = candidate
+                    break
+                candidate.destroy()
+            self.assertIsNotNone(family)
+            self.assertEqual(chooser.get_font_desc().get_family(), family)
+        finally:
+            if chooser is not None:
+                chooser.destroy()
         chosen = {}
 
         class Description:
