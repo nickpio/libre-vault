@@ -1,8 +1,12 @@
 """Per-vault filesystem and attachment preferences, stored outside the vault."""
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
+import sys
 
 from .workspace import WorkspaceStore
+
+# Where exists() can succeed for a name that differs from the stored one by case.
+FOLDS_CASE = sys.platform in ('darwin', 'win32')
 
 
 @dataclass(frozen=True)
@@ -65,20 +69,38 @@ class VaultPaths:
 
     def casefold_path(self, relative):
         """Find an existing local path, retaining exact component precedence."""
-        from .vault import VaultError
         self._visible_path(relative)
         current = self.root
         for part in PurePosixPath(relative).parts:
             exact = current / part
-            if exact.exists():
-                current = exact
-            else:
-                matches = [path for path in current.iterdir() if path.name.casefold() == part.casefold()]
-                if len(matches) != 1:
-                    raise VaultError('File path is missing or ambiguous: ' + relative)
-                current = matches[0]
+            current = self._stored_component(current, exact, part, relative)
             self._visible_path(current.relative_to(self.root).as_posix())
         return current
+
+    def _stored_component(self, directory, exact, part, relative):
+        """Return the directory entry for part, preferring its stored spelling.
+
+        Path.exists() is true for a different-case name on a case-insensitive
+        filesystem. The stored name is what vault paths and link rewrites use.
+        If the directory cannot be listed, keep the historical exists() result.
+        """
+        from .vault import VaultError
+        if not FOLDS_CASE and exact.exists():
+            return exact
+        try:
+            listed = list(directory.iterdir())
+        except OSError:
+            listed = None
+        if exact.exists() and (listed is None or any(entry.name == part for entry in listed)):
+            return exact
+        if listed is None:
+            listed = list(directory.iterdir())
+        matches = [entry for entry in listed if entry.name.casefold() == part.casefold()]
+        if len(matches) == 1:
+            return matches[0]
+        if exact.exists():
+            return exact
+        raise VaultError('File path is missing or ambiguous: ' + relative)
 
     def walk(self, relative=''):
         """Walk enabled paths, following internal links without ancestor cycles."""

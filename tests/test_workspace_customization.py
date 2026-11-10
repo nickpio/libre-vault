@@ -213,8 +213,12 @@ class WorkspaceCustomizationUITests(unittest.TestCase):
             self.assertEqual((root / 'A.md').read_text(), pane.text())
             self.assertFalse(window.key_press(window, SimpleNamespace(keyval=Gdk.KEY_s, state=Gdk.ModifierType.CONTROL_MASK)))
             bold_id = shortcut_id('editor', next(s for s in EDITOR_SHORTCUTS if s.handler == 'bold'))
-            window.set_hotkey(bold_id, '<Control><Alt>b')
-            self.assertEqual(window.hotkey_store.load()[bold_id], '<Primary><Alt>b')
+            requested = '<Control><Alt>b'
+            key, modifiers = Gtk.accelerator_parse(requested)
+            window.set_hotkey(bold_id, requested)
+            # GTK names the primary modifier Primary. That is Control on Linux
+            # and Command on macOS, so a Control binding stays <Control> there.
+            self.assertEqual(window.hotkey_store.load()[bold_id], Gtk.accelerator_name(key, modifiers))
             self.assertTrue(pane.editor_key_press(pane.editor, SimpleNamespace(keyval=Gdk.KEY_b,
                 state=Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.MOD1_MASK)))
             window.show_settings()

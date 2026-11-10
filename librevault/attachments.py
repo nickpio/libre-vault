@@ -4,6 +4,7 @@ import re
 from urllib.parse import quote, unquote, urlsplit
 
 from .vault import VaultError
+from .vault_options import FOLDS_CASE
 
 
 def local_path(vault, source, target):
@@ -21,7 +22,9 @@ def local_path(vault, source, target):
         normalized = posixpath.normpath(str(candidate))
         try:
             path = vault._visible_path(normalized)
-            if not path.is_file():
+            # is_file() also accepts a different-case name where the filesystem
+            # folds case, so look up the stored spelling there.
+            if FOLDS_CASE or not path.is_file():
                 path = vault.casefold_path(normalized)
         except (VaultError, OSError):
             continue
