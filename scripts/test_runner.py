@@ -8,7 +8,7 @@ import socket
 import subprocess
 import sys
 import time
-from tempfile import TemporaryDirectory
+from tempfile import TemporaryDirectory, gettempdir
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -90,6 +90,13 @@ def main(argv=None):
         env = dict(os.environ, XDG_CONFIG_HOME=str(base / 'config'), XDG_STATE_HOME=str(base / 'state'),
                    XDG_CACHE_HOME=str(base / 'cache'))
         env['PYTHONPATH'] = os.pathsep.join([str(bootstrap), str(ROOT), env.get('PYTHONPATH', '')])
+        # macOS reaches its temp directory through a symlink and Windows may shorten
+        # it, so give tests the canonical path that resolved vault paths will match.
+        env['TMPDIR'] = str(Path(gettempdir()).resolve())
+        # Launchers run by name, such as run.sh, must find this same interpreter.
+        env['PATH'] = os.pathsep.join(filter(None, [str(Path(sys.executable).parent), env.get('PATH')]))
+        # A native GTK crash ends the run before unittest reports anything.
+        env['PYTHONFAULTHANDLER'] = '1'
         identity = 'librevault-tests-' + str(os.getpid())
         if args.broadway:
             daemon = shutil.which('broadwayd')

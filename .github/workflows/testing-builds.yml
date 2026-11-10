@@ -27,7 +27,7 @@ jobs:
       - name: Check storage and build
         shell: msys2 {0}
         run: |
-          PYTHON=python ./check.sh discover -s tests -p test_platform_support.py -v
+          ./check.sh discover -s tests -p test_platform_support.py -v
           python scripts/build.py
       - name: Package
         shell: pwsh

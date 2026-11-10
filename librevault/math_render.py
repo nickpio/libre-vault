@@ -13,6 +13,7 @@ import re
 import cairo
 
 
+_TEXT_COMMAND = re.compile(r'\\text\{([^{}]*)\}')
 _ENVIRONMENTS = {
     'aligned': ('align', None),
     'align': ('align', None),
@@ -299,8 +300,20 @@ def _render_simple(expression, color, dpi):
     from matplotlib.mathtext import math_to_image
     output = BytesIO()
     with rc_context({'savefig.transparent': True}):
-        math_to_image('$' + expression + '$', output, dpi=dpi, format='png', color=color)
+        try:
+            math_to_image('$' + expression + '$', output, dpi=dpi, format='png', color=color)
+        except ValueError:
+            # Older supported Matplotlib, such as Ubuntu 24.04's 3.6, lacks \text.
+            fallback = _TEXT_COMMAND.sub(_text_as_roman, expression)
+            if fallback == expression:
+                raise
+            output = BytesIO()
+            math_to_image('$' + fallback + '$', output, dpi=dpi, format='png', color=color)
     return output.getvalue()
+
+
+def _text_as_roman(match):
+    return r'\mathrm{' + re.sub(r'(?<!\\) ', r'\\ ', match.group(1)) + '}'
 
 
 def _layout_surface(layout, color, dpi):

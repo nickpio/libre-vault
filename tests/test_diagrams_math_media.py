@@ -5,6 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import re
 import unittest
+from unittest.mock import patch
 import wave
 
 import cairo
@@ -144,6 +145,21 @@ class DiagramMathFormattingTests(unittest.TestCase):
         self.assertEqual(prepare_math(r'\begin{vmatrix}a\end{vmatrix}').delimiter, ('|', '|'))
         self.assertEqual(prepare_math(r'\begin{gather*}a \\ b\end{gather*}').mode, 'gather')
         self.assertEqual(prepare_math(r'\begin{aligned}a&=b\end{aligned}').mode, 'align')
+
+    def test_text_falls_back_to_roman_when_matplotlib_lacks_it(self):
+        attempts = []
+
+        def older_matplotlib(expression, output, **_):
+            attempts.append(expression)
+            if r'\text' in expression:
+                raise ValueError('Expected token')
+            output.write(b'\x89PNG')
+
+        with patch('matplotlib.mathtext.math_to_image', older_matplotlib):
+            image = render_math_png(r'x \text{only when older}', '#123456')
+        self.assertTrue(image.startswith(b'\x89PNG'))
+        self.assertEqual(attempts[-1], r'$x \mathrm{only\ when\ older}$')
+        self.assertTrue(render_math_png(r'\mathrm{only\ when\ older}', '#eeeeee').startswith(b'\x89PNG'))
 
     def test_math_pngs_cover_environments_and_reject_unknown_commands(self):
         simple = render_math_png(r'a', '#eeeeee')
