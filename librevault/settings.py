@@ -272,7 +272,18 @@ class SettingsDialog(Gtk.Dialog):
 
     def switch(self, page, key, title, description):
         control = Gtk.Switch()
-        control.connect('notify::active', lambda *_: self.change(key, control.get_active()))
+
+        def on_notify(*_):
+            if self.updating:
+                return
+            value = control.get_active()
+            # GtkSwitch notifies again after a revert, and that emission can run
+            # only once `updating` is already clear. It repeats the stored value.
+            if getattr(self.owner.preferences, key) == value:
+                return
+            self.change(key, value)
+
+        control.connect('notify::active', on_notify)
         self.setting_row(page, key, title, description, control)
 
     def entry(self, page, key, title, description):
