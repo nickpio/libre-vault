@@ -422,13 +422,13 @@ def paint_diagram(diagram, colors):
 
 
 def paint_graph(diagram, colors):
-    ink = _rgb(colors.get('ink', '#d5d5d5'))
-    bright = _rgb(colors.get('bright', '#eeeeee'))
-    accent = _rgb(colors.get('accent', '#cccccc'))
-    fill = _rgb(colors.get('hover', '#181818'))
-    stroke = _rgb(colors.get('border', '#333333'))
-    card = _rgb(colors.get('code_bg', '#1b1b1b'))
-    edge_color = _rgb(colors.get('soft', '#aaaaaa'))
+    ink = _rgb(colors['ink'])
+    bright = _rgb(colors['bright'])
+    accent = _rgb(colors['accent'])
+    fill = _rgb(colors['hover'])
+    stroke = _rgb(colors['border'])
+    card = _rgb(colors['code_bg'])
+    edge_color = _rgb(colors['soft'])
     sizes = {node_id: _node_size(node.label if node.shape != 'circle' or node.label else '',
                                  node.shape)
              for node_id, node in diagram.nodes.items()}
@@ -452,12 +452,12 @@ def paint_graph(diagram, colors):
 
 
 def paint_sequence(diagram, colors):
-    ink = _rgb(colors.get('ink', '#d5d5d5'))
-    muted = _rgb(colors.get('muted', '#999999'))
-    bright = _rgb(colors.get('bright', '#eeeeee'))
-    fill = _rgb(colors.get('hover', '#181818'))
-    stroke = _rgb(colors.get('border', '#333333'))
-    card = _rgb(colors.get('code_bg', '#1b1b1b'))
+    ink = _rgb(colors['ink'])
+    muted = _rgb(colors['muted'])
+    bright = _rgb(colors['bright'])
+    fill = _rgb(colors['hover'])
+    stroke = _rgb(colors['border'])
+    card = _rgb(colors['code_bg'])
     if not diagram.participants:
         surface = _canvas(280, 96, card, stroke)
         _draw_empty(cairo.Context(surface), 'sequence', ink, colors)
@@ -507,12 +507,12 @@ def paint_sequence(diagram, colors):
 
 
 def paint_class(diagram, colors):
-    ink = _rgb(colors.get('ink', '#d5d5d5'))
-    bright = _rgb(colors.get('bright', '#eeeeee'))
-    fill = _rgb(colors.get('hover', '#181818'))
-    stroke = _rgb(colors.get('border', '#333333'))
-    card = _rgb(colors.get('code_bg', '#1b1b1b'))
-    muted = _rgb(colors.get('muted', '#999999'))
+    ink = _rgb(colors['ink'])
+    bright = _rgb(colors['bright'])
+    fill = _rgb(colors['hover'])
+    stroke = _rgb(colors['border'])
+    card = _rgb(colors['code_bg'])
+    muted = _rgb(colors['muted'])
     sizes = {name: _class_size(name, diagram.members[name]) for name in diagram.order}
     links = [(source, target) for source, target, _, _ in diagram.edges if source != target]
     positions, width, height = _place(diagram.order, links, sizes, 'TD')
@@ -551,11 +551,11 @@ def paint_class(diagram, colors):
 
 
 def paint_source(source, colors):
-    ink = _rgb(colors.get('ink', '#d5d5d5'))
-    muted = _rgb(colors.get('muted', '#999999'))
-    card = _rgb(colors.get('code_bg', '#1b1b1b'))
-    stroke = _rgb(colors.get('border', '#333333'))
-    accent = _rgb(colors.get('accent', '#cccccc'))
+    ink = _rgb(colors['ink'])
+    muted = _rgb(colors['muted'])
+    card = _rgb(colors['code_bg'])
+    stroke = _rgb(colors['border'])
+    accent = _rgb(colors['accent'])
     body = _card_text(source)
     _, text_h = _measure(body, 'Monospace 12', 600)
     width, height = 660, max(96, 58 + text_h + 20)
@@ -587,7 +587,7 @@ def _card_text(source):
 
 def _draw_empty(context, kind, ink, colors):
     _paint_text(context, kind, 'Sans Bold 14', ink, 24, 28, 400)
-    muted = _rgb(colors.get('muted', '#999999'))
+    muted = _rgb(colors['muted'])
     _paint_text(context, 'Nothing to draw', 'Sans 12', muted, 24, 52, 400)
 
 

@@ -86,12 +86,8 @@ class EditorRenderMixin:
         self.tags['comment'].set_property('foreground', colors['muted'])
         for style in TOKEN_STYLES:
             self.tags[style].set_property('foreground', colors[style])
-        if preferences.theme == 'light':
-            self.tags['mark'].set_property('background', '#ffe08a')
-            self.tags['mark'].set_property('foreground', '#1a1400')
-        else:
-            self.tags['mark'].set_property('background', '#6b5420')
-            self.tags['mark'].set_property('foreground', colors['bright'])
+        self.tags['mark'].set_property('background', colors['mark_bg'])
+        self.tags['mark'].set_property('foreground', colors['mark_fg'])
         self.tags['kbd'].set_property('background', colors['code_bg'])
         self.tags['kbd'].set_property('foreground', colors['ink'])
         self.tags['callout'].set_property('foreground', colors['bright'])

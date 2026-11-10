@@ -73,29 +73,30 @@ class NotePane(EditorRenderMixin, Gtk.Box):
         self.tags = {
             'strong': self.buffer.create_tag(None, weight=Pango.Weight.BOLD),
             'em': self.buffer.create_tag(None, style=Pango.Style.ITALIC),
-            'code': self.buffer.create_tag(None, family='monospace', background='#1b1b1b', size_points=11),
-            'quote': self.buffer.create_tag(None, foreground='#aaaaaa', left_margin=18),
-            'link': self.buffer.create_tag(None, foreground='#8cc8ff', underline=Pango.Underline.SINGLE),
-            'completed': self.buffer.create_tag(None, foreground='#999999', strikethrough=True),
-            'metadata': self.buffer.create_tag(None, foreground='#888888', family='monospace', size_points=11),
-            'highlight': self.buffer.create_tag(None, background='#5c4b16', foreground='#fff4cc'),
+            # Colours come from the theme palette in apply_preferences, which runs
+            # at the end of __init__, so these tags carry no colours of their own.
+            'code': self.buffer.create_tag(None, family='monospace', size_points=11),
+            'quote': self.buffer.create_tag(None, left_margin=18),
+            'link': self.buffer.create_tag(None, underline=Pango.Underline.SINGLE),
+            'completed': self.buffer.create_tag(None, strikethrough=True),
+            'metadata': self.buffer.create_tag(None, family='monospace', size_points=11),
+            'highlight': self.buffer.create_tag(None),
             'strikethrough': self.buffer.create_tag(None, strikethrough=True),
-            'comment': self.buffer.create_tag(None, foreground='#999999'),
+            'comment': self.buffer.create_tag(None),
             'underline': self.buffer.create_tag(None, underline=Pango.Underline.SINGLE),
-            'mark': self.buffer.create_tag(None, background='#6b5420', foreground='#fff8e0'),
+            'mark': self.buffer.create_tag(None),
             'subscript': self.buffer.create_tag(None, rise=-3500, size_points=11),
             'superscript': self.buffer.create_tag(None, rise=5000, size_points=11),
-            'kbd': self.buffer.create_tag(None, family='monospace', background='#1b1b1b'),
+            'kbd': self.buffer.create_tag(None, family='monospace'),
             'table': self.buffer.create_tag(None, family='monospace'),
             'math': self.buffer.create_tag(None, style=Pango.Style.ITALIC, family='serif'),
             'callout': self.buffer.create_tag(None, weight=Pango.Weight.BOLD),
         }
         for style in TOKEN_STYLES:
-            self.tags[style] = self.buffer.create_tag(None, foreground='#d5d5d5')
+            self.tags[style] = self.buffer.create_tag(None)
         for level, size in enumerate([25, 21, 18, 16, 14, 12], 1):
             self.tags[f'h{level}'] = self.buffer.create_tag(
-                None, size_points=size, weight=Pango.Weight.BOLD,
-                foreground='#e4e4e4', pixels_above_lines=10)
+                None, size_points=size, weight=Pango.Weight.BOLD, pixels_above_lines=10)
         # This tag has highest priority, including inside headings and code.
         self.hidden = self.buffer.create_tag(None, invisible=True)
         self.editor = EditorTextView(buffer=self.buffer)
@@ -120,7 +121,7 @@ class NotePane(EditorRenderMixin, Gtk.Box):
         self._preserving_cursors = 0
         self._applying_vim = False
         self._applying_slash = False
-        self.occurrence_tag = self.buffer.create_tag(None, background='#3a5f8a')
+        self.occurrence_tag = self.buffer.create_tag(None)
         self.slash = SlashMenu(self)
         self.editor.connect('size-allocate', self.size_editor)
         self.editor.connect('copy-clipboard', self.copy_selection)

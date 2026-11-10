@@ -12,6 +12,7 @@ PALETTES = {
         'focus_edge': '#8ab69a', 'bright': '#f1f4ed', 'soft': '#b5c5ba', 'link': '#a8d5bb',
         'code_bg': '#1b211e', 'selection_bg': '#3f5d4c', 'panel_border': '#a8c8b4',
         'highlight_bg': '#5c4b16', 'highlight_fg': '#fff4cc',
+        'mark_bg': '#6b5420', 'mark_fg': '#f1f4ed',
         'code_keyword': '#d2a8ff', 'code_string': '#b5cf96', 'code_comment': '#9eafa5',
         'code_number': '#e0b77d', 'code_builtin': '#92cbd0',
     },
@@ -22,6 +23,7 @@ PALETTES = {
         'focus_edge': '#63896d', 'bright': '#24382b', 'soft': '#526859', 'link': '#32634b',
         'code_bg': '#edf0e7', 'selection_bg': '#c9decd', 'panel_border': '#365e45',
         'highlight_bg': '#ffe58a', 'highlight_fg': '#241c04',
+        'mark_bg': '#ffe08a', 'mark_fg': '#1a1400',
         'code_keyword': '#754599', 'code_string': '#30734e', 'code_comment': '#68776c',
         'code_number': '#925b17', 'code_builtin': '#206b7c',
     },
@@ -34,6 +36,7 @@ PALETTES['lights_out'] = {
     'soft': '#dedede', 'muted': '#bdbdbd', 'edge': '#303030', 'link': '#9fd3ff',
     'border': '#555555', 'focus_edge': '#aaaaaa', 'panel_border': '#ffffff',
     'highlight_bg': '#3d3410', 'highlight_fg': '#fff3c4',
+    'mark_bg': '#6b5420', 'mark_fg': '#ffffff',
     'code_keyword': '#d2a8ff', 'code_string': '#9ece6a', 'code_comment': '#9a9a9a',
     'code_number': '#e0af68', 'code_builtin': '#7dcfff',
 }

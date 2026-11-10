@@ -767,9 +767,7 @@ class ReadingView(Gtk.ScrolledWindow):
     def _html_markup(self, tag):
         colors = PALETTES[self.pane.window.preferences.theme]
         if tag == 'mark':
-            if self.pane.window.preferences.theme == 'light':
-                return '<span background="#ffe08a" foreground="#1a1400">', 'span'
-            return f'<span background="#6b5420" foreground="{colors["bright"]}">', 'span'
+            return f'<span background="{colors["mark_bg"]}" foreground="{colors["mark_fg"]}">', 'span'
         if tag in ('sub', 'sup'):
             size = round(max(MIN_FONT_SIZE, self.pane.window.preferences.editor_size * 0.8) * Pango.SCALE)
             rise = -3500 if tag == 'sub' else 5000
