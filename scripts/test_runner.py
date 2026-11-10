@@ -95,6 +95,8 @@ def main(argv=None):
         env['TMPDIR'] = str(Path(gettempdir()).resolve())
         # Launchers run by name, such as run.sh, must find this same interpreter.
         env['PATH'] = os.pathsep.join(filter(None, [str(Path(sys.executable).parent), env.get('PATH')]))
+        # A native GTK crash ends the run before unittest reports anything.
+        env['PYTHONFAULTHANDLER'] = '1'
         identity = 'librevault-tests-' + str(os.getpid())
         if args.broadway:
             daemon = shutil.which('broadwayd')

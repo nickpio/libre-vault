@@ -68,6 +68,7 @@ class TestRunnerTests(unittest.TestCase):
         env = run.call_args.kwargs['env']
         self.assertEqual(env['TMPDIR'], str(Path(gettempdir()).resolve()))
         self.assertEqual(env['PATH'].split(os.pathsep)[0], str(Path(sys.executable).parent))
+        self.assertEqual(env['PYTHONFAULTHANDLER'], '1')
 
     def test_broadway_is_private_and_always_stopped_after_a_failed_check(self):
         display = unittest.mock.MagicMock()
