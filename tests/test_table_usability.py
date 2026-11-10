@@ -2,7 +2,8 @@
 from types import SimpleNamespace
 import unittest
 
-from librevault.tables import TableEditorDialog, find_tables, format_table, table_from_model, table_break_after_row
+from librevault.tables import find_tables, format_table, table_from_model, table_break_after_row
+from librevault.tables_ui import TableEditorDialog
 
 try:
     from gi.repository import Gdk, Gtk

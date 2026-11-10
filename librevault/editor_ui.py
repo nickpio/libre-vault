@@ -20,11 +20,12 @@ from .shortcuts import EDITOR_SHORTCUTS, effective_shortcuts, shortcut_key
 from .slash import SlashMenu, builtin_commands, filter_commands, trigger_at
 from .syntax import TOKEN_STYLES
 from .tables import (
-    TableEditorDialog, cell_offset, format_table, table_add_column_left, table_add_column_right,
+    cell_offset, format_table, table_add_column_left, table_add_column_right,
     table_add_row_above, table_add_row_below, table_align_column, table_at, table_delete_column,
     table_delete_row, table_from_model, table_move_column, table_move_row, table_next_cell,
     table_previous_cell, table_sort_column, table_break_after_row,
 )
+from .tables_ui import TableEditorDialog
 from .textview import EditorTextView
 from .vault import Conflict, VaultError
 from .vim import Session, VimState, dispatch, display_selection, retreat
@@ -959,13 +960,9 @@ class NotePane(EditorRenderMixin, Gtk.Box):
         self.apply_edit(TextEdit(cursor, cursor, replacement), (caret, caret))
 
     def prompt_insert_table(self):
-        if TableEditorDialog is None:
-            return
         self.commit_table_dialog(TableEditorDialog(self.window, title='Insert table'), replace=False)
 
     def prompt_edit_table(self):
-        if TableEditorDialog is None:
-            return
         text = self.text()
         cursor = self.cursor_offset()
         table = table_at(text, cursor)
