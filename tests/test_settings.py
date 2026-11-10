@@ -10,7 +10,7 @@ from librevault.preferences import Preferences, PreferencesStore, normalize_edit
 
 try:
     from librevault.app import Gdk, GLib, Gtk, Window
-    from gi.repository import Gio
+    from gi.repository import Gio, Pango
     GTK_AVAILABLE = Gtk.init_check()[0]
 except (ImportError, ValueError):
     GTK_AVAILABLE = False
@@ -322,11 +322,19 @@ class SettingsTests(unittest.TestCase):
         self.assertNotIn('WenQuanYi Zen Hei', serif_faces)
 
     def font_faces(self, widget, text):
-        layout = widget.create_pango_layout(text)
-        line = layout.get_line_readonly(0)
+        # Reading PangoAnalysis.font through PyGObject is None on newer Pango and
+        # segfaults on Ubuntu 24.04. Ask the fontset Pango itemizes each script with.
+        context = widget.get_pango_context()
+        description = context.get_font_description()
+        language = context.get_language()
         faces = []
-        for run in line.runs or []:
-            family = run.item.analysis.font.describe().get_family()
+        for char in text:
+            if char.isspace():
+                continue
+            script = Pango.script_for_unichar(char)
+            derived = language if language.includes_script(script) else Pango.script_get_sample_language(script)
+            fontset = context.load_fontset(description, derived or language)
+            family = fontset.get_font(ord(char)).describe().get_family()
             if family not in faces:
                 faces.append(family)
         return faces
