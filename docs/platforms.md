@@ -101,8 +101,9 @@ PyInstaller must run on the target OS and architecture. AppImage is Linux-only.
 Signed Windows installers and signed/notarized macOS app bundles are not provided.
 These native build paths still need artifact validation on Windows and macOS.
 
-Run tests through `./check.sh`, using `PYTHON=/path/to/python ./check.sh` when
-needed. Windows can use the MSYS2 shell. The platform CI matrix exercises native
+Run tests through `./check.sh`. It uses the first of `.venv`, `python3`, and
+`python` that has the required packages, and `PYTHON=/path/to/python ./check.sh`
+overrides that choice. Windows can use the MSYS2 shell. The platform CI matrix exercises native
 locking and recovery on Linux, Windows, and macOS. It does not certify GTK or
 frozen builds. GUI checks prefer a background workspace or private Xvfb display.
 On floating desktops without one, including macOS and Windows, they run on the
