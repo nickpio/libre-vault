@@ -109,7 +109,7 @@ Run from the checkout; restart after Python or CSS changes. No build is needed.
 ./check.sh --script probe.py     # standalone GUI probe
 ```
 
-Always use `check.sh`: it isolates GUI windows on a background Hyprland workspace or private Xvfb display and uses temporary settings and recovery directories. If neither display option is available, GUI checks cannot run. Do not run GUI tests on the active desktop.
+Always use `check.sh`: it uses temporary settings and recovery directories, and opens GUI windows on a background Hyprland workspace or private Xvfb display when it can. On floating desktops without either, such as macOS, Windows, GNOME, and KDE, GUI tests run on the desktop. Other tiling window managers need Xvfb.
 
 Issues and pull requests are welcome. Run the tests before submitting changes, preserve unsupported Markdown and properties, and update the relevant docs when behavior changes.
 

@@ -104,6 +104,6 @@ These native build paths still need artifact validation on Windows and macOS.
 Run tests through `./check.sh`, using `PYTHON=/path/to/python ./check.sh` when
 needed. Windows can use the MSYS2 shell. The platform CI matrix exercises native
 locking and recovery on Linux, Windows, and macOS. It does not certify GTK or
-frozen builds. GUI probes require a background workspace or private Xvfb display;
-the runner refuses native GUI probes without one and disables native backends
-for unit tests. No test should open windows on the active desktop.
+frozen builds. GUI checks prefer a background workspace or private Xvfb display.
+On floating desktops without one, including macOS and Windows, they run on the
+desktop because new windows do not take focus. Other tiling window managers need Xvfb.

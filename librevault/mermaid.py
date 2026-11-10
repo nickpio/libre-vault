@@ -4,6 +4,7 @@ Flowcharts, sequence diagrams, state diagrams, and class diagrams become
 images. Anything else becomes a styled source card instead of a parser error.
 """
 from dataclasses import dataclass, field
+from functools import lru_cache
 from io import BytesIO
 import math
 import re
@@ -53,7 +54,7 @@ _RELATION_OPS = ('<|--', '--|>', '<|..', '..|>', '*--', '--*', 'o--', '--o',
                  '-->', '<--', '<..', '..>', '--', '..')
 
 
-@dataclass
+@dataclass(frozen=True)
 class DiagramImage:
     png: bytes
     kind: str
@@ -100,6 +101,12 @@ class ClassDiagram:
 def render_mermaid(source, colors):
     """Return a theme-colored diagram, or a source card when Mermaid is unrecognized."""
     text = source if isinstance(source, str) else str(source)
+    return _render_cached(text, tuple(sorted(colors.items())))
+
+
+@lru_cache(maxsize=64)
+def _render_cached(text, palette):
+    colors = dict(palette)
     diagram = None
     if len(text) <= MAX_SOURCE and text.count('\n') <= MAX_LINES:
         diagram = parse_mermaid(text)

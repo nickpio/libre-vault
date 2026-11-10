@@ -58,6 +58,14 @@ class NotePane(EditorRenderMixin, Gtk.Box):
         self.math_spans = []
         self.callouts = []
         self.preview_theme = None
+        self._preview_generation = 0
+        # What the last pass left in the buffer, so a pass without edits can
+        # change only the difference.
+        self._tags_stale = True
+        self._tagged_mode = None
+        self._applied_hidden = bytearray()
+        self._applied_spacing = {}
+        self._applied_occurrences = []
         self.position_source = None
         self.mode = 'live'
         self.buffer = text_buffer(note.text.replace('\r\n', '\n'))
@@ -161,7 +169,9 @@ class NotePane(EditorRenderMixin, Gtk.Box):
         self.findbar = FindBar(self)
         self.pack_start(self.findbar, False, False, 0)
         self.reorder_child(self.findbar, 1)
-        self.buffer_handlers = [self.buffer.connect('changed', self.changed),
+        # A separate handler because external reloads block self.changed.
+        self.buffer_handlers = [self.buffer.connect('changed', self._mark_tags_stale),
+                                self.buffer.connect('changed', self.changed),
                                 self.buffer.connect('mark-set', self.cursor_moved),
                                 self.buffer.connect('insert-text', self._remap_folds_insert),
                                 self.buffer.connect('delete-range', self._remap_folds_delete)]
@@ -266,6 +276,11 @@ class NotePane(EditorRenderMixin, Gtk.Box):
             self.buffer.begin_user_action()
             self.buffer.delete_interactive(*selection, True)
             self.buffer.end_user_action()
+
+    def _mark_tags_stale(self, *_):
+        # Text can return to its formatted value before formatting runs, but
+        # the edits between will still have disturbed the tags.
+        self._tags_stale = True
 
     def changed(self, *_):
         self.window.queue_reading_refresh()

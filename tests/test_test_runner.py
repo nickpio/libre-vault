@@ -1,4 +1,4 @@
-"""Background test routing must never silently fall back to the active desktop."""
+"""Tiling desktops must never silently fall back to the active desktop."""
 import os
 from pathlib import Path
 import subprocess

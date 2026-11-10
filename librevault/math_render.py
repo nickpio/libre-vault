@@ -5,6 +5,7 @@ and lays out aligned, gathered, case, and matrix environments as a grid of
 those strings.
 """
 from dataclasses import dataclass
+from functools import lru_cache
 from io import BytesIO
 import math
 import re
@@ -71,12 +72,13 @@ def prepare_math(expression):
     return MathLayout(mode, rows, delimiter, prefix, suffix)
 
 
-def render_math_png(expression, color):
+@lru_cache(maxsize=256)
+def render_math_png(expression, color, dpi=150):
     """Render one expression to a transparent PNG, using the active theme color."""
     prepared = prepare_math(expression)
     if isinstance(prepared, str):
-        return _render_simple(prepared, color)
-    return _png(_layout_surface(prepared, color))
+        return _render_simple(prepared, color, dpi)
+    return _png(_layout_surface(prepared, color, dpi))
 
 
 def expand_newcommands(expression):
@@ -289,7 +291,7 @@ def _split_outside(text, separator, skip_space):
     return parts
 
 
-def _render_simple(expression, color):
+def _render_simple(expression, color, dpi):
     expression = expression.strip()
     if not expression:
         raise ValueError('Empty math expression')
@@ -297,12 +299,12 @@ def _render_simple(expression, color):
     from matplotlib.mathtext import math_to_image
     output = BytesIO()
     with rc_context({'savefig.transparent': True}):
-        math_to_image('$' + expression + '$', output, dpi=150, format='png', color=color)
+        math_to_image('$' + expression + '$', output, dpi=dpi, format='png', color=color)
     return output.getvalue()
 
 
-def _layout_surface(layout, color):
-    rows = [[_piece_surface(cell, color) for cell in row] for row in layout.rows]
+def _layout_surface(layout, color, dpi):
+    rows = [[_piece_surface(cell, color, dpi) for cell in row] for row in layout.rows]
     columns = max(len(row) for row in rows)
     gap = {'align': 2, 'gather': 0, 'matrix': 18, 'cases': 16}[layout.mode]
     row_gap = 8
@@ -316,8 +318,8 @@ def _layout_surface(layout, color):
         row_heights.append(height)
     grid_w = sum(column_widths) + gap * max(0, columns - 1)
     grid_h = sum(row_heights) + row_gap * max(0, len(row_heights) - 1)
-    prefix = _piece_surface(layout.prefix, color) if layout.prefix else None
-    suffix = _piece_surface(layout.suffix, color) if layout.suffix else None
+    prefix = _piece_surface(layout.prefix, color, dpi) if layout.prefix else None
+    suffix = _piece_surface(layout.suffix, color, dpi) if layout.suffix else None
     left, right = layout.delimiter or ('', '')
     left_w = _delimiter_width(left)
     right_w = _delimiter_width(right)
@@ -359,7 +361,7 @@ def _layout_surface(layout, color):
     return surface
 
 
-def _piece_surface(expression, color):
+def _piece_surface(expression, color, dpi):
     expression = expression.strip()
     if not expression:
         surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, 1, 1)
@@ -367,9 +369,9 @@ def _piece_surface(expression, color):
     if '\\begin{' in expression:
         prepared = prepare_math(expression)
         if not isinstance(prepared, str):
-            return _layout_surface(prepared, color)
+            return _layout_surface(prepared, color, dpi)
         expression = prepared
-    return cairo.ImageSurface.create_from_png(BytesIO(_render_simple(expression, color)))
+    return cairo.ImageSurface.create_from_png(BytesIO(_render_simple(expression, color, dpi)))
 
 
 def _align_x(mode, column, column_width, piece_width):

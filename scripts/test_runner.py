@@ -1,4 +1,4 @@
-"""Run GUI checks away from the active desktop, with private application state."""
+"""Run GUI checks without disturbing the desktop, with private application state."""
 import argparse
 from contextlib import contextmanager
 import os
@@ -13,6 +13,7 @@ from tempfile import TemporaryDirectory
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKSPACE = 'librevault-tests'
+FLOATING_DESKTOPS = {'gnome', 'kde', 'xfce', 'cinnamon', 'x-cinnamon', 'mate', 'lxqt', 'budgie', 'unity', 'pantheon'}
 DEFAULT_TESTS = ['discover', '-s', 'tests', '-p', 'test_*.py', '-v']
 BOOTSTRAP = '''import os
 import sys
@@ -52,6 +53,16 @@ def background_workspace(identity):
         yield
     finally:
         hyprctl(f'{handle}:set_enabled(false); {handle}=nil')
+
+
+def floating_desktop(env):
+    """True where new windows open without taking over the layout or focus."""
+    if sys.platform in ('win32', 'darwin'):
+        return True
+    if not env.get('DISPLAY') and not env.get('WAYLAND_DISPLAY'):
+        return False
+    # An unlisted desktop may tile, so it still needs an explicit --foreground.
+    return bool(FLOATING_DESKTOPS.intersection(env.get('XDG_CURRENT_DESKTOP', '').lower().split(':')))
 
 
 def command_for(args, remaining):
@@ -124,14 +135,8 @@ def main(argv=None):
             print('GUI checks use a private Xvfb display.', flush=True)
             return subprocess.run(['xvfb-run', '-a', '-s', '-screen 0 1600x1000x24', *command],
                                   cwd=ROOT, env=env).returncode
-        if sys.platform in ('win32', 'darwin'):
-            if args.smoke or args.script:
-                parser.error('Native GUI probes require an isolated display, unavailable on this host.')
-            # Do not let GTK select the native desktop when DISPLAY is absent.
-            env['GDK_BACKEND'] = 'x11'
-            env.pop('DISPLAY', None)
-            env.pop('WAYLAND_DISPLAY', None)
-            print('No isolated native display; GUI tests will be skipped.', flush=True)
+        if floating_desktop(env):
+            print('GUI checks use the floating desktop.', flush=True)
             return subprocess.run(command, cwd=ROOT, env=env).returncode
         if not env.get('DISPLAY') and not env.get('WAYLAND_DISPLAY'):
             print('No desktop display; GUI tests will be skipped.', flush=True)
