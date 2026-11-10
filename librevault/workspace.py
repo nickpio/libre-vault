@@ -1,9 +1,9 @@
 """Per-vault workspace state stored outside the vault."""
 import copy
 import json
-import os
 from pathlib import Path
-import tempfile
+
+from .durable import write_json
 
 
 class WorkspaceStore:
@@ -118,14 +118,4 @@ class SavedWorkspacesStore:
 
 def _write(path, data):
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    descriptor, temporary = tempfile.mkstemp(prefix='.workspace-', dir=path.parent)
-    try:
-        with os.fdopen(descriptor, 'w', encoding='utf-8') as handle:
-            json.dump(data, handle, ensure_ascii=False, indent=2)
-            handle.write('\n')
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
+    write_json(path, data, prefix='.workspace-', indent=2)

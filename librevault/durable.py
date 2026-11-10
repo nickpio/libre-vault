@@ -6,6 +6,7 @@ crash leaves either the previous file or the new one. It does not make that
 directory update durable. The following directory fsync does.
 """
 from contextlib import contextmanager
+import json
 import os
 import sys
 from pathlib import Path
@@ -97,3 +98,19 @@ def synced_temporary(directory, write, *, prefix, binary=True):
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
+
+
+def write_json(path, data, *, prefix, indent=None):
+    """Durably replace ``path`` with ``data`` as UTF-8 JSON.
+
+    The parent directory must exist. The file is created with mode 0600 on
+    POSIX. Errors are those of ``write_synced_temporary`` and
+    ``replace_durably``; a value JSON cannot encode raises before ``path``
+    changes.
+    """
+    def write(handle):
+        json.dump(data, handle, ensure_ascii=False, indent=indent)
+        handle.write('\n')
+
+    with synced_temporary(Path(path).parent, write, prefix=prefix, binary=False) as temporary:
+        replace_durably(temporary, path)

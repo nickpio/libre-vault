@@ -221,7 +221,6 @@ class VersionHistoryTests(unittest.TestCase):
             store = VersionHistoryStore(Path(directory) / 'vault', Path(directory) / 'history')
             store.record('Note.md', 'r1', 'one', timestamp='2026-11-04T00:00:01+00:00')
             stages = (
-                ('mode', OSError, patch('librevault.recovery.os.fchmod', side_effect=OSError('mode'))),
                 ('file sync failed', OSError,
                  patch('librevault.durable.sync_file', side_effect=OSError('file sync failed'))),
                 ('disk failure', AtomicReplacementError,

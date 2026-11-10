@@ -3,12 +3,12 @@ from datetime import date, datetime
 import json
 import math
 import re
-import tempfile
-import os
 from pathlib import Path
 
 import yaml
 from gi.repository import Gtk, Pango
+
+from .durable import write_json
 
 
 TYPES = ('text', 'number', 'checkbox', 'date', 'datetime', 'list', 'yaml')
@@ -37,7 +37,7 @@ class PropertyForm(Gtk.Box):
         try:
             if self.registry_path.parent.is_symlink() or self.registry_path.is_symlink():
                 raise OSError('Property type registry must be inside the vault.')
-            self.registry = json.loads(self.registry_path.read_text())
+            self.registry = json.loads(self.registry_path.read_text(encoding='utf-8'))
             if not isinstance(self.registry, dict):
                 self.registry = {}
         except (OSError, ValueError):
@@ -194,11 +194,4 @@ class PropertyForm(Gtk.Box):
         if self.registry_path.parent.is_symlink() or self.registry_path.is_symlink():
             raise OSError('Property type registry must be inside the vault.')
         self.registry_path.parent.mkdir(parents=True, exist_ok=True)
-        descriptor, name = tempfile.mkstemp(prefix='.property-types-', dir=self.registry_path.parent)
-        temporary = Path(name)
-        try:
-            with os.fdopen(descriptor, 'w') as handle:
-                json.dump(self.registry, handle, indent=2)
-            temporary.replace(self.registry_path)
-        finally:
-            temporary.unlink(missing_ok=True)
+        write_json(self.registry_path, self.registry, prefix='.property-types-', indent=2)

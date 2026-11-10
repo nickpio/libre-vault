@@ -85,7 +85,7 @@ class PreferenceTests(unittest.TestCase):
             store.save(expected)
             self.assertEqual(PreferencesStore(store.path).load(), expected)
             before = store.path.read_bytes()
-            with patch('librevault.preferences.os.replace', side_effect=OSError('Disk full')):
+            with patch('librevault.durable.replace_file', side_effect=OSError('Disk full')):
                 with self.assertRaises(OSError):
                     store.save(Preferences())
             self.assertEqual(store.path.read_bytes(), before)

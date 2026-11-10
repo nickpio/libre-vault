@@ -1,10 +1,9 @@
 """Validated application preferences, stored separately from note vaults."""
 from dataclasses import asdict, dataclass, fields
 import json
-import os
+from .durable import write_json
 from .platform_support import app_directory
 from pathlib import Path
-import tempfile
 import unicodedata
 
 
@@ -152,14 +151,4 @@ class PreferencesStore:
 
     def save(self, preferences):
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        descriptor, temporary = tempfile.mkstemp(prefix='.settings-', dir=self.path.parent)
-        try:
-            with os.fdopen(descriptor, 'w', encoding='utf-8') as handle:
-                json.dump(asdict(preferences), handle, indent=2)
-                handle.write('\n')
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary, self.path)
-        finally:
-            if os.path.exists(temporary):
-                os.unlink(temporary)
+        write_json(self.path, asdict(preferences), prefix='.settings-', indent=2)

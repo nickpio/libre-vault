@@ -10,6 +10,7 @@ from librevault.durable import (
     DirectorySyncError,
     replace_durably,
     synced_temporary,
+    write_json,
     write_synced_temporary,
 )
 
@@ -117,6 +118,23 @@ class DurableReplacementTests(unittest.TestCase):
         self.assertEqual(str(caught.exception), 'stopped before replace')
         self.assertEqual(self.destination.read_text(encoding='utf-8'), 'original')
         self.assertEqual(list(self.directory.glob('.librevault-*')), [])
+
+    def test_write_json_round_trips_unicode_and_keeps_the_previous_file_on_failure(self):
+        target = self.directory / 'state.json'
+        write_json(target, {'name': 'café'}, prefix='.state-', indent=2)
+        before = target.read_bytes()
+        self.assertEqual(before.decode('utf-8'), '{\n  "name": "café"\n}\n')
+        failures = (
+            (TypeError, {'bad': object()}, patch('librevault.durable.sync_directory')),
+            (AtomicReplacementError, {},
+             patch('librevault.durable.replace_file', side_effect=OSError('disk failure'))),
+        )
+        for error_type, data, stage in failures:
+            with self.subTest(error=error_type.__name__), stage:
+                with self.assertRaises(error_type):
+                    write_json(target, data, prefix='.state-')
+            self.assertEqual(target.read_bytes(), before)
+            self.assertEqual(list(self.directory.glob('.state-*')), [])
 
 
 if __name__ == '__main__':

@@ -13,8 +13,8 @@ import queue
 import threading
 import uuid
 
-from .platform_support import app_directory, set_file_mode, lock_session
-from .durable import replace_durably, synced_temporary
+from .platform_support import app_directory, lock_session
+from .durable import write_json
 from .vault import Note
 
 
@@ -67,12 +67,7 @@ class RecoveryStore:
     def _write_now(self, note, text):
         self._start()
         target = self.session / (hashlib.sha256(note.path.encode()).hexdigest() + '.json')
-
-        def write(handle):
-            json.dump({'note': asdict(note), 'text': text}, handle, ensure_ascii=False)
-
-        with synced_temporary(self.session, write, prefix='.draft-', binary=False) as temporary:
-            replace_durably(temporary, target)
+        write_json(target, {'note': asdict(note), 'text': text}, prefix='.draft-')
 
     def _remove_now(self, path):
         target = self.session / (hashlib.sha256(path.encode()).hexdigest() + '.json')
@@ -293,12 +288,5 @@ class VersionHistoryStore:
     def _write(self, path, versions):
         self._ensure()
         target = self._file(path)
-
-        def write(handle):
-            set_file_mode(handle, 0o600)
-            json.dump([asdict(version) for version in versions], handle, ensure_ascii=False)
-            handle.write('\n')
-
-        with synced_temporary(self.directory, write, prefix='.history-', binary=False) as temporary:
-            replace_durably(temporary, target)
+        write_json(target, [asdict(version) for version in versions], prefix='.history-')
         os.chmod(target, 0o600)
