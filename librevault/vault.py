@@ -107,7 +107,58 @@ def fingerprint(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+class _NoteMap(dict):
+    """Note records that count mutations, so derived lookups know when they are stale."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.version = 0
+
+    def _changed(self):
+        self.version += 1
+
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value)
+        self._changed()
+
+    def __delitem__(self, key):
+        super().__delitem__(key)
+        self._changed()
+
+    def pop(self, *args):
+        self._changed()
+        return super().pop(*args)
+
+    def popitem(self):
+        self._changed()
+        return super().popitem()
+
+    def clear(self):
+        super().clear()
+        self._changed()
+
+    def update(self, *args, **kwargs):
+        super().update(*args, **kwargs)
+        self._changed()
+
+    def setdefault(self, key, default=None):
+        self._changed()
+        return super().setdefault(key, default)
+
+    def __ior__(self, other):
+        super().__ior__(other)
+        self._changed()
+        return self
+
+
 class Vault(VaultPaths):
+    @property
+    def notes(self) -> dict[str, NoteRecord | None]:
+        return self._notes
+
+    @notes.setter
+    def notes(self, value):
+        self._notes = value if isinstance(value, _NoteMap) else _NoteMap(value)
+
     def __init__(self, root: str | Path, *, cache_dir=None, text_cache_bytes=4 * 1024 * 1024,
                  options=None, scan=True, verify_index=True, resolve_root=True, cancelled=None):
         self.root = Path(root).expanduser().resolve(strict=True) if resolve_root else Path(root)
@@ -115,7 +166,7 @@ class Vault(VaultPaths):
             raise VaultError('Choose a folder as your vault.')
         from .vault_options import VaultOptions
         self.options = options or VaultOptions()
-        self.notes: dict[str, NoteRecord | None] = {}
+        self.notes = {}
         self.canvases: dict[str, str | None] = {}
         self.version_history = None
         self.folders = []
@@ -419,14 +470,23 @@ class Vault(VaultPaths):
         from .canvas import create_canvas
         return create_canvas(self, relative)
 
+    def _link_resolver(self):
+        """One resolver per note set; rebuilt only after the notes map changes."""
+        from .link_resolution import PathResolver
+        notes = self._notes
+        cached = self.__dict__.get('_resolver_cache')
+        if cached is None or cached[0] is not notes or cached[1] != notes.version:
+            resolver = PathResolver(notes, lambda path: self.metadata(path).aliases)
+            cached = (notes, notes.version, resolver)
+            self._resolver_cache = cached
+        return cached[2]
+
     def resolve(self, source: str, target: str) -> list[str]:
         """Resolve paths and aliases without silently choosing ambiguous names."""
-        from .link_resolution import resolve_paths
-        return resolve_paths(self.notes, lambda path: self.metadata(path).aliases, source, target)
+        return self._link_resolver().resolve(source, target)
 
     def backlinks(self, relative: str) -> list[str]:
-        from .link_resolution import PathResolver
-        resolver = PathResolver(self.notes, lambda path: self.metadata(path).aliases)
+        resolver = self._link_resolver()
         found = []
         for path, note in self.notes.items():
             self.check_work()
@@ -482,66 +542,9 @@ class Vault(VaultPaths):
         return counts
 
     def rename_tag(self, old, new):
-        from .metadata import rename_tag
-        from .organization import _discard_backup, _prepare_tag_backup
-        self.organization_notice = ''
-        rename_tag('', old, new)  # Validate even when the vault is empty.
-        # Prepare every edit before writing, so malformed YAML cannot cause a
-        # partially applied rename. save() checks disk revisions for each file.
-        edits = []
-        originals = {}
-        for path, record in self.notes.items():
-            self.check_work()
-            self.report_work()
-            if record is None:
-                continue
-            note = self.read(path)
-            changed = rename_tag(note.text, old, new)
-            if changed != note.text:
-                originals[path] = (b'\xef\xbb\xbf' if note.bom else b'') + note.text.encode('utf-8')
-                edits.append((note, changed))
-        # As with moves, publish the complete manifest first so a crash or a
-        # failed rollback always leaves recoverable original bytes behind.
-        backup = _prepare_tag_backup(self, old, new, originals)
-        written = []
-        try:
-            for note, text in edits:
-                written.append((note, self.save(note, text)))
-        except Exception as error:
-            rollback_errors = []
-            restored = []
-            for original, saved in reversed(written):
-                # Never overwrite an intervening external edit during rollback.
-                try:
-                    self.save(saved, original.text)
-                    restored.append(original.path)
-                except (Conflict, OSError) as rollback_error:
-                    rollback_errors.append((original.path, rollback_error))
-            self.refresh()
-            if rollback_errors:
-                still_changed = ', '.join(path for path, _ in rollback_errors)
-                restored_text = ', '.join(restored) or 'none'
-                raise VaultError(
-                    f'Tag rename stopped with partial completion. Restored: {restored_text}. '
-                    f'Could not roll back: {still_changed}. Original note bytes and the tag rename '
-                    f'manifest are preserved in {backup}. {rollback_errors[0][1]}'
-                ) from error
-            if backup:
-                try:
-                    _discard_backup(backup)
-                except OSError:
-                    raise VaultError(
-                        f'Tag rename stopped. Original notes were restored; a recovery copy '
-                        f'remains in {backup}. {error}'
-                    ) from error
-            self.organization_notice = 'All earlier tag changes were rolled back.'
-            raise
-        if backup:
-            try:
-                _discard_backup(backup)
-            except OSError:
-                self.organization_notice = f'Recovery copies retained in {backup}'
-        return [note.path for note, _ in edits]
+        """Rename a tag in every note, rolling back the vault if any write fails."""
+        from .organization import rename_tag
+        return rename_tag(self, old, new)
 
     def move(self, relative: str, destination: str) -> dict[str, str]:
         """Rename or move a note/folder, updating unambiguous Markdown links."""

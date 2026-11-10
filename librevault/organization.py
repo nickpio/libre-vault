@@ -11,7 +11,7 @@ import uuid
 from urllib.parse import quote, unquote, urlsplit
 
 from .durable import sync_directory
-from .metadata import frontmatter_range
+from .metadata import frontmatter_range, rename_tag as rename_tag_text
 
 
 def _trash_directory(vault):
@@ -293,6 +293,69 @@ def move(vault, relative, destination):
         except OSError:
             vault.organization_notice = f'Recovery copies retained in {backup}'
     return mapping
+
+
+def rename_tag(vault, old, new):
+    """Rename a tag across notes; a failed write rolls back every earlier write."""
+    from .vault import Conflict, VaultError
+    vault.organization_notice = ''
+    rename_tag_text('', old, new)  # Validate even when the vault is empty.
+    # Prepare every edit before writing, so malformed YAML cannot cause a
+    # partially applied rename. save() checks disk revisions for each file.
+    edits = []
+    originals = {}
+    for path, record in vault.notes.items():
+        vault.check_work()
+        vault.report_work()
+        if record is None:
+            continue
+        note = vault.read(path)
+        changed = rename_tag_text(note.text, old, new)
+        if changed != note.text:
+            originals[path] = (b'\xef\xbb\xbf' if note.bom else b'') + note.text.encode('utf-8')
+            edits.append((note, changed))
+    # As with moves, publish the complete manifest first so a crash or a
+    # failed rollback always leaves recoverable original bytes behind.
+    backup = _prepare_tag_backup(vault, old, new, originals)
+    written = []
+    try:
+        for note, text in edits:
+            written.append((note, vault.save(note, text)))
+    except Exception as error:
+        rollback_errors = []
+        restored = []
+        for original, saved in reversed(written):
+            # Never overwrite an intervening external edit during rollback.
+            try:
+                vault.save(saved, original.text)
+                restored.append(original.path)
+            except (Conflict, OSError) as rollback_error:
+                rollback_errors.append((original.path, rollback_error))
+        vault.refresh()
+        if rollback_errors:
+            still_changed = ', '.join(path for path, _ in rollback_errors)
+            restored_text = ', '.join(restored) or 'none'
+            raise VaultError(
+                f'Tag rename stopped with partial completion. Restored: {restored_text}. '
+                f'Could not roll back: {still_changed}. Original note bytes and the tag rename '
+                f'manifest are preserved in {backup}. {rollback_errors[0][1]}'
+            ) from error
+        if backup:
+            try:
+                _discard_backup(backup)
+            except OSError:
+                raise VaultError(
+                    f'Tag rename stopped. Original notes were restored; a recovery copy '
+                    f'remains in {backup}. {error}'
+                ) from error
+        vault.organization_notice = 'All earlier tag changes were rolled back.'
+        raise
+    if backup:
+        try:
+            _discard_backup(backup)
+        except OSError:
+            vault.organization_notice = f'Recovery copies retained in {backup}'
+    return [note.path for note, _ in edits]
 
 
 def trash(vault, relative):

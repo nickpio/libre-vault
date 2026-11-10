@@ -99,5 +99,35 @@ class LinkCacheTests(unittest.TestCase):
         self.assertEqual(self.vault.backlinks('One/Target.md'), ['Source.md'])
 
 
+    def test_link_resolution_reuses_one_resolver_until_notes_change(self):
+        from librevault import link_resolution
+        with patch.object(link_resolution, 'PathResolver', wraps=link_resolution.PathResolver) as make:
+            for _ in range(3):
+                self.assertEqual(self.vault.resolve('Source.md', 'Target'), ['Target.md'])
+            self.assertEqual(make.call_count, 1)
+            self.vault.refresh()
+            self.assertEqual(self.vault.resolve('Source.md', 'Target'), ['Target.md'])
+            self.assertEqual(make.call_count, 2)
+
+    def test_link_resolution_tracks_added_removed_and_aliased_notes(self):
+        self.assertEqual(self.vault.resolve('Source.md', 'New'), [])
+        self.write('New.md', '# New\n')
+        self.vault.update_paths(['New.md'])
+        self.assertEqual(self.vault.resolve('Source.md', 'New'), ['New.md'])
+        self.write('Alias.md', '---\naliases: [Nickname]\n---\n')
+        self.vault.update_paths(['Alias.md'])
+        self.assertEqual(self.vault.resolve('Source.md', 'Nickname'), ['Alias.md'])
+        self.vault.notes.pop('New.md')
+        self.assertEqual(self.vault.resolve('Source.md', 'New'), [])
+
+    def test_copied_vault_with_its_own_notes_does_not_reuse_original_resolver(self):
+        import copy
+        self.assertEqual(self.vault.resolve('Source.md', 'Target'), ['Target.md'])
+        future = copy.copy(self.vault)
+        future.notes = {'Renamed.md': self.vault.notes['Target.md']}
+        self.assertEqual(future.resolve('Source.md', 'Target'), [])
+        self.assertEqual(self.vault.resolve('Source.md', 'Target'), ['Target.md'])
+
+
 if __name__ == '__main__':
     unittest.main()
