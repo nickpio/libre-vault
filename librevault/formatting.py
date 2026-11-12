@@ -9,10 +9,10 @@ from pathlib import PurePosixPath
 import re
 from urllib.parse import unquote
 
-from markdown_it import MarkdownIt
 from markdown_it.rules_inline import backticks, emphasis, link
 
 from .anchors import image_alt_size, parse_image_size
+from .markdown_parsers import new_parser
 from .syntax import highlight_code
 from .tables import find_tables
 from .vault import wiki_rule
@@ -152,7 +152,7 @@ def positioned(rule, kind):
     return wrapped
 
 
-MARKDOWN = MarkdownIt('commonmark', {'html': False})
+MARKDOWN = new_parser()
 MARKDOWN.inline.ruler.at('emphasis', positioned(emphasis.tokenize, 'emphasis'))
 MARKDOWN.inline.ruler.at('backticks', positioned(backticks.backtick, 'code'))
 MARKDOWN.inline.ruler.at('link', positioned(link, 'link'))

@@ -14,9 +14,8 @@ import stat
 import sqlite3
 from urllib.parse import unquote, urlsplit
 
-from markdown_it import MarkdownIt
-
 from .durable import synced_temporary, replace_durably
+from .markdown_parsers import new_parser
 from .vault_options import VaultPaths
 from .index import NoteIndex, TextCache
 from .mentions import Mention, find_mentions
@@ -74,7 +73,7 @@ def wiki_rule(state, silent):
     return True
 
 
-MARKDOWN = MarkdownIt('commonmark', {'html': False})
+MARKDOWN = new_parser(tables=True)
 MARKDOWN.inline.ruler.before('link', 'wikilink', wiki_rule)
 
 

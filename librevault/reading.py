@@ -8,13 +8,13 @@ from urllib.parse import quote
 import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk, GdkPixbuf, GLib, Gio, Pango
-from markdown_it import MarkdownIt
 from markdown_it.rules_inline.state_inline import Delimiter
 
 from .anchors import conceal_block_id, extract_subpath, image_alt_size, split_transclusion_target
 from .attachments import AUDIO_SUFFIXES, MEDIA_SUFFIXES, local_path
 from .appearance import PALETTES
 from .formatting import enable_safe_html, obsidian_comment_ranges
+from .markdown_parsers import new_parser
 from .math_render import render_math_png
 from .mermaid import render_mermaid
 from .preferences import MIN_FONT_SIZE
@@ -86,7 +86,7 @@ def _highlight_post(state):
             _highlight_pairs(state, meta['delimiters'])
 
 
-MARKDOWN = MarkdownIt('commonmark', {'html': False}).enable('table').enable('strikethrough')
+MARKDOWN = new_parser(tables=True, strikethrough=True)
 MARKDOWN.inline.ruler.before('emphasis', 'highlight', _highlight_tokenize)
 MARKDOWN.inline.ruler2.before('emphasis', 'highlight', _highlight_post)
 MARKDOWN.inline.ruler.before('link', 'wikilink', wiki_rule)

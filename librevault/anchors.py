@@ -273,9 +273,9 @@ class _Analysis:
 def _parser():
     global _PARSER
     if _PARSER is None:
-        from markdown_it import MarkdownIt
+        from .markdown_parsers import new_parser
         from .vault import wiki_rule
-        _PARSER = MarkdownIt('commonmark', {'html': False}).enable('table')
+        _PARSER = new_parser(tables=True)
         _PARSER.inline.ruler.before('link', 'wikilink', wiki_rule)
     return _PARSER
 

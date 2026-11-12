@@ -128,7 +128,7 @@ saved = vault.save(note, '# Revised plan\n')
 | `tests/test_vault.py` | Repeatable filesystem and parsing regression cases |
 | `tests/smoke_gui.py` | The real GTK edit-to-save path and external-change behavior |
 
-Disk files are authoritative. The index is disposable and rebuilt from files. Each open note owns its unsaved editor buffer and the revision it opened. Split views share that buffer and its edit history. The engine has no GTK dependency. The UI uses the same parser as the index.
+Disk files are authoritative. The index is disposable and rebuilt from files. Each open note owns its unsaved editor buffer and the revision it opened. Split views share that buffer and its edit history. The engine has no GTK dependency. Markdown parsers are built in `librevault/markdown_parsers.py`, which records whether each one reads tables and strikethrough. The index, the reading view, and the heading-anchor code all read tables, so they split table rows the same way. The editor layout reads neither tables nor strikethrough, because it finds those itself. The shared commonmark base is the same everywhere; the rules each module adds are its own.
 
 Application preferences live in the user's XDG configuration directory, independently of vaults. Loading missing or malformed preferences uses defaults without writing files. Changes save through atomic replacement before applying to all open windows. CSS and Markdown text tags share the same theme colors. Appearance updates change widget styles and layout without rewriting note buffers or changing dirty state. A failed settings save retains the previous preferences and reports the error in the settings dialog.
 
